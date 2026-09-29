@@ -1,0 +1,224 @@
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from ..models.device import Device
+from ..models.event import Event
+from .access_policy import get_access_decision
+from .event_service import create_event
+
+
+def enforce_device_access(
+    device: Device,
+    db: Session,
+) -> dict:
+    """
+    Calculate and record the current network enforcement state.
+
+    NETOPS is currently operating in simulation mode.
+
+    The enforcement state is stored on the device as:
+
+        allowed
+        quarantined
+
+    Approval and enforcement are intentionally separate:
+
+        approval_status = approved
+        enforcement_status = allowed
+
+    means the administrator has approved the device and
+    Internet access is currently allowed.
+
+        approval_status = approved
+        enforcement_status = quarantined
+
+    means the administrator approved the device but has
+    subsequently blocked its network access.
+    """
+
+    old_enforcement_status = (
+        device.enforcement_status
+    )
+
+    decision = get_access_decision(
+        device.device_type,
+        device.approval_status,
+        device.enforcement_status,
+    )
+
+    # ---------------------------------------------------------
+    # Preserve an administrator's manual quarantine.
+    #
+    # A quarantined approved device must not automatically
+    # become allowed simply because /enforce is called again.
+    # ---------------------------------------------------------
+
+    if (
+        device.approval_status == "approved"
+        and device.device_type
+        and device.enforcement_status == "quarantined"
+    ):
+        decision = "quarantine"
+
+    # ---------------------------------------------------------
+    # Calculate enforcement state.
+    # ---------------------------------------------------------
+
+    if decision == "allowed":
+        action = "allow"
+        enforcement_status = "allowed"
+
+        message = (
+            f"Internet access allowed for device "
+            f"{device.ip_address} "
+            f"({device.mac_address}) "
+            f"on VLAN {device.vlan_id}"
+        )
+
+    else:
+        action = "quarantine"
+        enforcement_status = "quarantined"
+
+        message = (
+            f"Internet access blocked for device "
+            f"{device.ip_address} "
+            f"({device.mac_address}) "
+            f"on VLAN {device.vlan_id}"
+        )
+
+    device.enforcement_status = (
+        enforcement_status
+    )
+
+    # ---------------------------------------------------------
+    # Create an audit event only when the enforcement state
+    # actually changes or there is no previous enforcement
+    # event.
+    # ---------------------------------------------------------
+
+    latest_event = db.scalar(
+        select(Event)
+        .where(
+            Event.device_id == device.id,
+            Event.event_type
+            == "access_enforcement",
+        )
+        .order_by(Event.id.desc())
+        .limit(1)
+    )
+
+    if (
+        latest_event is None
+        or latest_event.message != message
+    ):
+        create_event(
+            db,
+            "access_enforcement",
+            message,
+            device.id,
+        )
+
+    return {
+        "device_id": device.id,
+        "ip_address": device.ip_address,
+        "mac_address": device.mac_address,
+        "device_type": device.device_type,
+        "approval_status": device.approval_status,
+        "vlan_id": device.vlan_id,
+        "decision": decision,
+        "action": action,
+        "enforcement_status": (
+            device.enforcement_status
+        ),
+        "previous_enforcement_status": (
+            old_enforcement_status
+        ),
+        "mode": "simulation",
+    }
+
+
+def allow_device_access(
+    device: Device,
+    db: Session,
+) -> dict:
+    """
+    Explicitly allow Internet access for an approved,
+    recognized device.
+    """
+
+    if device.approval_status != "approved":
+        raise ValueError(
+            "Device must be approved before Internet "
+            "access can be allowed."
+        )
+
+    if not device.device_type:
+        raise ValueError(
+            "Device must be classified before Internet "
+            "access can be allowed."
+        )
+
+    old_status = device.enforcement_status
+
+    device.enforcement_status = "allowed"
+
+    create_event(
+        db,
+        "access_allowed",
+        (
+            f"Internet access manually allowed for "
+            f"device {device.ip_address} "
+            f"({device.mac_address}) "
+            f"on VLAN {device.vlan_id}. "
+            f"Previous enforcement status: "
+            f"{old_status}."
+        ),
+        device.id,
+    )
+
+    return {
+        "device_id": device.id,
+        "action": "allow",
+        "decision": "allowed",
+        "enforcement_status": "allowed",
+        "previous_enforcement_status": old_status,
+        "mode": "simulation",
+    }
+
+
+def block_device_access(
+    device: Device,
+    db: Session,
+) -> dict:
+    """
+    Manually block Internet access.
+
+    The device remains approved, but its current network
+    access is quarantined.
+    """
+
+    old_status = device.enforcement_status
+
+    device.enforcement_status = "quarantined"
+
+    create_event(
+        db,
+        "access_blocked",
+        (
+            f"Internet access manually blocked for "
+            f"device {device.ip_address} "
+            f"({device.mac_address}). "
+            f"Previous enforcement status: "
+            f"{old_status}."
+        ),
+        device.id,
+    )
+
+    return {
+        "device_id": device.id,
+        "action": "quarantine",
+        "decision": "quarantine",
+        "enforcement_status": "quarantined",
+        "previous_enforcement_status": old_status,
+        "mode": "simulation",
+    }

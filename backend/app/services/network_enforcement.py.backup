@@ -1,0 +1,60 @@
+from sqlalchemy.orm import Session
+
+from ..models.device import Device
+from .access_policy import get_access_decision
+from .event_service import create_event
+
+
+def enforce_device_access(
+    device: Device,
+    db: Session,
+) -> dict:
+    """
+    Simulate network access enforcement for a device.
+
+    In the current development environment, this does not
+    modify a real switch or firewall. It records what NETOPS
+    would enforce on the network.
+    """
+
+    decision = get_access_decision(
+        device.device_type,
+        device.approval_status,
+    )
+
+    if decision == "allowed":
+        action = "allow"
+        message = (
+            f"Access allowed for device "
+            f"{device.ip_address} "
+            f"({device.mac_address}) "
+            f"on VLAN {device.vlan_id}"
+        )
+
+    else:
+        action = "quarantine"
+        message = (
+            f"Access quarantined for device "
+            f"{device.ip_address} "
+            f"({device.mac_address}) "
+            f"on VLAN {device.vlan_id}"
+        )
+
+    create_event(
+        db,
+        "access_enforcement",
+        message,
+        device.id,
+    )
+
+    return {
+        "device_id": device.id,
+        "ip_address": device.ip_address,
+        "mac_address": device.mac_address,
+        "device_type": device.device_type,
+        "approval_status": device.approval_status,
+        "vlan_id": device.vlan_id,
+        "decision": decision,
+        "action": action,
+        "mode": "simulation",
+    }

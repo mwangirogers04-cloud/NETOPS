@@ -1,0 +1,333 @@
+import socket
+import subprocess
+import xml.etree.ElementTree as ET
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from ..models.device import Device
+from .event_service import create_event
+from .vlan_policy import get_vlan_for_device_type
+from .device_classifier import classify_device
+
+
+def get_local_ip():
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+    try:
+        sock.connect(("8.8.8.8", 80))
+        local_ip = sock.getsockname()[0]
+    finally:
+        sock.close()
+
+    return local_ip
+
+
+def get_local_mac():
+    result = subprocess.run(
+        ["ip", "link", "show", "wlan0"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    for line in result.stdout.splitlines():
+        line = line.strip()
+
+        if line.startswith("link/ether"):
+            return line.split()[1].upper()
+
+    return None
+
+
+def discover_devices(network: str):
+    local_ip = get_local_ip()
+    local_mac = get_local_mac()
+
+    command = [
+        "nmap",
+        "-sn",
+        network,
+        "-oX",
+        "-",
+    ]
+
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    root = ET.fromstring(result.stdout)
+
+    devices = []
+
+    for host in root.findall("host"):
+        status = host.find("status")
+
+        if status is None or status.get("state") != "up":
+            continue
+
+        ip_address = None
+        mac_address = None
+        vendor = None
+        hostname = None
+
+        for address in host.findall("address"):
+            addr_type = address.get("addrtype")
+
+            if addr_type == "ipv4":
+                ip_address = address.get("addr")
+
+            elif addr_type == "mac":
+                mac_address = address.get("addr")
+                vendor = address.get("vendor")
+
+        hostnames = host.find("hostnames")
+
+        if hostnames is not None:
+            hostname_entry = hostnames.find("hostname")
+
+            if hostname_entry is not None:
+                hostname = hostname_entry.get("name")
+
+        # Nmap may not return the local machine's MAC.
+        # If the discovered IP is our own IP, use the
+        # interface MAC and identify it as the local machine.
+        if ip_address == local_ip and not mac_address:
+            mac_address = local_mac
+            vendor = "Local Machine"
+
+        if not mac_address:
+            continue
+
+        device_type = classify_device(
+            hostname=hostname,
+            vendor=vendor,
+            mac_address=mac_address,
+        )
+
+        devices.append(
+            {
+                "ip_address": ip_address,
+                "mac_address": mac_address.upper(),
+                "hostname": hostname,
+                "vendor": vendor,
+                "device_type": device_type,
+            }
+        )
+
+    return devices
+
+
+def save_discovered_devices(
+    devices: list[dict],
+    db: Session,
+):
+    saved_devices = []
+
+    discovered_macs = {
+        device.get("mac_address", "").upper()
+        for device in devices
+        if device.get("mac_address")
+    }
+
+    existing_devices = db.scalars(
+        select(Device)
+    ).all()
+
+    # Mark devices that disappeared from the
+    # current discovery scan as offline.
+    for existing_device in existing_devices:
+        if (
+            existing_device.status == "online"
+            and existing_device.mac_address.upper()
+            not in discovered_macs
+        ):
+            existing_device.status = "offline"
+
+    for discovered in devices:
+        mac_address = discovered.get("mac_address")
+
+        if not mac_address:
+            continue
+
+        mac_address = mac_address.upper()
+
+        hostname = discovered.get("hostname")
+        vendor = discovered.get("vendor")
+
+        detected_type = classify_device(
+            hostname=hostname,
+            vendor=vendor,
+            mac_address=mac_address,
+        )
+
+        existing_device = db.scalar(
+            select(Device).where(
+                Device.mac_address == mac_address
+            )
+        )
+
+        if existing_device:
+            existing_device.ip_address = discovered.get(
+                "ip_address"
+            )
+
+            existing_device.hostname = hostname
+            existing_device.vendor = vendor
+
+            existing_type = existing_device.device_type
+
+            # -------------------------------------------------
+            # CASE 1:
+            # Existing device has no useful classification,
+            # but discovery can now identify it.
+            # -------------------------------------------------
+            if (
+                detected_type != "unknown"
+                and existing_type in (None, "unknown")
+            ):
+                existing_device.device_type = detected_type
+
+                existing_device.vlan_id = (
+                    get_vlan_for_device_type(
+                        detected_type
+                    )
+                )
+
+                existing_device.classification_status = (
+                    "reviewed"
+                )
+
+                create_event(
+                    db,
+                    "device_classification",
+                    (
+                        f"Device classified as "
+                        f"{detected_type}: "
+                        f"{existing_device.ip_address} "
+                        f"({existing_device.mac_address})"
+                    ),
+                    existing_device.id,
+                )
+
+            # -------------------------------------------------
+            # CASE 2:
+            # Discovery detects a different classification
+            # from the existing administrator-approved type.
+            #
+            # IMPORTANT:
+            # We DO NOT automatically change the existing type.
+            # Instead, the device requires administrator review.
+            # -------------------------------------------------
+            elif (
+                detected_type != "unknown"
+                and existing_type not in (None, "unknown")
+                and existing_type != detected_type
+            ):
+                existing_device.classification_status = (
+                    "review_required"
+                )
+
+                create_event(
+                    db,
+                    "classification_mismatch",
+                    (
+                        f"Classification mismatch for device "
+                        f"{existing_device.ip_address} "
+                        f"({existing_device.mac_address}): "
+                        f"existing={existing_type}, "
+                        f"detected={detected_type}. "
+                        f"Manual review required."
+                    ),
+                    existing_device.id,
+                )
+
+            # -------------------------------------------------
+            # CASE 3:
+            # Discovery agrees with the existing classification.
+            # -------------------------------------------------
+            elif (
+                detected_type != "unknown"
+                and existing_type == detected_type
+            ):
+                if existing_device.classification_status != (
+                    "review_required"
+                ):
+                    existing_device.classification_status = (
+                        "normal"
+                    )
+
+            existing_device.status = "online"
+
+            saved_devices.append(existing_device)
+
+        else:
+            # -------------------------------------------------
+            # NEW DEVICE
+            # -------------------------------------------------
+            device_type = (
+                None
+                if detected_type == "unknown"
+                else detected_type
+            )
+
+            classification_status = (
+                "normal"
+                if detected_type != "unknown"
+                else "normal"
+            )
+
+            new_device = Device(
+                mac_address=mac_address,
+                ip_address=discovered.get("ip_address"),
+                hostname=hostname,
+                vendor=vendor,
+                device_type=device_type,
+                classification_status=(
+                    classification_status
+                ),
+                status="online",
+                approval_status="pending",
+                vlan_id=get_vlan_for_device_type(
+                    detected_type
+                ),
+            )
+
+            db.add(new_device)
+            db.flush()
+
+            saved_devices.append(new_device)
+
+            create_event(
+                db,
+                "new_device",
+                (
+                    f"New device discovered: "
+                    f"{new_device.ip_address} "
+                    f"({new_device.mac_address})"
+                ),
+                new_device.id,
+            )
+
+            if detected_type != "unknown":
+                create_event(
+                    db,
+                    "device_classification",
+                    (
+                        f"New device classified as "
+                        f"{detected_type}: "
+                        f"{new_device.ip_address} "
+                        f"({new_device.mac_address})"
+                    ),
+                    new_device.id,
+                )
+
+    db.commit()
+
+    for device in saved_devices:
+        db.refresh(device)
+
+    return saved_devices

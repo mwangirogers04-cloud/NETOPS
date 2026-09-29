@@ -1,0 +1,4143 @@
+import React, { useEffect, useState } from "react";
+
+const API_URL = "http://127.0.0.1:8000";
+const WS_URL = "ws://127.0.0.1:8000/ws/events";
+
+function App() {
+  const [activePage, setActivePage] = useState("dashboard");
+  const [devices, setDevices] = useState([]);
+  const [events, setEvents] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState(null);
+  const [wsConnected, setWsConnected] = useState(false);
+  const [newDeviceAlert, setNewDeviceAlert] = useState(null);
+  const [highlightedDeviceId, setHighlightedDeviceId] =
+    useState(null);
+  const [automationResult, setAutomationResult] = useState(null);
+
+  const [deviceFilter, setDeviceFilter] = useState("all");
+  const [vlanFilter, setVlanFilter] = useState("all");
+
+  // ------------------------------------------------------------
+  // LOAD DEVICES
+  // ------------------------------------------------------------
+
+  const loadDevices = async () => {
+    try {
+      const response = await fetch(`${API_URL}/devices/`);
+
+      if (!response.ok) {
+        throw new Error("Failed to load devices");
+      }
+
+      const data = await response.json();
+
+      setDevices(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error("Device loading error:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ------------------------------------------------------------
+  // LOAD EVENTS
+  // ------------------------------------------------------------
+
+  const loadEvents = async () => {
+    try {
+      const response = await fetch(`${API_URL}/events/`);
+
+      if (!response.ok) {
+        throw new Error("Failed to load events");
+      }
+
+      const data = await response.json();
+
+      setEvents(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error("Event loading error:", error);
+    }
+  };
+
+  // ------------------------------------------------------------
+  // INITIAL LOAD + AUTO REFRESH
+  // ------------------------------------------------------------
+
+  useEffect(() => {
+    loadDevices();
+    loadEvents();
+
+    const timer = setInterval(() => {
+      loadDevices();
+      loadEvents();
+    }, 10000);
+
+    return () => clearInterval(timer);
+  }, []);
+
+  // ------------------------------------------------------------
+  // WEBSOCKET
+  // ------------------------------------------------------------
+
+  useEffect(() => {
+    let socket;
+    let reconnectTimer;
+
+    const connect = () => {
+      try {
+        socket = new WebSocket(WS_URL);
+
+        socket.onopen = () => {
+          console.log("NETOPS WebSocket connected");
+          setWsConnected(true);
+        };
+
+        socket.onmessage = (message) => {
+          try {
+            const event = JSON.parse(message.data);
+
+            setEvents((previous) => {
+              const exists = previous.some(
+                (item) =>
+                  item.id &&
+                  event.id &&
+                  item.id === event.id
+              );
+
+              if (exists) {
+                return previous;
+              }
+
+              return [event, ...previous];
+            });
+
+            if (event.event_type === "new_device") {
+              setNewDeviceAlert(event);
+              setHighlightedDeviceId(event.device_id);
+
+              loadDevices();
+
+              setTimeout(() => {
+                setNewDeviceAlert(null);
+                setHighlightedDeviceId(null);
+              }, 8000);
+            }
+          } catch (error) {
+            console.error(
+              "WebSocket event error:",
+              error
+            );
+          }
+        };
+
+        socket.onerror = () => {
+          setWsConnected(false);
+        };
+
+        socket.onclose = () => {
+          setWsConnected(false);
+
+          reconnectTimer = setTimeout(
+            connect,
+            5000
+          );
+        };
+      } catch (error) {
+        console.error(
+          "WebSocket connection error:",
+          error
+        );
+
+        reconnectTimer = setTimeout(
+          connect,
+          5000
+        );
+      }
+    };
+
+    connect();
+
+    return () => {
+      clearTimeout(reconnectTimer);
+
+      if (socket) {
+        socket.close();
+      }
+    };
+  }, []);
+
+  // ------------------------------------------------------------
+  // DEVICE ACTION
+  // ------------------------------------------------------------
+
+  const deviceAction = async (
+  deviceId,
+  action,
+  value = null
+) => {
+  const actionKey = `${action}-${deviceId}`;
+
+  try {
+    setActionLoading(actionKey);
+
+    let url = `${API_URL}/devices/${deviceId}`;
+    let method = "PATCH";
+    let body = null;
+
+    // ----------------------------------------------------------
+    // APPROVE DEVICE
+    // ----------------------------------------------------------
+
+    if (action === "approve") {
+      url += "/approve";
+      method = "PATCH";
+    }
+
+    // ----------------------------------------------------------
+    // REJECT DEVICE
+    // ----------------------------------------------------------
+
+    else if (action === "reject") {
+      url += "/reject";
+      method = "PATCH";
+    }
+
+    // ----------------------------------------------------------
+    // CLASSIFY DEVICE
+    // computer -> VLAN 20
+    // cctv     -> VLAN 30
+    // printer  -> VLAN 40
+    // unknown  -> VLAN 90
+    // ----------------------------------------------------------
+
+    else if (action === "type") {
+      url += "/type";
+      method = "PATCH";
+
+      body = JSON.stringify({
+        device_type: value,
+      });
+    }
+
+    // ----------------------------------------------------------
+    // ALLOW INTERNET ACCESS
+    // ----------------------------------------------------------
+
+    else if (action === "allow") {
+      url += "/allow";
+      method = "POST";
+    }
+
+    // ----------------------------------------------------------
+    // DISALLOW / QUARANTINE INTERNET ACCESS
+    // ----------------------------------------------------------
+
+    else if (
+      action === "disallow" ||
+      action === "quarantine"
+    ) {
+      url += "/disallow";
+      method = "POST";
+    }
+
+    // ----------------------------------------------------------
+    // ENFORCE CURRENT POLICY
+    // ----------------------------------------------------------
+
+    else if (action === "enforce") {
+      url += "/enforce";
+      method = "POST";
+    }
+
+    // ----------------------------------------------------------
+    // AUTOMATIC VLAN ASSIGNMENT
+    // ----------------------------------------------------------
+
+    else if (action === "automate-vlan") {
+      url += "/automate-vlan";
+      method = "POST";
+    }
+
+    else {
+      throw new Error(
+        `Unsupported action: ${action}`
+      );
+    }
+
+    const options = {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+      },
+    };
+
+    if (body !== null) {
+      options.body = body;
+    }
+
+    const response = await fetch(
+      url,
+      options
+    );
+
+    const responseText =
+      await response.text();
+
+    if (!response.ok) {
+      throw new Error(
+        responseText ||
+          `HTTP ${response.status}`
+      );
+    }
+
+    let result = {};
+
+    if (responseText) {
+      try {
+        result = JSON.parse(
+          responseText
+        );
+      } catch {
+        result = {
+          message: responseText,
+        };
+      }
+    }
+
+    console.log(
+      "NETOPS action successful:",
+      result
+    );
+
+    // Save VLAN automation result
+    if (action === "automate-vlan") {
+      setAutomationResult(result);
+    }
+
+    // Refresh devices and events
+    await loadDevices();
+    await loadEvents();
+
+  } catch (error) {
+    console.error(
+      `Device action ${action} failed:`,
+      error
+    );
+
+    alert(
+      `Action failed: ${
+        error.message ||
+        "Unknown error"
+      }`
+    );
+
+  } finally {
+    setActionLoading(null);
+  }
+};
+// ------------------------------------------------------------
+// DEVICES PAGE
+// ------------------------------------------------------------
+
+const DevicesPage = () => {
+  const getDeviceIcon = (type) => {
+    switch (type) {
+      case "computer":
+        return "💻";
+      case "cctv":
+        return "📹";
+      case "printer":
+        return "🖨️";
+      default:
+        return "⚠️";
+    }
+  };
+
+  return (
+    <div className="page">
+
+      <div className="page-header">
+        <div>
+          <div className="page-title">
+            Connected Devices
+          </div>
+
+          <div className="page-description">
+            Devices detected on the LAN and their current
+            classification, VLAN and Internet access state.
+          </div>
+        </div>
+
+        <button
+          className="secondary-button"
+          onClick={loadDevices}
+        >
+          Refresh Devices
+        </button>
+      </div>
+
+      {/* NEW DEVICE NOTIFICATION */}
+
+      {pendingDevices > 0 && (
+        <div className="panel">
+          <div className="panel-header">
+            <div>
+              <div className="panel-title">
+                ⚠️ New Devices Require Attention
+              </div>
+
+              <div className="panel-subtitle">
+                {pendingDevices} device(s) are waiting
+                for administrator approval.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* DEVICE TABLE */}
+
+      <div className="panel">
+
+        <div className="panel-header">
+
+          <div>
+            <div className="panel-title">
+              LAN Device Inventory
+            </div>
+
+            <div className="panel-subtitle">
+              Select a device classification to assign
+              its VLAN.
+            </div>
+          </div>
+
+          <div className="settings-status">
+            <span className="status-dot online" />
+            {totalDevices} Devices
+          </div>
+
+        </div>
+
+        <div className="table-container">
+
+          <table className="data-table">
+
+            <thead>
+              <tr>
+                <th>DEVICE</th>
+                <th>TYPE</th>
+                <th>VLAN</th>
+                <th>APPROVAL</th>
+                <th>INTERNET</th>
+                <th>ACTIONS</th>
+              </tr>
+            </thead>
+
+            <tbody>
+
+              {devices.length === 0 ? (
+                <tr>
+                  <td colSpan="6">
+                    <div className="empty-state">
+                      No devices detected.
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+
+                devices.map((device) => (
+
+                  <tr key={device.id}>
+
+                    {/* DEVICE */}
+
+                    <td>
+
+                      <div className="device-primary">
+
+                        <span
+                          style={{
+                            marginRight: "8px",
+                            fontSize: "18px",
+                          }}
+                        >
+                          {getDeviceIcon(
+                            device.device_type
+                          )}
+                        </span>
+
+                        {device.hostname ||
+                          "Unknown Device"}
+
+                      </div>
+
+                      <div className="device-secondary">
+                        {device.ip_address || "-"}
+                      </div>
+
+                      <div className="device-secondary">
+                        {device.mac_address || "-"}
+                      </div>
+
+                    </td>
+
+                    {/* TYPE */}
+
+                    <td>
+
+                      <select
+                        value={
+                          device.device_type ||
+                          "unknown"
+                        }
+                        onChange={(event) =>
+                          deviceAction(
+                            device.id,
+                            "type",
+                            event.target.value
+                          )
+                        }
+                        disabled={
+                          actionLoading ===
+                          `type-${device.id}`
+                        }
+                      >
+
+                        <option value="unknown">
+                          ⚠️ Unknown
+                        </option>
+
+                        <option value="computer">
+                          💻 Computer
+                        </option>
+
+                        <option value="cctv">
+                          📹 CCTV
+                        </option>
+
+                        <option value="printer">
+                          🖨️ Printer
+                        </option>
+
+                      </select>
+
+                    </td>
+
+                    {/* VLAN */}
+
+                    <td>
+
+                      <span className="vlan-badge">
+
+                        VLAN{" "}
+
+                        {device.vlan_id || 90}
+
+                      </span>
+
+                    </td>
+
+                    {/* APPROVAL */}
+
+                    <td>
+
+                      {device.approval_status ===
+                      "approved" ? (
+
+                        <span className="status-badge allowed">
+                          Approved
+                        </span>
+
+                      ) : device.approval_status ===
+                        "rejected" ? (
+
+                        <span className="status-badge blocked">
+                          Rejected
+                        </span>
+
+                      ) : (
+
+                        <span className="status-badge pending">
+                          Pending
+                        </span>
+
+                      )}
+
+                    </td>
+
+                    {/* INTERNET */}
+
+                    <td>
+
+                      {device.enforcement_status ===
+                      "allowed" ? (
+
+                        <span className="status-badge allowed">
+                          Allowed
+                        </span>
+
+                      ) : (
+
+                        <span className="status-badge blocked">
+                          Quarantined
+                        </span>
+
+                      )}
+
+                    </td>
+
+                    {/* ACTIONS */}
+
+                    <td>
+
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: "6px",
+                          flexWrap: "wrap",
+                        }}
+                      >
+
+                        {/* APPROVE */}
+
+                        {device.approval_status !==
+                          "approved" && (
+
+                          <button
+                            className="primary-button small"
+                            disabled={
+                              actionLoading ===
+                              `approve-${device.id}`
+                            }
+                            onClick={() =>
+                              deviceAction(
+                                device.id,
+                                "approve"
+                              )
+                            }
+                          >
+                            {actionLoading ===
+                            `approve-${device.id}`
+                              ? "..."
+                              : "Approve"}
+                          </button>
+
+                        )}
+
+                        {/* REJECT */}
+
+                        {device.approval_status !==
+                          "rejected" && (
+
+                          <button
+                            className="secondary-button small"
+                            disabled={
+                              actionLoading ===
+                              `reject-${device.id}`
+                            }
+                            onClick={() =>
+                              deviceAction(
+                                device.id,
+                                "reject"
+                              )
+                            }
+                          >
+                            {actionLoading ===
+                            `reject-${device.id}`
+                              ? "..."
+                              : "Reject"}
+                          </button>
+
+                        )}
+
+                        {/* ALLOW INTERNET */}
+
+                        {device.approval_status ===
+                          "approved" && (
+
+                          <button
+                            className="primary-button small"
+                            disabled={
+                              actionLoading ===
+                              `allow-${device.id}`
+                            }
+                            onClick={() =>
+                              deviceAction(
+                                device.id,
+                                "allow"
+                              )
+                            }
+                          >
+                            {actionLoading ===
+                            `allow-${device.id}`
+                              ? "..."
+                              : "Allow Internet"}
+                          </button>
+
+                        )}
+
+                        {/* DISALLOW INTERNET */}
+
+                        {device.approval_status ===
+                          "approved" && (
+
+                          <button
+                            className="secondary-button small"
+                            disabled={
+                              actionLoading ===
+                              `disallow-${device.id}`
+                            }
+                            onClick={() =>
+                              deviceAction(
+                                device.id,
+                                "disallow"
+                              )
+                            }
+                          >
+                            {actionLoading ===
+                            `disallow-${device.id}`
+                              ? "..."
+                              : "Disconnect"}
+                          </button>
+
+                        )}
+
+                      </div>
+
+                    </td>
+
+                  </tr>
+
+                ))
+
+              )}
+
+            </tbody>
+
+          </table>
+
+        </div>
+
+      </div>
+
+    </div>
+  );
+};
+
+
+// ------------------------------------------------------------
+// ACCESS CONTROL PAGE
+// ------------------------------------------------------------
+
+const AccessPage = () => {
+
+  const allowed = devices.filter(
+    (device) =>
+      device.enforcement_status ===
+      "allowed"
+  );
+
+  const quarantined = devices.filter(
+    (device) =>
+      device.enforcement_status !==
+      "allowed"
+  );
+
+  return (
+    <div className="page">
+
+      <div className="page-header">
+
+        <div>
+
+          <div className="page-title">
+            Access Control
+          </div>
+
+          <div className="page-description">
+            Control administrator approval and
+            Internet access for LAN devices.
+          </div>
+
+        </div>
+
+        <button
+          className="secondary-button"
+          onClick={loadDevices}
+        >
+          Refresh
+        </button>
+
+      </div>
+
+
+      {/* SUMMARY */}
+
+      <div className="report-grid">
+
+        <ReportCard
+          title="Allowed"
+          value={allowed.length}
+          description="Devices currently allowed Internet access."
+        />
+
+        <ReportCard
+          title="Quarantined"
+          value={quarantined.length}
+          description="Devices currently blocked from Internet access."
+        />
+
+        <ReportCard
+          title="Pending"
+          value={pendingDevices}
+          description="Devices awaiting administrator approval."
+        />
+
+        <ReportCard
+          title="Total Devices"
+          value={totalDevices}
+          description="Devices detected by NETOPS."
+        />
+
+      </div>
+
+
+      {/* ACCESS TABLE */}
+
+      <div className="panel">
+
+        <div className="panel-header">
+
+          <div>
+
+            <div className="panel-title">
+              Internet Access Control
+            </div>
+
+            <div className="panel-subtitle">
+              Approval and Internet enforcement
+              are controlled separately.
+            </div>
+
+          </div>
+
+        </div>
+
+
+        <div className="table-container">
+
+          <table className="data-table">
+
+            <thead>
+
+              <tr>
+                <th>DEVICE</th>
+                <th>TYPE</th>
+                <th>VLAN</th>
+                <th>APPROVAL</th>
+                <th>ACCESS</th>
+                <th>ACTION</th>
+              </tr>
+
+            </thead>
+
+
+            <tbody>
+
+              {devices.length === 0 ? (
+
+                <tr>
+
+                  <td colSpan="6">
+
+                    <div className="empty-state">
+                      No devices found.
+                    </div>
+
+                  </td>
+
+                </tr>
+
+              ) : (
+
+                devices.map((device) => (
+
+                  <tr key={device.id}>
+
+                    <td>
+
+                      <div className="device-primary">
+
+                        {device.device_type ===
+                        "computer"
+                          ? "💻"
+                          : device.device_type ===
+                            "cctv"
+                          ? "📹"
+                          : device.device_type ===
+                            "printer"
+                          ? "🖨️"
+                          : "⚠️"}
+
+                        {" "}
+
+                        {device.hostname ||
+                          "Unknown Device"}
+
+                      </div>
+
+                      <div className="device-secondary">
+                        {device.ip_address}
+                      </div>
+
+                    </td>
+
+
+                    <td>
+
+                      <TypeBadge
+                        type={
+                          device.device_type
+                        }
+                      />
+
+                    </td>
+
+
+                    <td>
+
+                      <span className="vlan-badge">
+                        VLAN{" "}
+                        {device.vlan_id || 90}
+                      </span>
+
+                    </td>
+
+
+                    <td>
+
+                      {device.approval_status ===
+                      "approved" ? (
+
+                        <span className="status-badge allowed">
+                          Approved
+                        </span>
+
+                      ) : device.approval_status ===
+                        "rejected" ? (
+
+                        <span className="status-badge blocked">
+                          Rejected
+                        </span>
+
+                      ) : (
+
+                        <span className="status-badge pending">
+                          Pending
+                        </span>
+
+                      )}
+
+                    </td>
+
+
+                    <td>
+
+                      {device.enforcement_status ===
+                      "allowed" ? (
+
+                        <span className="status-badge allowed">
+                          Internet Allowed
+                        </span>
+
+                      ) : (
+
+                        <span className="status-badge blocked">
+                          ⚠️ Quarantined
+                        </span>
+
+                      )}
+
+                    </td>
+
+
+                    <td>
+
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: "6px",
+                          flexWrap: "wrap",
+                        }}
+                      >
+
+                        {device.approval_status !==
+                          "approved" && (
+
+                          <button
+                            className="primary-button small"
+                            onClick={() =>
+                              deviceAction(
+                                device.id,
+                                "approve"
+                              )
+                            }
+                          >
+                            Approve
+                          </button>
+
+                        )}
+
+
+                        {device.approval_status ===
+                          "approved" &&
+                          device.enforcement_status !==
+                            "allowed" && (
+
+                          <button
+                            className="primary-button small"
+                            onClick={() =>
+                              deviceAction(
+                                device.id,
+                                "allow"
+                              )
+                            }
+                          >
+                            Allow Internet
+                          </button>
+
+                        )}
+
+
+                        {device.approval_status ===
+                          "approved" &&
+                          device.enforcement_status ===
+                            "allowed" && (
+
+                          <button
+                            className="secondary-button small"
+                            onClick={() =>
+                              deviceAction(
+                                device.id,
+                                "disallow"
+                              )
+                            }
+                          >
+                            Disconnect
+                          </button>
+
+                        )}
+
+
+                        {device.approval_status !==
+                          "rejected" && (
+
+                          <button
+                            className="secondary-button small"
+                            onClick={() =>
+                              deviceAction(
+                                device.id,
+                                "reject"
+                              )
+                            }
+                          >
+                            Reject
+                          </button>
+
+                        )}
+
+                      </div>
+
+                    </td>
+
+                  </tr>
+
+                ))
+
+              )}
+
+            </tbody>
+
+          </table>
+
+        </div>
+
+      </div>
+
+    </div>
+  );
+};
+  // ------------------------------------------------------------
+  // VLAN PAGE
+  // ------------------------------------------------------------
+                 
+
+  const VLANPage = () => {
+    const vlanDevices =
+      vlanFilter === "all"
+        ? devices
+        : devices.filter(
+            (device) =>
+              String(
+                device.vlan_id
+              ) === String(vlanFilter)
+          );
+
+    const vlan20 = devices.filter(
+      (device) => device.vlan_id === 20
+    );
+
+    const vlan30 = devices.filter(
+      (device) => device.vlan_id === 30
+    );
+
+    const vlan40 = devices.filter(
+      (device) => device.vlan_id === 40
+    );
+
+    const vlan90 = devices.filter(
+      (device) => device.vlan_id === 90
+    );
+
+    return (
+      <div className="page">
+        <div className="page-header">
+          <div>
+            <div className="page-title">
+              VLAN Automation
+            </div>
+
+            <div className="page-description">
+              Centralized device segmentation
+              and simulated switch configuration.
+            </div>
+          </div>
+        </div>
+
+        <div className="vlan-card-grid">
+          <VLANCard
+            vlan="20"
+            name="Computers"
+            description="LAN computers and workstations"
+            devices={vlan20}
+            selected={
+              vlanFilter === "20"
+            }
+            onClick={() =>
+              setVlanFilter("20")
+            }
+          />
+
+          <VLANCard
+            vlan="30"
+            name="CCTV"
+            description="Cameras and surveillance equipment"
+            devices={vlan30}
+            selected={
+              vlanFilter === "30"
+            }
+            onClick={() =>
+              setVlanFilter("30")
+            }
+          />
+
+          <VLANCard
+            vlan="40"
+            name="Printers"
+            description="Network printing devices"
+            devices={vlan40}
+            selected={
+              vlanFilter === "40"
+            }
+            onClick={() =>
+              setVlanFilter("40")
+            }
+          />
+
+          <VLANCard
+            vlan="90"
+            name="Quarantine"
+            description="Unknown or restricted devices"
+            devices={vlan90}
+            selected={
+              vlanFilter === "90"
+            }
+            quarantine
+            onClick={() =>
+              setVlanFilter("90")
+            }
+          />
+        </div>
+
+        <FilterBar
+          label={
+            vlanFilter === "all"
+              ? "All VLAN Devices"
+              : `VLAN ${vlanFilter} Devices`
+          }
+          count={vlanDevices.length}
+          active={vlanFilter !== "all"}
+          clear={() =>
+            setVlanFilter("all")
+          }
+        />
+
+        <div className="panel">
+          <div className="panel-header">
+            <div>
+              <div className="panel-title">
+                VLAN Assignment
+              </div>
+
+              <div className="panel-subtitle">
+                Current device-to-VLAN mapping
+              </div>
+            </div>
+
+            <div className="settings-status">
+              <span className="status-dot online" />
+              Policy Active
+            </div>
+          </div>
+
+          <div className="table-container">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>DEVICE</th>
+                  <th>TYPE</th>
+                  <th>VLAN</th>
+                  <th>SWITCH</th>
+                  <th>PORT</th>
+                  <th>AUTOMATION</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {vlanDevices.length === 0 ? (
+                  <tr>
+                    <td colSpan="6">
+                      <div className="empty-state">
+                        No devices found.
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  vlanDevices.map(
+                    (device) => (
+                      <tr key={device.id}>
+                        <td>
+                          <div className="device-primary">
+                            {device.hostname ||
+                              "Unknown Device"}
+                          </div>
+
+                          <div className="device-secondary">
+                            {device.ip_address ||
+                              "-"}
+                          </div>
+                        </td>
+
+                        <td>
+                          <TypeBadge
+                            type={
+                              device.device_type
+                            }
+                          />
+                        </td>
+
+                        <td>
+                          <span className="vlan-badge">
+                            VLAN{" "}
+                            {device.vlan_id ||
+                              "-"}
+                          </span>
+                        </td>
+
+                        <td>
+                          {device.switch_name ||
+                            "Not identified"}
+                        </td>
+
+                        <td>
+                          {device.switch_port ||
+                            "Not identified"}
+                        </td>
+
+                        <td>
+                          <button
+                            className="primary-button small"
+                            disabled={
+                              actionLoading ===
+                              `automate-vlan-${device.id}`
+                            }
+                            onClick={() =>
+                              deviceAction(
+                                device.id,
+                                "automate-vlan"
+                              )
+                            }
+                          >
+                            {actionLoading ===
+                            `automate-vlan-${device.id}`
+                              ? "Running..."
+                              : "Auto VLAN"}
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  )
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="panel">
+          <div className="panel-header">
+            <div>
+              <div className="panel-title">
+                VLAN Automation Policy
+              </div>
+
+              <div className="panel-subtitle">
+                Device classification determines
+                the target VLAN
+              </div>
+            </div>
+          </div>
+
+          <PolicyRow
+            vlan="20"
+            name="Computers"
+            description="Approved LAN computers and workstations"
+            count={vlan20.length}
+          />
+
+          <PolicyRow
+            vlan="30"
+            name="CCTV"
+            description="Cameras and surveillance equipment"
+            count={vlan30.length}
+          />
+
+          <PolicyRow
+            vlan="40"
+            name="Printers"
+            description="Network printing devices"
+            count={vlan40.length}
+          />
+
+          <PolicyRow
+            vlan="90"
+            name="Quarantine"
+            description="Unknown, rejected, or restricted devices"
+            count={vlan90.length}
+            quarantine
+          />
+        </div>
+      </div>
+    );
+  };
+
+  // ------------------------------------------------------------
+  // EVENTS
+  // ------------------------------------------------------------
+
+  const EventsPage = () => (
+    <div className="page">
+      <div className="page-header">
+        <div>
+          <div className="page-title">
+            Network Events
+          </div>
+
+          <div className="page-description">
+            Audit trail of NETOPS activity.
+          </div>
+        </div>
+
+        <button
+          className="secondary-button"
+          onClick={loadEvents}
+        >
+          Refresh Events
+        </button>
+      </div>
+
+      <div className="panel">
+        {events.length === 0 ? (
+          <div className="empty-state">
+            No events found.
+          </div>
+        ) : (
+          <div className="event-list large">
+            {events.map(
+              (event, index) => (
+                <EventRow
+                  key={
+                    event.id ||
+                    `${event.event_type}-${index}`
+                  }
+                  event={event}
+                />
+              )
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  // ------------------------------------------------------------
+  // REPORTS
+  // ------------------------------------------------------------
+
+  const ReportsPage = () => (
+    <div className="page">
+      <div className="page-header">
+        <div>
+          <div className="page-title">
+            Reports
+          </div>
+
+          <div className="page-description">
+            Network operations reporting and
+            analytics.
+          </div>
+        </div>
+      </div>
+
+      <div className="report-grid">
+        <ReportCard
+          title="Device Inventory"
+          value={totalDevices}
+          description="Current LAN device inventory."
+        />
+
+        <ReportCard
+          title="Online Devices"
+          value={onlineDevices}
+          description="Devices currently detected online."
+        />
+
+        <ReportCard
+          title="Pending Approvals"
+          value={pendingDevices}
+          description="Devices awaiting administrator action."
+        />
+
+        <ReportCard
+          title="Quarantine"
+          value={quarantinedDevices}
+          description="Devices blocked from network access."
+        />
+      </div>
+
+      <div className="panel">
+        <div className="panel-header">
+          <div>
+            <div className="panel-title">
+              Enforcement Summary
+            </div>
+
+            <div className="panel-subtitle">
+              Current simulated enforcement state
+            </div>
+          </div>
+        </div>
+
+        <div className="classification-list">
+          <ClassificationRow
+            label="Allowed"
+            icon="OK"
+            type="computer"
+            value={enforcedAllowed}
+          />
+
+          <ClassificationRow
+            label="Quarantined"
+            icon="Q"
+            type="unknown"
+            value={enforcedQuarantined}
+          />
+        </div>
+      </div>
+    </div>
+  );
+
+  // ------------------------------------------------------------
+  // SETTINGS
+  // ------------------------------------------------------------
+
+  const SettingsPage = () => (
+    <div className="page">
+      <div className="page-header">
+        <div>
+          <div className="page-title">
+            Settings
+          </div>
+
+          <div className="page-description">
+            NETOPS platform configuration.
+          </div>
+        </div>
+      </div>
+
+      <div className="settings-grid">
+        <div className="panel">
+          <div className="panel-header">
+            <div>
+              <div className="panel-title">
+                Backend API
+              </div>
+
+              <div className="panel-subtitle">
+                NETOPS FastAPI service
+              </div>
+            </div>
+          </div>
+
+          <div className="settings-row">
+            <span>API URL</span>
+            <code>{API_URL}</code>
+          </div>
+
+          <div className="settings-row">
+            <span>WebSocket</span>
+            <code>{WS_URL}</code>
+          </div>
+        </div>
+
+        <div className="panel">
+          <div className="panel-header">
+            <div>
+              <div className="panel-title">
+                Connection
+              </div>
+
+              <div className="panel-subtitle">
+                Current frontend status
+              </div>
+            </div>
+          </div>
+
+          <div className="settings-row">
+            <span>API</span>
+
+            <span className="settings-status">
+              <span className="status-dot online" />
+              Connected
+            </span>
+          </div>
+
+          <div className="settings-row">
+            <span>WebSocket</span>
+
+            <span className="settings-status">
+              <span
+                className={
+                  wsConnected
+                    ? "status-dot online"
+                    : "status-dot offline"
+                }
+              />
+
+              {wsConnected
+                ? "Connected"
+                : "Disconnected"}
+            </span>
+          </div>
+
+          <div className="settings-row">
+            <span>Refresh interval</span>
+            <span>10 seconds</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+// ------------------------------------------------------------
+// DASHBOARD PAGE
+// ------------------------------------------------------------
+
+const Dashboard = () => {
+  const totalDevices = devices.length;
+
+  const onlineDevices = devices.filter(
+    (device) => device.status === "online"
+  ).length;
+
+  const pendingDevices = devices.filter(
+    (device) => device.approval_status === "pending"
+  ).length;
+
+  const approvedDevices = devices.filter(
+    (device) => device.approval_status === "approved"
+  ).length;
+
+  const quarantinedDevices = devices.filter(
+    (device) =>
+      device.enforcement_status === "quarantined" ||
+      device.access_decision === "quarantine"
+  ).length;
+
+  const computerDevices = devices.filter(
+    (device) => device.device_type === "computer"
+  ).length;
+
+  const cctvDevices = devices.filter(
+    (device) => device.device_type === "cctv"
+  ).length;
+
+  const printerDevices = devices.filter(
+    (device) => device.device_type === "printer"
+  ).length;
+
+  const unknownDevices = devices.filter(
+    (device) =>
+      !device.device_type ||
+      device.device_type === "unknown"
+  ).length;
+
+  return (
+    <div className="page">
+
+      <div className="page-header">
+        <div>
+          <div className="page-title">
+            Network Operations Dashboard
+          </div>
+
+          <div className="page-description">
+            Real-time overview of connected devices,
+            access control, VLAN assignment and
+            network enforcement.
+          </div>
+        </div>
+      </div>
+
+      <div className="access-summary">
+
+        <AccessSummary
+          title="Total Devices"
+          value={totalDevices}
+          text="Devices detected on the LAN"
+          onClick={() => setActivePage("devices")}
+        />
+
+        <AccessSummary
+          title="Online"
+          value={onlineDevices}
+          text="Currently connected"
+          onClick={() => setActivePage("devices")}
+        />
+
+        <AccessSummary
+          title="Pending"
+          value={pendingDevices}
+          text="Awaiting administrator approval"
+          onClick={() => setActivePage("access")}
+        />
+
+        <AccessSummary
+          title="Quarantined"
+          value={quarantinedDevices}
+          text="Internet access blocked"
+          onClick={() => setActivePage("access")}
+        />
+
+      </div>
+
+      <div className="panel">
+
+        <div className="panel-header">
+
+          <div>
+            <div className="panel-title">
+              Device Classification
+            </div>
+
+            <div className="panel-subtitle">
+              Current device-to-VLAN distribution
+            </div>
+          </div>
+
+        </div>
+
+        <div className="access-summary">
+
+          <div
+            className="summary-card"
+            onClick={() => {
+              setActivePage("vlans");
+              setVlanFilter("20");
+            }}
+            style={{ cursor: "pointer" }}
+          >
+            <div className="summary-card-title">
+              💻 Computers
+            </div>
+
+            <div className="summary-card-value">
+              {computerDevices}
+            </div>
+
+            <div className="summary-card-text">
+              VLAN 20
+            </div>
+          </div>
+
+          <div
+            className="summary-card"
+            onClick={() => {
+              setActivePage("vlans");
+              setVlanFilter("30");
+            }}
+            style={{ cursor: "pointer" }}
+          >
+            <div className="summary-card-title">
+              📹 CCTV
+            </div>
+
+            <div className="summary-card-value">
+              {cctvDevices}
+            </div>
+
+            <div className="summary-card-text">
+              VLAN 30
+            </div>
+          </div>
+
+          <div
+            className="summary-card"
+            onClick={() => {
+              setActivePage("vlans");
+              setVlanFilter("40");
+            }}
+            style={{ cursor: "pointer" }}
+          >
+            <div className="summary-card-title">
+              🖨️ Printers
+            </div>
+
+            <div className="summary-card-value">
+              {printerDevices}
+            </div>
+
+            <div className="summary-card-text">
+              VLAN 40
+            </div>
+          </div>
+
+          <div
+            className="summary-card"
+            onClick={() => {
+              setActivePage("vlans");
+              setVlanFilter("90");
+            }}
+            style={{ cursor: "pointer" }}
+          >
+            <div className="summary-card-title">
+              ⚠️ Quarantine
+            </div>
+
+            <div className="summary-card-value">
+              {unknownDevices}
+            </div>
+
+            <div className="summary-card-text">
+              VLAN 90
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+
+      <div className="panel">
+
+        <div className="panel-header">
+
+          <div>
+            <div className="panel-title">
+              Access Control Status
+            </div>
+
+            <div className="panel-subtitle">
+              Approval and Internet access state
+            </div>
+          </div>
+
+          <button
+            className="secondary-button small"
+            onClick={() => setActivePage("access")}
+          >
+            Manage Access
+          </button>
+
+        </div>
+
+        <div className="table-container">
+
+          <table className="data-table">
+
+            <thead>
+              <tr>
+                <th>DEVICE</th>
+                <th>TYPE</th>
+                <th>APPROVAL</th>
+                <th>ACCESS</th>
+                <th>ENFORCEMENT</th>
+                <th>VLAN</th>
+              </tr>
+            </thead>
+
+            <tbody>
+
+              {devices.length === 0 ? (
+
+                <tr>
+                  <td colSpan="6">
+                    <div className="empty-state">
+                      No devices detected.
+                    </div>
+                  </td>
+                </tr>
+
+              ) : (
+
+                devices.slice(0, 10).map((device) => (
+
+                  <tr key={device.id}>
+
+                    <td>
+                      <div className="device-primary">
+                        {device.hostname ||
+                          "Unknown Device"}
+                      </div>
+
+                      <div className="device-secondary">
+                        {device.ip_address || "-"}
+                      </div>
+                    </td>
+
+                    <td>
+                      <TypeBadge
+                        type={device.device_type}
+                      />
+                    </td>
+
+                    <td>
+                      <StatusBadge
+                        value={
+                          device.approval_status
+                        }
+                      />
+                    </td>
+
+                    <td>
+                      <StatusBadge
+                        value={
+                          device.access_decision ||
+                          "unknown"
+                        }
+                      />
+                    </td>
+
+                    <td>
+                      <EnforcementBadge
+                        value={
+                          device.enforcement_status
+                        }
+                      />
+                    </td>
+
+                    <td>
+                      <span className="vlan-badge">
+                        VLAN{" "}
+                        {device.vlan_id || 90}
+                      </span>
+                    </td>
+
+                  </tr>
+
+                ))
+
+              )}
+
+            </tbody>
+
+          </table>
+
+        </div>
+
+      </div>
+
+    </div>
+  );
+};
+
+  // ------------------------------------------------------------
+  // PAGE ROUTER
+  // ------------------------------------------------------------
+
+  const renderPage = () => {
+  console.log("NETOPS activePage:", activePage);
+    switch (activePage) {
+      case "devices":
+        return <DevicesPage />;
+
+      case "events":
+        return <EventsPage />;
+
+      case "access":
+        return <AccessPage />;
+
+      case "vlans":
+        return <VLANPage />;
+
+      case "reports":
+        return <ReportsPage />;
+
+      case "settings":
+        return <SettingsPage />;
+
+      default:
+        return <Dashboard />;
+    }
+  };
+
+  // ------------------------------------------------------------
+  // AUTOMATION MODAL
+  // ------------------------------------------------------------
+
+  const renderAutomationResult = () => {
+    if (!automationResult) {
+      return null;
+    }
+
+    const success =
+      automationResult.configuration_status ===
+        "simulated" &&
+      automationResult.verification_status ===
+        "verified_simulation";
+
+    return (
+      <div
+        className="modal-overlay"
+        onClick={() =>
+          setAutomationResult(null)
+        }
+      >
+        <div
+          className="automation-modal"
+          onClick={(event) =>
+            event.stopPropagation()
+          }
+        >
+          <div className="automation-modal-header">
+            <div>
+              <div className="automation-label">
+                NETOPS AUTOMATION
+              </div>
+
+              <div className="automation-title">
+                VLAN Automation
+              </div>
+            </div>
+
+            <div
+              className={
+                success
+                  ? "automation-result success"
+                  : "automation-result warning"
+              }
+            >
+              {success
+                ? "SUCCESS"
+                : "WARNING"}
+            </div>
+          </div>
+
+          <div className="automation-device">
+            <div>
+              <span>IP ADDRESS</span>
+              <strong>
+                {automationResult.ip_address ||
+                  "-"}
+              </strong>
+            </div>
+
+            <div>
+              <span>MAC ADDRESS</span>
+              <strong>
+                {automationResult.mac_address ||
+                  "-"}
+              </strong>
+            </div>
+          </div>
+
+          <div className="automation-grid">
+            <AutomationField
+              label="Device Type"
+              value={
+                automationResult.device_type
+              }
+            />
+
+            <AutomationField
+              label="Target VLAN"
+              value={`VLAN ${
+                automationResult.vlan_id ??
+                "-"
+              }`}
+            />
+
+            <AutomationField
+              label="Switch"
+              value={
+                automationResult.switch_name ||
+                "Not identified"
+              }
+            />
+
+            <AutomationField
+              label="Port"
+              value={
+                automationResult.switch_port ||
+                "Not identified"
+              }
+            />
+
+            <AutomationField
+              label="Switch Status"
+              value={
+                automationResult.switch_status ||
+                "-"
+              }
+            />
+
+            <AutomationField
+              label="Port Status"
+              value={
+                automationResult.port_status ||
+                "-"
+              }
+            />
+          </div>
+
+          <div className="automation-pipeline">
+            <div className="pipeline-title">
+              AUTOMATION PIPELINE
+            </div>
+
+            <PipelineStep
+              number="01"
+              title="Classify Device"
+              status="Complete"
+            />
+
+            <PipelineStep
+              number="02"
+              title="Apply VLAN Policy"
+              status={`VLAN ${
+                automationResult.vlan_id ??
+                "-"
+              }`}
+            />
+
+            <PipelineStep
+              number="03"
+              title="Identify Switch Port"
+              status={
+                automationResult.switch_port
+                  ? "Complete"
+                  : "Waiting"
+              }
+            />
+
+            <PipelineStep
+              number="04"
+              title="Configure Switch"
+              status={
+                automationResult.configuration_status ||
+                "-"
+              }
+            />
+
+            <PipelineStep
+              number="05"
+              title="Verify Configuration"
+              status={
+                automationResult.verification_status ||
+                "-"
+              }
+            />
+          </div>
+
+          <div className="automation-mode">
+            <span>MODE</span>
+
+            <strong>
+              {automationResult.mode ||
+                "simulation"}
+            </strong>
+          </div>
+
+          <button
+            className="primary-button full"
+            onClick={() =>
+              setAutomationResult(null)
+            }
+          >
+            Done
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  // ------------------------------------------------------------
+  // MAIN UI
+  // ------------------------------------------------------------
+
+  return (
+    <>
+      <style>{`
+        * {
+          box-sizing: border-box;
+        }
+
+        html,
+        body,
+        #root {
+          margin: 0;
+          padding: 0;
+          width: 100%;
+          min-height: 100%;
+        }
+
+        body {
+          min-height: 100vh;
+          background: #0b1120;
+          color: #e5e7eb;
+          font-family:
+            Inter,
+            -apple-system,
+            BlinkMacSystemFont,
+            "Segoe UI",
+            sans-serif;
+        }
+
+        button,
+        input,
+        select,
+        textarea {
+          font-family: inherit;
+        }
+
+        button {
+          transition:
+            background 0.15s ease,
+            border-color 0.15s ease,
+            color 0.15s ease,
+            transform 0.15s ease;
+        }
+
+        .app {
+          min-height: 100vh;
+          display: flex;
+          background: #0b1120;
+        }
+
+        .sidebar {
+          width: 230px;
+          min-height: 100vh;
+          background: #0d1526;
+          border-right: 1px solid #1e293b;
+          display: flex;
+          flex-direction: column;
+          position: fixed;
+          left: 0;
+          top: 0;
+          bottom: 0;
+          z-index: 20;
+        }
+
+        .brand {
+          height: 76px;
+          padding: 0 20px;
+          display: flex;
+          align-items: center;
+          border-bottom: 1px solid #1e293b;
+        }
+
+        .brand-mark {
+          width: 38px;
+          height: 38px;
+          border-radius: 8px;
+          background: #2563eb;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 14px;
+          font-weight: 800;
+          color: white;
+          margin-right: 11px;
+        }
+
+        .brand-name {
+          font-size: 15px;
+          font-weight: 800;
+          color: #f8fafc;
+        }
+
+        .brand-subtitle {
+          font-size: 9px;
+          color: #64748b;
+          margin-top: 3px;
+          letter-spacing: 0.8px;
+          text-transform: uppercase;
+        }
+
+        .nav {
+          padding: 18px 12px;
+          flex: 1;
+        }
+
+        .nav-section-title {
+          color: #475569;
+          font-size: 9px;
+          font-weight: 800;
+          letter-spacing: 1.2px;
+          padding: 0 10px 8px;
+        }
+
+        .nav-item {
+          width: 100%;
+          border: 0;
+          background: transparent;
+          color: #94a3b8;
+          padding: 10px 11px;
+          margin-bottom: 3px;
+          border-radius: 6px;
+          display: flex;
+          align-items: center;
+          text-align: left;
+          cursor: pointer;
+          font-size: 12px;
+        }
+
+        .nav-item:hover {
+          background: #111c30;
+          color: #e2e8f0;
+        }
+
+        .nav-item.active {
+          background: #172554;
+          color: #60a5fa;
+        }
+
+        .nav-icon {
+          width: 25px;
+          color: inherit;
+          font-size: 11px;
+          font-weight: 800;
+        }
+
+        .sidebar-footer {
+          border-top: 1px solid #1e293b;
+          padding: 14px 18px;
+        }
+
+        .system-status {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          color: #64748b;
+          font-size: 10px;
+        }
+
+        .status-dot {
+          width: 7px;
+          height: 7px;
+          border-radius: 50%;
+          display: inline-block;
+        }
+
+        .status-dot.online {
+          background: #22c55e;
+          box-shadow: 0 0 7px rgba(34, 197, 94, 0.45);
+        }
+
+        .status-dot.offline {
+          background: #ef4444;
+        }
+
+        .main {
+          margin-left: 230px;
+          width: calc(100% - 230px);
+          min-height: 100vh;
+        }
+
+        .topbar {
+          height: 76px;
+          border-bottom: 1px solid #1e293b;
+          background: #0c1424;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 0 28px;
+          position: sticky;
+          top: 0;
+          z-index: 10;
+        }
+
+        .topbar-title {
+          color: #f8fafc;
+          font-size: 14px;
+          font-weight: 700;
+        }
+
+        .topbar-right {
+          display: flex;
+          align-items: center;
+          gap: 16px;
+        }
+
+        .live-indicator {
+          display: flex;
+          align-items: center;
+          gap: 7px;
+          font-size: 10px;
+          color: #64748b;
+        }
+
+        .live-dot {
+          width: 7px;
+          height: 7px;
+          border-radius: 50%;
+          background: #22c55e;
+        }
+
+        .page {
+          padding: 28px;
+          max-width: 1700px;
+          margin: 0 auto;
+        }
+
+        .page-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          gap: 20px;
+          margin-bottom: 24px;
+        }
+
+        .page-title {
+          color: #f8fafc;
+          font-size: 23px;
+          font-weight: 800;
+        }
+
+        .page-description {
+          margin-top: 5px;
+          color: #64748b;
+          font-size: 11px;
+        }
+
+        .connection-indicator {
+          display: flex;
+          align-items: center;
+          gap: 7px;
+          font-size: 10px;
+          color: #64748b;
+          padding: 7px 10px;
+          background: #0f172a;
+          border: 1px solid #1e293b;
+          border-radius: 6px;
+        }
+
+        .connection-dot {
+          width: 7px;
+          height: 7px;
+          border-radius: 50%;
+        }
+
+        .connection-dot.online {
+          background: #22c55e;
+        }
+
+        .connection-dot.offline {
+          background: #ef4444;
+        }
+
+        .stats-grid {
+          display: grid;
+          grid-template-columns: repeat(5, 1fr);
+          gap: 12px;
+          margin-bottom: 18px;
+        }
+
+        .stat-card {
+          background: #0f172a;
+          border: 1px solid #1e293b;
+          border-radius: 8px;
+          padding: 17px;
+          min-height: 126px;
+        }
+
+        .stat-card-clickable {
+          cursor: pointer;
+        }
+
+        .stat-card-clickable:hover {
+          border-color: #2563eb;
+          background: #172033;
+          transform: translateY(-2px);
+        }
+
+        .stat-title {
+          color: #64748b;
+          font-size: 9px;
+          font-weight: 800;
+          letter-spacing: 0.8px;
+        }
+
+        .stat-value {
+          color: #f8fafc;
+          font-size: 29px;
+          line-height: 1;
+          font-weight: 800;
+          margin-top: 12px;
+        }
+
+        .stat-subtitle {
+          color: #475569;
+          font-size: 10px;
+          margin-top: 8px;
+        }
+
+        .stat-card-action {
+          margin-top: 12px;
+          color: #60a5fa;
+          font-size: 10px;
+          font-weight: 700;
+        }
+
+        .dashboard-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 18px;
+          margin-bottom: 18px;
+        }
+
+        .panel {
+          background: #0f172a;
+          border: 1px solid #1e293b;
+          border-radius: 8px;
+          overflow: hidden;
+          margin-bottom: 18px;
+        }
+
+        .panel-header {
+          min-height: 65px;
+          padding: 15px 17px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 15px;
+          border-bottom: 1px solid #1e293b;
+        }
+
+        .panel-title {
+          color: #e2e8f0;
+          font-size: 12px;
+          font-weight: 800;
+        }
+
+        .panel-subtitle {
+          color: #475569;
+          font-size: 9px;
+          margin-top: 4px;
+        }
+
+        .classification-list {
+          padding: 4px 17px;
+        }
+
+        .classification-row {
+          min-height: 53px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          border-bottom: 1px solid #172033;
+        }
+
+        .classification-row:last-child {
+          border-bottom: 0;
+        }
+
+        .classification-name {
+          display: flex;
+          align-items: center;
+          gap: 9px;
+          color: #94a3b8;
+          font-size: 11px;
+        }
+
+        .classification-value {
+          color: #f8fafc;
+          font-weight: 800;
+          font-size: 14px;
+        }
+
+        .device-icon {
+          width: 32px;
+          height: 25px;
+          border-radius: 5px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 8px;
+          font-weight: 800;
+        }
+
+        .device-icon.computer {
+          background: #172554;
+          color: #60a5fa;
+        }
+
+        .device-icon.camera {
+          background: #2e1065;
+          color: #c4b5fd;
+        }
+
+        .device-icon.printer {
+          background: #083344;
+          color: #67e8f9;
+        }
+
+        .device-icon.unknown {
+          background: #451a03;
+          color: #fbbf24;
+        }
+
+        .vlan-mini-grid {
+          padding: 15px;
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 10px;
+        }
+
+        .vlan-mini {
+          background: #0b1120;
+          border: 1px solid #1e293b;
+          border-radius: 6px;
+          padding: 13px;
+        }
+
+        .vlan-mini.quarantine {
+          border-color: #422006;
+        }
+
+        .vlan-mini-id {
+          color: #60a5fa;
+          font-size: 10px;
+          font-weight: 800;
+        }
+
+        .vlan-mini-name {
+          color: #cbd5e1;
+          font-size: 11px;
+          font-weight: 700;
+          margin-top: 7px;
+        }
+
+        .vlan-mini-count {
+          color: #475569;
+          font-size: 9px;
+          margin-top: 4px;
+        }
+
+        .event-list {
+          padding: 0 17px;
+        }
+
+        .event-list.large {
+          padding: 0;
+        }
+
+        .event-row {
+          display: flex;
+          align-items: flex-start;
+          gap: 12px;
+          padding: 14px 0;
+          border-bottom: 1px solid #172033;
+        }
+
+        .event-list.large .event-row {
+          padding: 15px 18px;
+        }
+
+        .event-row:last-child {
+          border-bottom: 0;
+        }
+
+        .event-dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          background: #3b82f6;
+          margin-top: 4px;
+          flex-shrink: 0;
+        }
+
+        .event-dot.warning {
+          background: #f59e0b;
+        }
+
+        .event-dot.success {
+          background: #22c55e;
+        }
+
+        .event-content {
+          min-width: 0;
+          flex: 1;
+        }
+
+        .event-message {
+          color: #cbd5e1;
+          font-size: 11px;
+          line-height: 1.45;
+        }
+
+        .event-meta {
+          display: flex;
+          gap: 10px;
+          margin-top: 4px;
+          color: #475569;
+          font-size: 9px;
+        }
+
+        .primary-button,
+        .secondary-button,
+        .approve-button,
+        .reject-button {
+          border-radius: 5px;
+          padding: 8px 11px;
+          font-size: 10px;
+          font-weight: 700;
+          cursor: pointer;
+        }
+
+        .primary-button {
+          border: 1px solid #2563eb;
+          background: #2563eb;
+          color: white;
+        }
+
+        .primary-button:hover {
+          background: #1d4ed8;
+        }
+
+        .secondary-button {
+          border: 1px solid #334155;
+          background: #1e293b;
+          color: #cbd5e1;
+        }
+
+        .secondary-button:hover {
+          background: #334155;
+        }
+
+        .approve-button {
+          border: 1px solid #166534;
+          background: #14532d;
+          color: #86efac;
+        }
+
+        .reject-button {
+          border: 1px solid #7f1d1d;
+          background: #450a0a;
+          color: #fca5a5;
+        }
+
+        button:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+
+        .small {
+          padding: 6px 8px;
+          font-size: 9px;
+        }
+
+        .full {
+          width: 100%;
+        }
+
+        .table-container {
+          width: 100%;
+          overflow-x: auto;
+        }
+
+        .data-table {
+          width: 100%;
+          border-collapse: collapse;
+          min-width: 1150px;
+        }
+
+        .data-table th {
+          background: #0b1120;
+          color: #475569;
+          text-align: left;
+          padding: 11px 13px;
+          font-size: 8px;
+          font-weight: 800;
+          letter-spacing: 0.7px;
+          border-bottom: 1px solid #1e293b;
+          white-space: nowrap;
+        }
+
+        .data-table td {
+          padding: 12px 13px;
+          border-bottom: 1px solid #172033;
+          color: #94a3b8;
+          font-size: 10px;
+          vertical-align: middle;
+        }
+
+        .data-table tbody tr:hover {
+          background: #111c30;
+        }
+
+        .data-table tbody tr.highlighted {
+          background: #172554;
+        }
+
+        .device-primary {
+          color: #e2e8f0;
+          font-size: 11px;
+          font-weight: 700;
+        }
+
+        .device-secondary {
+          color: #475569;
+          font-size: 9px;
+          margin-top: 3px;
+        }
+
+        .action-group {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 5px;
+        }
+
+        .type-badge,
+        .status-badge,
+        .vlan-badge,
+        .enforcement-badge {
+          display: inline-flex;
+          align-items: center;
+          border-radius: 4px;
+          padding: 4px 6px;
+          font-size: 8px;
+          font-weight: 800;
+          text-transform: uppercase;
+          white-space: nowrap;
+        }
+
+        .type-badge.computer {
+          color: #60a5fa;
+          background: #172554;
+        }
+
+        .type-badge.cctv {
+          color: #c4b5fd;
+          background: #2e1065;
+        }
+
+        .type-badge.printer {
+          color: #67e8f9;
+          background: #083344;
+        }
+
+        .type-badge.unknown {
+          color: #fbbf24;
+          background: #451a03;
+        }
+
+        .status-badge.online,
+        .status-badge.allowed,
+        .status-badge.approved {
+          color: #86efac;
+          background: #052e16;
+        }
+
+        .status-badge.offline,
+        .status-badge.rejected,
+        .status-badge.quarantine {
+          color: #fca5a5;
+          background: #450a0a;
+        }
+
+        .status-badge.pending {
+          color: #fcd34d;
+          background: #451a03;
+        }
+
+        .enforcement-badge.allowed {
+          color: #86efac;
+          background: #052e16;
+        }
+
+        .enforcement-badge.quarantined {
+          color: #fca5a5;
+          background: #450a0a;
+        }
+
+        .enforcement-badge.unknown {
+          color: #fcd34d;
+          background: #451a03;
+        }
+
+        .vlan-badge {
+          color: #60a5fa;
+          background: #172554;
+        }
+
+        .device-filter-bar {
+          margin-bottom: 14px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          padding: 10px 12px;
+          background: #0f172a;
+          border: 1px solid #1f2937;
+          border-radius: 7px;
+          color: #64748b;
+          font-size: 11px;
+        }
+
+        .device-filter-bar strong {
+          color: #60a5fa;
+        }
+
+        .clear-filter-button {
+          border: 1px solid #334155;
+          background: #1e293b;
+          color: #cbd5e1;
+          border-radius: 5px;
+          padding: 6px 9px;
+          font-size: 10px;
+          cursor: pointer;
+        }
+
+        .access-summary {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 12px;
+          margin-bottom: 18px;
+        }
+
+        .access-summary-card {
+          background: #0f172a;
+          border: 1px solid #1e293b;
+          border-radius: 7px;
+          padding: 16px;
+          cursor: pointer;
+        }
+
+        .access-summary-card:hover {
+          border-color: #2563eb;
+          background: #172033;
+        }
+
+        .access-summary-card span {
+          display: block;
+          color: #64748b;
+          font-size: 9px;
+          text-transform: uppercase;
+          font-weight: 800;
+        }
+
+        .access-summary-card strong {
+          display: block;
+          color: #f8fafc;
+          font-size: 25px;
+          margin-top: 8px;
+        }
+
+        .access-summary-card small {
+          display: block;
+          color: #60a5fa;
+          font-size: 9px;
+          margin-top: 8px;
+        }
+
+        .vlan-card-grid {
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 12px;
+          margin-bottom: 18px;
+        }
+
+        .vlan-card {
+          background: #0f172a;
+          border: 1px solid #1e293b;
+          border-radius: 8px;
+          padding: 17px;
+          cursor: pointer;
+        }
+
+        .vlan-card:hover,
+        .vlan-card-selected {
+          border-color: #2563eb;
+          background: #172033;
+        }
+
+        .vlan-card.quarantine {
+          border-color: #422006;
+        }
+
+        .vlan-card-top {
+          display: flex;
+          justify-content: space-between;
+        }
+
+        .vlan-number {
+          color: #60a5fa;
+          font-size: 10px;
+          font-weight: 800;
+        }
+
+        .vlan-name {
+          color: #cbd5e1;
+          font-size: 13px;
+          font-weight: 800;
+          margin-top: 10px;
+        }
+
+        .vlan-description {
+          color: #475569;
+          font-size: 9px;
+          margin-top: 5px;
+        }
+
+        .vlan-count {
+          color: #f8fafc;
+          font-size: 13px;
+          font-weight: 800;
+          margin-top: 12px;
+        }
+
+        .vlan-device-list {
+          margin-top: 12px;
+        }
+
+        .vlan-device {
+          display: flex;
+          justify-content: space-between;
+          gap: 8px;
+          padding: 5px 0;
+          color: #64748b;
+          font-size: 8px;
+          border-top: 1px solid #172033;
+        }
+
+        .vlan-card-action {
+          margin-top: 14px;
+          padding-top: 10px;
+          border-top: 1px solid #1e293b;
+          color: #60a5fa;
+          font-size: 9px;
+          font-weight: 700;
+        }
+
+        .vlan-policy-row {
+          min-height: 68px;
+          padding: 10px 17px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          border-bottom: 1px solid #172033;
+        }
+
+        .vlan-policy-row:last-child {
+          border-bottom: 0;
+        }
+
+        .vlan-policy-left {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+        }
+
+        .vlan-policy-number {
+          width: 38px;
+          height: 30px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 5px;
+          background: #172554;
+          color: #60a5fa;
+          font-size: 9px;
+          font-weight: 800;
+        }
+
+        .vlan-policy-name {
+          color: #cbd5e1;
+          font-size: 11px;
+          font-weight: 800;
+        }
+
+        .vlan-policy-description {
+          color: #475569;
+          font-size: 9px;
+          margin-top: 4px;
+        }
+
+        .vlan-policy-count {
+          color: #f8fafc;
+          font-size: 15px;
+          font-weight: 800;
+        }
+
+        .report-grid {
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 12px;
+        }
+
+        .report-card {
+          background: #0f172a;
+          border: 1px solid #1e293b;
+          border-radius: 8px;
+          padding: 17px;
+        }
+
+        .report-card-title {
+          color: #cbd5e1;
+          font-size: 11px;
+          font-weight: 800;
+        }
+
+        .report-card-value {
+          color: #f8fafc;
+          font-size: 25px;
+          font-weight: 800;
+          margin-top: 12px;
+        }
+
+        .report-card-description {
+          color: #475569;
+          font-size: 9px;
+          line-height: 1.5;
+          margin-top: 6px;
+        }
+
+        .settings-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 18px;
+        }
+
+        .settings-row {
+          min-height: 52px;
+          padding: 12px 17px;
+          border-bottom: 1px solid #172033;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 15px;
+          color: #64748b;
+          font-size: 10px;
+        }
+
+        .settings-row code {
+          color: #60a5fa;
+          font-size: 9px;
+          word-break: break-all;
+          text-align: right;
+        }
+
+        .settings-status {
+          display: flex;
+          align-items: center;
+          gap: 7px;
+          color: #94a3b8;
+        }
+
+        .new-device-alert {
+          position: fixed;
+          top: 90px;
+          right: 25px;
+          width: 340px;
+          background: #0f172a;
+          border: 1px solid #2563eb;
+          border-radius: 8px;
+          box-shadow: 0 15px 45px rgba(0,0,0,.4);
+          z-index: 100;
+        }
+
+        .alert-top {
+          height: 3px;
+          background: #2563eb;
+        }
+
+        .alert-body {
+          padding: 15px;
+        }
+
+        .alert-label {
+          color: #60a5fa;
+          font-size: 9px;
+          font-weight: 800;
+        }
+
+        .alert-title {
+          color: #f8fafc;
+          font-size: 13px;
+          font-weight: 800;
+          margin-top: 5px;
+        }
+
+        .alert-message {
+          color: #64748b;
+          font-size: 10px;
+          line-height: 1.5;
+          margin-top: 7px;
+        }
+
+        .modal-overlay {
+          position: fixed;
+          inset: 0;
+          background: rgba(2,6,23,.78);
+          backdrop-filter: blur(4px);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 20px;
+          z-index: 200;
+        }
+
+        .automation-modal {
+          width: min(700px,100%);
+          max-height: 90vh;
+          overflow-y: auto;
+          background: #0d1526;
+          border: 1px solid #334155;
+          border-radius: 10px;
+          padding: 22px;
+        }
+
+        .automation-modal-header {
+          display: flex;
+          justify-content: space-between;
+          gap: 20px;
+          align-items: flex-start;
+          padding-bottom: 18px;
+          border-bottom: 1px solid #1e293b;
+        }
+
+        .automation-label {
+          color: #3b82f6;
+          font-size: 9px;
+          font-weight: 800;
+        }
+
+        .automation-title {
+          color: #f8fafc;
+          font-size: 20px;
+          font-weight: 800;
+          margin-top: 4px;
+        }
+
+        .automation-result {
+          padding: 6px 9px;
+          border-radius: 4px;
+          font-size: 8px;
+          font-weight: 800;
+        }
+
+        .automation-result.success {
+          color: #86efac;
+          background: #052e16;
+          border: 1px solid #166534;
+        }
+
+        .automation-result.warning {
+          color: #fcd34d;
+          background: #451a03;
+          border: 1px solid #92400e;
+        }
+
+        .automation-device {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 12px;
+          padding: 17px 0;
+          border-bottom: 1px solid #1e293b;
+        }
+
+        .automation-device span,
+        .automation-grid span {
+          display: block;
+          color: #475569;
+          font-size: 8px;
+          font-weight: 800;
+        }
+
+        .automation-device strong {
+          display: block;
+          color: #cbd5e1;
+          font-size: 11px;
+          margin-top: 5px;
+        }
+
+        .automation-grid {
+          display: grid;
+          grid-template-columns: repeat(3,1fr);
+          gap: 10px;
+          padding: 17px 0;
+        }
+
+        .automation-field {
+          background: #0b1120;
+          border: 1px solid #1e293b;
+          border-radius: 5px;
+          padding: 10px;
+        }
+
+        .automation-field strong {
+          display: block;
+          color: #cbd5e1;
+          font-size: 10px;
+          margin-top: 5px;
+        }
+
+        .automation-pipeline {
+          border: 1px solid #1e293b;
+          border-radius: 6px;
+          background: #0b1120;
+          padding: 13px;
+          margin-bottom: 14px;
+        }
+
+        .pipeline-title {
+          color: #475569;
+          font-size: 8px;
+          font-weight: 800;
+          margin-bottom: 5px;
+        }
+
+        .pipeline-step {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          min-height: 38px;
+          border-bottom: 1px solid #172033;
+        }
+
+        .pipeline-number {
+          color: #3b82f6;
+          font-size: 8px;
+          font-weight: 800;
+          width: 22px;
+        }
+
+        .pipeline-title-text {
+          flex: 1;
+          color: #94a3b8;
+          font-size: 9px;
+        }
+
+        .pipeline-status {
+          color: #86efac;
+          font-size: 8px;
+          font-weight: 800;
+          text-transform: uppercase;
+        }
+
+        .automation-mode {
+          display: flex;
+          justify-content: space-between;
+          padding: 11px 12px;
+          background: #111c30;
+          border-radius: 5px;
+          margin-bottom: 14px;
+        }
+
+        .automation-mode strong {
+          color: #fbbf24;
+          font-size: 9px;
+          text-transform: uppercase;
+        }
+
+        .loading-state,
+        .empty-state {
+          padding: 35px 20px;
+          text-align: center;
+          color: #475569;
+          font-size: 11px;
+        }
+
+        @media (max-width: 1200px) {
+          .stats-grid {
+            grid-template-columns: repeat(3,1fr);
+          }
+
+          .vlan-card-grid,
+          .report-grid {
+            grid-template-columns: repeat(2,1fr);
+          }
+        }
+
+        @media (max-width: 850px) {
+          .sidebar {
+            width: 68px;
+          }
+
+          .brand {
+            justify-content: center;
+            padding: 0;
+          }
+
+          .brand-mark {
+            margin: 0;
+          }
+
+          .brand-text,
+          .nav-section-title,
+          .nav-label,
+          .sidebar-footer {
+            display: none;
+          }
+
+          .nav-item {
+            justify-content: center;
+          }
+
+          .main {
+            margin-left: 68px;
+            width: calc(100% - 68px);
+          }
+
+          .dashboard-grid,
+          .settings-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .stats-grid {
+            grid-template-columns: repeat(2,1fr);
+          }
+        }
+
+        @media (max-width: 600px) {
+          .page {
+            padding: 16px;
+          }
+
+          .topbar {
+            padding: 0 16px;
+          }
+
+          .stats-grid,
+          .vlan-card-grid,
+          .report-grid,
+          .access-summary {
+            grid-template-columns: 1fr;
+          }
+
+          .page-header {
+            flex-direction: column;
+          }
+
+          .automation-grid {
+            grid-template-columns: 1fr 1fr;
+          }
+
+          .automation-device {
+            grid-template-columns: 1fr;
+          }
+
+          .new-device-alert {
+            left: 15px;
+            right: 15px;
+            width: auto;
+          }
+        }
+      `}</style>
+
+      <div className="app">
+        <aside className="sidebar">
+          <div className="brand">
+            <div className="brand-mark">
+              N
+            </div>
+
+            <div className="brand-text">
+              <div className="brand-name">
+                NETOPS
+              </div>
+
+              <div className="brand-subtitle">
+                Network Operations
+              </div>
+            </div>
+          </div>
+
+          <nav className="nav">
+            <div className="nav-section-title">
+              OPERATIONS
+            </div>
+
+            <NavItem
+              icon="D"
+              label="Dashboard"
+              active={
+                activePage === "dashboard"
+              }
+              onClick={() =>
+                setActivePage("dashboard")
+              }
+            />
+
+            <NavItem
+              icon="▣"
+              label="Devices"
+              active={
+                activePage === "devices"
+              }
+              onClick={() => {
+                setDeviceFilter("all");
+                setActivePage("devices");
+              }}
+            />
+
+            <NavItem
+              icon="!"
+              label="Events"
+              active={
+                activePage === "events"
+              }
+              onClick={() =>
+                setActivePage("events")
+              }
+            />
+
+            <NavItem
+              icon="A"
+              label="Access Control"
+              active={
+                activePage === "access"
+              }
+              onClick={() => {
+                setDeviceFilter("all");
+                setActivePage("access");
+              }}
+            />
+
+            <div className="nav-section-title">
+              AUTOMATION
+            </div>
+
+            <NavItem
+              icon="V"
+              label="VLAN Automation"
+              active={
+                activePage === "vlans"
+              }
+              onClick={() => {
+                setVlanFilter("all");
+                setActivePage("vlans");
+              }}
+            />
+
+            <NavItem
+              icon="R"
+              label="Reports"
+              active={
+                activePage === "reports"
+              }
+              onClick={() =>
+                setActivePage("reports")
+              }
+            />
+
+            <div className="nav-section-title">
+              SYSTEM
+            </div>
+
+            <NavItem
+              icon="S"
+              label="Settings"
+              active={
+                activePage === "settings"
+              }
+              onClick={() =>
+                setActivePage("settings")
+              }
+            />
+          </nav>
+
+          <div className="sidebar-footer">
+            <div className="system-status">
+              <span className="status-dot online" />
+              NETOPS online
+            </div>
+          </div>
+        </aside>
+
+        <main className="main">
+          <header className="topbar">
+            <div className="topbar-title">
+              {getPageTitle(activePage)}
+            </div>
+
+            <div className="topbar-right">
+              <div className="live-indicator">
+                <span className="live-dot" />
+                Live monitoring
+              </div>
+            </div>
+            <div style={{position:"fixed",bottom:10,right:10,zIndex:99999,background:"#000",color:"#0f0",padding:"8px",fontSize:"12px"}}>PAGE: {activePage}</div>
+          </header>
+
+          {renderPage()}
+        </main>
+
+        {newDeviceAlert && (
+          <div className="new-device-alert">
+            <div className="alert-top" />
+
+            <div className="alert-body">
+              <div className="alert-label">
+                NEW DEVICE DETECTED
+              </div>
+
+              <div className="alert-title">
+                Network device requires review
+              </div>
+
+              <div className="alert-message">
+                {newDeviceAlert.message ||
+                  "A new device was discovered on the LAN."}
+              </div>
+
+              <button
+                className="primary-button small"
+                style={{
+                  marginTop: "11px",
+                }}
+                onClick={() => {
+                  setDeviceFilter("pending");
+                  setActivePage("devices");
+                  setNewDeviceAlert(null);
+                }}
+              >
+                Review Device
+              </button>
+            </div>
+          </div>
+        )}
+
+        {renderAutomationResult()}
+      </div>
+    </>
+  );
+}
+
+// ============================================================
+// COMPONENTS
+// ============================================================
+
+function NavItem({
+  icon,
+  label,
+  active,
+  onClick,
+}) {
+  return (
+    <button
+      className={
+        active
+          ? "nav-item active"
+          : "nav-item"
+      }
+      onClick={onClick}
+    >
+      <span className="nav-icon">
+        {icon}
+      </span>
+
+      <span className="nav-label">
+        {label}
+      </span>
+    </button>
+  );
+}
+
+function getPageTitle(page) {
+  const titles = {
+    dashboard:
+      "Network Operations Dashboard",
+    devices: "Device Management",
+    events: "Network Events",
+    access: "Access Control",
+    vlans: "VLAN Automation",
+    reports: "Network Reports",
+    settings: "System Settings",
+  };
+
+  return titles[page] || "NETOPS";
+}
+
+function TypeBadge({ type }) {
+  const normalized =
+    type || "unknown";
+
+  return (
+    <span
+      className={`type-badge ${normalized}`}
+    >
+      {normalized}
+    </span>
+  );
+}
+
+function StatusBadge({ value }) {
+  const normalized =
+    value || "unknown";
+
+  return (
+    <span
+      className={`status-badge ${normalized}`}
+    >
+      {normalized}
+    </span>
+  );
+}
+
+function EnforcementBadge({ value }) {
+  const normalized =
+    value || "unknown";
+
+  return (
+    <span
+      className={`enforcement-badge ${normalized}`}
+    >
+      {normalized}
+    </span>
+  );
+}
+
+function ClassificationRow({
+  label,
+  icon,
+  type,
+  value,
+}) {
+  return (
+    <div className="classification-row">
+      <div className="classification-name">
+        <span
+          className={`device-icon ${type}`}
+        >
+          {icon}
+        </span>
+
+        {label}
+      </div>
+
+      <div className="classification-value">
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function VLANMini({
+  vlan,
+  name,
+  count,
+  quarantine = false,
+}) {
+  return (
+    <div
+      className={
+        quarantine
+          ? "vlan-mini quarantine"
+          : "vlan-mini"
+      }
+    >
+      <div className="vlan-mini-id">
+        VLAN {vlan}
+      </div>
+
+      <div className="vlan-mini-name">
+        {name}
+      </div>
+
+      <div className="vlan-mini-count">
+        {count} device
+        {count === 1 ? "" : "s"}
+      </div>
+    </div>
+  );
+}
+
+function FilterBar({
+  label,
+  count,
+  active,
+  clear,
+}) {
+  return (
+    <div className="device-filter-bar">
+      <span>
+        Showing:{" "}
+        <strong>{label}</strong>{" "}
+        <span>
+          ({count})
+        </span>
+      </span>
+
+      {active && (
+        <button
+          className="clear-filter-button"
+          onClick={clear}
+        >
+          Show All
+        </button>
+      )}
+    </div>
+  );
+}
+
+function AccessSummary({
+  title,
+  value,
+  text,
+  onClick,
+}) {
+  return (
+    <div
+      className="access-summary-card"
+      role="button"
+      tabIndex={0}
+      onClick={onClick}
+      onKeyDown={(event) => {
+        if (
+          event.key === "Enter" ||
+          event.key === " "
+        ) {
+          event.preventDefault();
+          onClick();
+        }
+      }}
+    >
+      <span>{title}</span>
+
+      <strong>{value}</strong>
+
+      <small>
+        {text} →
+      </small>
+    </div>
+  );
+}
+
+function DeviceRow({
+  device,
+  actionLoading,
+  highlighted,
+  onAction,
+}) {
+  return (
+    <tr
+      className={
+        highlighted ? "highlighted" : ""
+      }
+    >
+      <td>
+        <div className="device-primary">
+          {device.hostname ||
+            "Unknown Device"}
+        </div>
+
+        <div className="device-secondary">
+          {device.mac_address}
+        </div>
+      </td>
+
+      <td>
+        {device.ip_address || "-"}
+      </td>
+
+      <td>
+        <TypeBadge
+          type={device.device_type}
+        />
+      </td>
+
+      <td>
+        <StatusBadge
+          value={device.status}
+        />
+      </td>
+
+      <td>
+        <StatusBadge
+          value={device.approval_status}
+        />
+      </td>
+
+      <td>
+        <StatusBadge
+          value={
+            device.access_decision ||
+            "unknown"
+          }
+        />
+      </td>
+
+      <td>
+        <EnforcementBadge
+          value={
+            device.enforcement_status
+          }
+        />
+      </td>
+
+      <td>
+        <span className="vlan-badge">
+          VLAN {device.vlan_id || "-"}
+        </span>
+      </td>
+
+      <td>
+        <div className="action-group">
+          {device.approval_status ===
+            "pending" && (
+            <>
+              <button
+                className="approve-button"
+                disabled={
+                  actionLoading ===
+                  `approve-${device.id}`
+                }
+                onClick={() =>
+                  onAction(
+                    device.id,
+                    "approve"
+                  )
+                }
+              >
+                {actionLoading ===
+                `approve-${device.id}`
+                  ? "Approving..."
+                  : "Approve"}
+              </button>
+
+              <button
+                className="reject-button"
+                disabled={
+                  actionLoading ===
+                  `reject-${device.id}`
+                }
+                onClick={() =>
+                  onAction(
+                    device.id,
+                    "reject"
+                  )
+                }
+              >
+                {actionLoading ===
+                `reject-${device.id}`
+                  ? "Rejecting..."
+                  : "Reject"}
+              </button>
+            </>
+          )}
+
+          <button
+            className="secondary-button small"
+            disabled={
+              actionLoading ===
+              `enforce-${device.id}`
+            }
+            onClick={() =>
+              onAction(
+                device.id,
+                "enforce"
+              )
+            }
+          >
+            {actionLoading ===
+            `enforce-${device.id}`
+              ? "Enforcing..."
+              : "Enforce"}
+          </button>
+
+          <button
+            className="primary-button small"
+            disabled={
+              actionLoading ===
+              `automate-vlan-${device.id}`
+            }
+            onClick={() =>
+              onAction(
+                device.id,
+                "automate-vlan"
+              )
+            }
+          >
+            {actionLoading ===
+            `automate-vlan-${device.id}`
+              ? "Running..."
+              : "Auto VLAN"}
+          </button>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+function VLANCard({
+  vlan,
+  name,
+  description,
+  devices,
+  selected,
+  quarantine,
+  onClick,
+}) {
+  return (
+    <div
+      className={[
+        "vlan-card",
+        selected
+          ? "vlan-card-selected"
+          : "",
+        quarantine
+          ? "quarantine"
+          : "",
+      ].join(" ")}
+      onClick={onClick}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(event) => {
+        if (
+          event.key === "Enter" ||
+          event.key === " "
+        ) {
+          event.preventDefault();
+          onClick();
+        }
+      }}
+    >
+      <div className="vlan-card-top">
+        <div className="vlan-number">
+          VLAN {vlan}
+        </div>
+
+        <div>VIEW →</div>
+      </div>
+
+      <div className="vlan-name">
+        {name}
+      </div>
+
+      <div className="vlan-description">
+        {description}
+      </div>
+
+      <div className="vlan-count">
+        {devices.length} device
+        {devices.length === 1 ? "" : "s"}
+      </div>
+
+      {devices
+        .slice(0, 4)
+        .map((device) => (
+          <div
+            className="vlan-device"
+            key={device.id}
+          >
+            <span>
+              {device.hostname ||
+                "Unknown"}
+            </span>
+
+            <span>
+              {device.ip_address || "-"}
+            </span>
+          </div>
+        ))}
+
+      <div className="vlan-card-action">
+        Show VLAN {vlan} devices →
+      </div>
+    </div>
+  );
+}
+
+function PolicyRow({
+  vlan,
+  name,
+  description,
+  count,
+  quarantine,
+}) {
+  return (
+    <div
+      className="vlan-policy-row"
+      style={
+        quarantine
+          ? {
+              borderBottomColor:
+                "#422006",
+            }
+          : undefined
+      }
+    >
+      <div className="vlan-policy-left">
+        <div className="vlan-policy-number">
+          {vlan}
+        </div>
+
+        <div>
+          <div className="vlan-policy-name">
+            {name}
+          </div>
+
+          <div className="vlan-policy-description">
+            {description}
+          </div>
+        </div>
+      </div>
+
+      <div className="vlan-policy-count">
+        {count}
+      </div>
+    </div>
+  );
+}
+
+function ReportCard({
+  title,
+  value,
+  description,
+}) {
+  return (
+    <div className="report-card">
+      <div className="report-card-title">
+        {title}
+      </div>
+
+      <div className="report-card-value">
+        {value}
+      </div>
+
+      <div className="report-card-description">
+        {description}
+      </div>
+    </div>
+  );
+}
+
+function EventRow({ event }) {
+  const type =
+    event.event_type || "event";
+
+  let dotClass = "event-dot";
+
+  if (
+    type.includes("reject") ||
+    type.includes("quarantine")
+  ) {
+    dotClass += " warning";
+  }
+
+  if (
+    type.includes("approve") ||
+    type.includes("allow")
+  ) {
+    dotClass += " success";
+  }
+
+  return (
+    <div className="event-row">
+      <span className={dotClass} />
+
+      <div className="event-content">
+        <div className="event-message">
+          {event.message ||
+            type}
+        </div>
+
+        <div className="event-meta">
+          <span>{type}</span>
+
+          {event.device_id && (
+            <span>
+              Device #{event.device_id}
+            </span>
+          )}
+
+          {event.created_at && (
+            <span>
+              {event.created_at}
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AutomationField({
+  label,
+  value,
+}) {
+  return (
+    <div className="automation-field">
+      <span>{label}</span>
+
+      <strong>
+        {value || "-"}
+      </strong>
+    </div>
+  );
+}
+
+function PipelineStep({
+  number,
+  title,
+  status,
+}) {
+  return (
+    <div className="pipeline-step">
+      <div className="pipeline-number">
+        {number}
+      </div>
+
+      <div className="pipeline-title-text">
+        {title}
+      </div>
+
+      <div className="pipeline-status">
+        {status}
+      </div>
+    </div>
+  );
+}
+
+export default App;

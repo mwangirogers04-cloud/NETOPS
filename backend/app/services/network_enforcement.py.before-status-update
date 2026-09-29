@@ -1,0 +1,117 @@
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from ..models.device import Device
+from ..models.event import Event
+from .access_policy import get_access_decision
+from .event_service import create_event
+
+
+def enforce_device_access(
+    device: Device,
+    db: Session,
+) -> dict:
+    """
+    Simulate network access enforcement for a device.
+
+    Current development mode:
+        - No real switch or firewall configuration.
+        - NETOPS calculates the required access decision.
+        - An audit event is created only when the
+          enforcement state changes.
+
+    This prevents the monitor from generating duplicate
+    access_enforcement events on every scan.
+    """
+
+    # ---------------------------------------------------------
+    # Determine the current access decision
+    # ---------------------------------------------------------
+
+    decision = get_access_decision(
+        device.device_type,
+        device.approval_status,
+    )
+
+    # ---------------------------------------------------------
+    # Determine the enforcement action
+    # ---------------------------------------------------------
+
+    if decision == "allowed":
+
+        action = "allow"
+
+        message = (
+            f"Access allowed for device "
+            f"{device.ip_address} "
+            f"({device.mac_address}) "
+            f"on VLAN {device.vlan_id}"
+        )
+
+    else:
+
+        action = "quarantine"
+
+        message = (
+            f"Access quarantined for device "
+            f"{device.ip_address} "
+            f"({device.mac_address}) "
+            f"on VLAN {device.vlan_id}"
+        )
+
+    # ---------------------------------------------------------
+    # Check the most recent access enforcement event
+    # for this device.
+    #
+    # If the exact same enforcement message already exists
+    # as the most recent event, do not create another event.
+    # ---------------------------------------------------------
+
+    latest_event = db.scalar(
+        select(Event)
+        .where(
+            Event.device_id == device.id,
+            Event.event_type == "access_enforcement",
+        )
+        .order_by(Event.id.desc())
+        .limit(1)
+    )
+
+    # ---------------------------------------------------------
+    # Create an audit event only when the enforcement
+    # state/message has changed.
+    # ---------------------------------------------------------
+
+    if latest_event is None:
+
+        create_event(
+            db,
+            "access_enforcement",
+            message,
+            device.id,
+        )
+
+    elif latest_event.message != message:
+
+        create_event(
+            db,
+            "access_enforcement",
+            message,
+            device.id,
+        )
+
+    # ---------------------------------------------------------
+    # Return current enforcement state
+    # ---------------------------------------------------------
+
+    return {
+        "device_id": device.id,
+        "ip_address": device.ip_address,
+        "mac_address": device.mac_address,
+        "device_type": device.device_type,
+        "approval_status": device.approval_status,
+        "vlan_id": device.vlan_id,
+        "decision": decision,
+        "action": action,
+        "mode": "simulation",
+    }

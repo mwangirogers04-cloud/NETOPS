@@ -1,0 +1,82 @@
+KNOWN_DEVICE_TYPES = {
+    "computer",
+    "cctv",
+    "printer",
+}
+
+
+def normalize_device_type(
+    device_type: str | None,
+) -> str | None:
+    if not device_type:
+        return None
+
+    value = device_type.lower().strip()
+
+    if value in KNOWN_DEVICE_TYPES:
+        return value
+
+    return None
+
+
+def get_access_decision(
+    device_type: str | None,
+    approval_status: str,
+    enforcement_status: str | None = None,
+) -> str:
+    """
+    Determine the effective network access decision.
+
+    Rules:
+
+    1. Pending devices are quarantined.
+    2. Rejected devices are quarantined.
+    3. Unknown/unclassified devices are quarantined.
+    4. An administrator can manually quarantine an
+       otherwise approved device.
+    5. Approved recognized devices are allowed unless
+       their enforcement status is quarantined.
+    """
+
+    normalized_type = normalize_device_type(
+        device_type
+    )
+
+    if approval_status != "approved":
+        return "quarantine"
+
+    if normalized_type is None:
+        return "quarantine"
+
+    if enforcement_status == "quarantined":
+        return "quarantine"
+
+    return "allowed"
+
+
+def get_access_reason(
+    device_type: str | None,
+    approval_status: str,
+    enforcement_status: str | None = None,
+) -> str:
+
+    normalized_type = normalize_device_type(
+        device_type
+    )
+
+    if approval_status == "pending":
+        return "Pending administrator approval"
+
+    if approval_status == "rejected":
+        return "Rejected by administrator"
+
+    if normalized_type is None:
+        return "Device requires classification"
+
+    if enforcement_status == "quarantined":
+        return "Internet access blocked by administrator"
+
+    if approval_status == "approved":
+        return "Approved recognized device with network access allowed"
+
+    return "Network access restricted"

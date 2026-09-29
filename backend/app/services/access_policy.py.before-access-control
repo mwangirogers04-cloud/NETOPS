@@ -1,0 +1,47 @@
+KNOWN_DEVICE_TYPES = {
+    "computer",
+    "cctv",
+    "printer",
+}
+
+
+def get_access_decision(
+    device_type: str | None,
+    approval_status: str,
+) -> str:
+    if approval_status != "approved":
+        return "quarantine"
+
+    if not device_type:
+        return "quarantine"
+
+    device_type = device_type.lower().strip()
+
+    if device_type not in KNOWN_DEVICE_TYPES:
+        return "quarantine"
+
+    return "allowed"
+
+
+def get_access_reason(
+    device_type: str | None,
+    approval_status: str,
+) -> str:
+    if approval_status == "pending":
+        return "Pending administrator approval"
+
+    if approval_status == "rejected":
+        return "Rejected by administrator"
+
+    if not device_type:
+        return "Unknown device type"
+
+    device_type = device_type.lower().strip()
+
+    if device_type not in KNOWN_DEVICE_TYPES:
+        return "Unrecognized device type"
+
+    if approval_status == "approved":
+        return "Approved recognized device"
+
+    return "Network access restricted"
