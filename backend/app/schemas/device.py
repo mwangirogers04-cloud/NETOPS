@@ -21,6 +21,7 @@ class DeviceResponse(DeviceCreate):
     approval_status: str
     classification_status: str
     enforcement_status: str
+    internet_access_authorized: bool
 
     access_decision: str | None = None
 
@@ -43,22 +44,28 @@ class DeviceResponse(DeviceCreate):
         if self.classification_status == "review_required":
             return "Classification mismatch requires manual review"
 
-        if not self.device_type:
-            return "Unknown device type"
-
         known_types = {
             "computer",
             "cctv",
             "printer",
         }
 
-        if self.device_type.lower().strip() not in known_types:
-            return "Unrecognized device type"
+        if (
+            not self.device_type
+            or self.device_type.lower().strip() not in known_types
+        ):
+            return "Unknown or unrecognized device type"
 
-        if self.approval_status == "approved":
-            return "Approved recognized device"
+        if not self.internet_access_authorized:
+            return "Internet access has not been explicitly authorized"
 
-        return "Network access restricted"
+        if self.enforcement_status != "allowed":
+            return (
+                "Internet access is currently quarantined "
+                "by policy or schedule"
+            )
+
+        return "Approved recognized device with internet access allowed"
 
 
 class DeviceTypeUpdate(BaseModel):

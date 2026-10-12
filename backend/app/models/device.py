@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, String, Text
+from sqlalchemy import Boolean, DateTime, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..database import Base
@@ -76,6 +76,13 @@ class Device(Base):
     enforcement_status: Mapped[str] = mapped_column(
         String(30),
         default="quarantined",
+        nullable=False,
+    )
+
+
+    internet_access_authorized: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
         nullable=False,
     )
 

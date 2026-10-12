@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -17,6 +17,13 @@ router = APIRouter(
 
 class DiscoveryRequest(BaseModel):
     network: str
+
+    @field_validator("network")
+    @classmethod
+    def validate_network(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Network range cannot be empty.")
+        return value
 
 
 @router.post("/scan")
@@ -71,8 +78,15 @@ def run_discovery_scan(
             ],
         }
 
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid network range. Provide a valid IPv4 CIDR range, such as 192.168.1.0/24.",
+        ) from exc
+
     except Exception as exc:
         raise HTTPException(
             status_code=500,
-            detail=f"Discovery scan failed: {exc}",
+            detail="Discovery scan failed due to an internal error.",
         ) from exc

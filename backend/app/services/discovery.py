@@ -1,3 +1,4 @@
+import ipaddress
 import socket
 import subprocess
 import xml.etree.ElementTree as ET
@@ -9,8 +10,19 @@ from ..models.device import Device
 from ..models.event import Event
 from .event_service import create_event
 from .vlan_policy import get_vlan_for_device_type
+
 from .device_classifier import classify_device
 
+
+def is_valid_ip_address(ip_address: str | None) -> bool:
+    if not ip_address:
+        return False
+
+    try:
+        ipaddress.ip_address(ip_address)
+        return True
+    except ValueError:
+        return False
 
 DISCOVERY_INTERFACE = "wlan0"
 
@@ -110,6 +122,27 @@ def discover_devices(network: str):
     The Linux neighbour table acts as a fallback for devices
     that Nmap misses during a subnet-wide scan.
     """
+    if not isinstance(network, str) or "/" not in network:
+        raise ValueError(
+            "A network range in CIDR notation is required."
+        )
+
+    try:
+        parsed_network = ipaddress.ip_network(
+            network,
+            strict=False,
+        )
+    except ValueError as exc:
+        raise ValueError(
+            "A valid IPv4 or IPv6 network range is required."
+        ) from exc
+
+    if parsed_network.version != 4:
+        raise ValueError(
+            "Only IPv4 network ranges are supported for discovery."
+        )
+
+    network = str(parsed_network)
 
     local_ip = get_local_ip()
     local_mac = get_local_mac()
@@ -130,6 +163,7 @@ def discover_devices(network: str):
         capture_output=True,
         text=True,
         check=True,
+        timeout=60,
     )
 
     root = ET.fromstring(result.stdout)
@@ -273,7 +307,15 @@ def save_discovered_devices(
             continue
 
         mac_address = mac_address.upper()
+        ip_address = discovered.get("ip_address")
 
+        if ip_address and not is_valid_ip_address(ip_address):
+            print(
+                f"[DISCOVERY] Ignoring invalid IP address: "
+                f"{ip_address} "
+                f"({mac_address})"
+            )
+            continue
         existing_device = db.scalar(
             select(Device).where(
                 Device.mac_address == mac_address
@@ -412,6 +454,12 @@ def save_discovered_devices(
                 detected_type != "unknown"
                 and existing_type == detected_type
             ):
+                existing_device.vlan_id = (
+                    get_vlan_for_device_type(
+                        detected_type
+                    )
+                )
+
                 if (
                     existing_device.classification_status
                     != "review_required"
@@ -421,9 +469,7 @@ def save_discovered_devices(
                     )
 
             existing_device.status = "online"
-
             saved_devices.append(existing_device)
-
         # -----------------------------------------------------
         # New device
         # -----------------------------------------------------

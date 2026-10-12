@@ -8,12 +8,22 @@ from .config import settings
 from .database import Base, engine, SessionLocal
 from .models.device import Device
 from .models.event import Event
+from .models.access_schedule import AccessSchedule
+from .models.endpoint_update import EndpointUpdate
 
 from .api.devices import router as devices_router
 from .api.events import router as events_router
 from .api.discovery import router as discovery_router
+from .api.reports import router as reports_router
+from .api.access_schedules import router as access_schedules_router
+from .api.endpoint_updates import router as endpoint_updates_router
+from .api.cisco import router as cisco_router
+from .api.sophos import router as sophos_router
+from .api.simulation import router as simulation_router
 
 from .services.websocket_manager import manager
+from .services.schedule_enforcement import schedule_enforcement_loop
+from .services.endpoint_health_monitor import endpoint_health_monitor_loop
 
 
 # ---------------------------------------------------------
@@ -41,11 +51,10 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "http://localhost:5174",
-    "http://127.0.0.1:5174",
-],    
+        origin.strip()
+        for origin in settings.cors_origins.split(",")
+        if origin.strip()
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -59,6 +68,12 @@ app.add_middleware(
 app.include_router(devices_router)
 app.include_router(events_router)
 app.include_router(discovery_router)
+app.include_router(reports_router)
+app.include_router(access_schedules_router)
+app.include_router(endpoint_updates_router)
+app.include_router(cisco_router)
+app.include_router(sophos_router)
+app.include_router(simulation_router)
 
 
 # ---------------------------------------------------------
@@ -142,10 +157,19 @@ async def event_broadcaster():
 # START EVENT BROADCASTER
 # ---------------------------------------------------------
 
+
 @app.on_event("startup")
 async def startup_event_broadcaster():
     asyncio.create_task(
         event_broadcaster()
+    )
+
+    asyncio.create_task(
+        schedule_enforcement_loop()
+    )
+
+    asyncio.create_task(
+        endpoint_health_monitor_loop()
     )
 
 

@@ -157,8 +157,6 @@ def automate_vlan_assignment(
             device.id,
         )
 
-        db.commit()
-        db.refresh(device)
 
         return {
             "device_id": device.id,
@@ -238,8 +236,6 @@ def automate_vlan_assignment(
     # 7. Commit database changes
     # =========================================================
 
-    db.commit()
-    db.refresh(device)
 
     # =========================================================
     # 8. Return complete automation result

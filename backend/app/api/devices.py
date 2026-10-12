@@ -33,16 +33,9 @@ def add_access_information(device: Device):
     """
     Calculate the logical access decision shown by the API.
 
-    IMPORTANT:
     Approval and Internet access are separate concepts.
-
-    approved + quarantined = approved but Internet blocked
-    approved + allowed     = approved and Internet allowed
-    rejected               = quarantined
-    pending                = quarantined
     """
 
-    # Use the actual enforcement state when available.
     if device.approval_status in {"pending", "rejected"}:
         device.access_decision = "quarantine"
 
@@ -52,13 +45,34 @@ def add_access_information(device: Device):
     else:
         device.access_decision = "quarantine"
 
-    device.access_reason = get_access_reason(
+    # Explain the actual access state, not just approval eligibility.
+    reason = get_access_reason(
         device.device_type,
         device.approval_status,
     )
 
-    return device
+    if device.approval_status in {"pending", "rejected"}:
+        device.access_reason = reason
 
+    elif reason == "Unknown or unrecognized device type":
+        device.access_reason = reason
+
+    elif not device.internet_access_authorized:
+        device.access_reason = (
+            "Internet access has not been explicitly authorized"
+        )
+
+    elif device.enforcement_status != "allowed":
+        device.access_reason = (
+            "Internet access is currently quarantined by policy or schedule"
+        )
+
+    else:
+        device.access_reason = (
+            "Approved recognized device with internet access allowed"
+        )
+
+    return device
 
 # ------------------------------------------------------------
 # GET ALL DEVICES
@@ -202,6 +216,15 @@ def approve_device(
         device.id,
     )
 
+    # --------------------------------------------------------
+    # AUTOMATE VLAN ASSIGNMENT
+    # --------------------------------------------------------
+    # VLAN automation is simulation-only for now.
+    # Approval does NOT grant Internet access.
+    vlan_result = automate_vlan_assignment(
+        device,
+        db,
+    )
     db.commit()
     db.refresh(device)
 
@@ -297,8 +320,7 @@ def allow_device(
     # EXPLICIT INTERNET ACCESS GRANT
     # --------------------------------------------------------
 
-    device.enforcement_status = "allowed"
-
+    device.internet_access_authorized = True
     result = enforce_device_access(
         device,
         db,
@@ -360,7 +382,7 @@ def disallow_device(
     # REMOVE INTERNET ACCESS WITHOUT REJECTING DEVICE
     # --------------------------------------------------------
 
-    device.enforcement_status = "quarantined"
+    device.internet_access_authorized = False
 
     result = enforce_device_access(
         device,

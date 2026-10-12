@@ -1,15 +1,18 @@
+from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..models.device import Device
 from ..models.event import Event
 from .access_policy import get_access_decision
+from .access_schedule import is_access_allowed
 from .event_service import create_event
 
 
 def enforce_device_access(
     device: Device,
     db: Session,
+    current_datetime: datetime | None = None,
 ) -> dict:
     """
     Calculate and record the current network enforcement state.
@@ -36,13 +39,33 @@ def enforce_device_access(
     )
 
     # ---------------------------------------------------------
-    # Determine access from approval + device classification.
+    # Determine access from approval, authorization,
+    # device classification, and access schedule.
     # ---------------------------------------------------------
 
-    decision = get_access_decision(
-        device.device_type,
-        device.approval_status,
-    )
+    if device.approval_status in {"pending", "rejected"}:
+        decision = "quarantine"
+
+    elif not device.internet_access_authorized:
+        # Approval does NOT automatically grant Internet access.
+        # The administrator must explicitly authorize access.
+        decision = "quarantine"
+
+    else:
+        decision = get_access_decision(
+            device.device_type,
+            device.approval_status,
+        )
+
+        if decision == "allowed":
+            schedule_allows_access = is_access_allowed(
+                db,
+                device.id,
+                current_datetime=current_datetime,
+            )
+
+            if not schedule_allows_access:
+                decision = "quarantine"
 
     # ---------------------------------------------------------
     # Determine the simulated enforcement action.

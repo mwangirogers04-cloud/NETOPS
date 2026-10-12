@@ -1,7 +1,10 @@
 import React, { useEffect, useState } from "react";
 
-const API_URL = "http://127.0.0.1:8000";
-const WS_URL = "ws://127.0.0.1:8000/ws/events";
+const API_URL =
+  import.meta.env.VITE_API_URL || "/api";
+const WS_URL =
+  import.meta.env.VITE_WS_URL ||
+  `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/ws/events`;
 
 function App() {
   const [activePage, setActivePage] = useState("dashboard");
@@ -14,13 +17,41 @@ function App() {
   const [highlightedDeviceId, setHighlightedDeviceId] =
     useState(null);
   const [automationResult, setAutomationResult] = useState(null);
-
+  const [accessSchedules, setAccessSchedules] = useState({});
+  const [scheduleLoading, setScheduleLoading] = useState(null);
+  const [scheduleForm, setScheduleForm] = useState({
+    schedule_id: null,
+    device_id: null,
+    start_time: "08:00",
+    end_time: "17:00",
+    days: "daily",
+    enabled: true,
+  });
   const [deviceFilter, setDeviceFilter] = useState("all");
   const [vlanFilter, setVlanFilter] = useState("all");
+  const [eventTypeFilter, setEventTypeFilter] = useState("all");
+  const [eventLimit, setEventLimit] = useState(50);
+  const [eventOffset, setEventOffset] = useState(0);
+
+
 
   // ------------------------------------------------------------
   // LOAD DEVICES
   // ------------------------------------------------------------
+  
+  const totalDevices = devices.length;
+  const onlineDevices = devices.filter((device) => device.status === "online").length;
+  const pendingDevices = devices.filter(
+    (device) => device.approval_status === "pending"
+  ).length;
+
+const rejectedDevices = devices.filter(
+  (device) => device.approval_status === "rejected"
+).length;  
+
+const quarantinedDevices = devices.filter(
+    (device) => device.enforcement_status === "quarantined"
+  ).length;
 
   const loadDevices = async () => {
     try {
@@ -44,22 +75,197 @@ function App() {
   // LOAD EVENTS
   // ------------------------------------------------------------
 
-  const loadEvents = async () => {
+const loadEvents = async () => {
+  try {
+    const params = new URLSearchParams();
+
+    params.set("limit", String(eventLimit));
+    params.set("offset", String(eventOffset));
+
+    if (eventTypeFilter !== "all") {
+      params.set("event_type", eventTypeFilter);
+    }
+
+    const response = await fetch(
+      `${API_URL}/events/?${params.toString()}`
+    );
+
+    if (!response.ok) {
+      throw new Error("Failed to load events");
+    }
+
+    const data = await response.json();
+
+    setEvents(Array.isArray(data) ? data : []);
+  } catch (error) {
+    console.error("Event loading error:", error);
+  }
+};
+
+
+
+  // ------------------------------------------------------------
+  // CREATE ACCESS SCHEDULE
+  // ------------------------------------------------------------
+
+    const createAccessSchedule = async () => {
+    if (!scheduleForm.device_id) {
+      return;
+    }
+
+    setScheduleLoading(scheduleForm.device_id);
+
     try {
-      const response = await fetch(`${API_URL}/events/`);
+      const isEditing = Boolean(scheduleForm.schedule_id);
+
+      const response = await fetch(
+        isEditing
+          ? `${API_URL}/access-schedules/${scheduleForm.schedule_id}`
+          : `${API_URL}/access-schedules/`,
+        {
+          method: isEditing ? "PUT" : "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            device_id: scheduleForm.device_id,
+            start_time: scheduleForm.start_time,
+            end_time: scheduleForm.end_time,
+            days: scheduleForm.days,
+            enabled: scheduleForm.enabled,
+          }),
+        }
+      );
 
       if (!response.ok) {
-        throw new Error("Failed to load events");
+        throw new Error(
+          isEditing
+            ? "Failed to update access schedule"
+            : "Failed to create access schedule"
+        );
+      }
+
+      await loadAccessSchedules();
+
+      setScheduleForm({
+        schedule_id: null,
+        device_id: null,
+        start_time: "08:00",
+        end_time: "17:00",
+        days: "daily",
+        enabled: true,
+      });
+    } catch (error) {
+      console.error(
+        "Access schedule save error:",
+        error
+      );
+    } finally {
+      setScheduleLoading(null);
+    }
+  };
+  // ------------------------------------------------------------
+  // RESET ACCESS SCHEDULE
+  // ------------------------------------------------------------
+
+  const resetAccessSchedule = async (deviceId) => {
+    const schedules = accessSchedules[deviceId] || [];
+
+    if (schedules.length === 0) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Reset the access schedule for device #${deviceId}?`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setScheduleLoading(deviceId);
+
+    try {
+      for (const schedule of schedules) {
+        const response = await fetch(
+          `${API_URL}/access-schedules/${schedule.id}`,
+          {
+            method: "DELETE",
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error(
+            `Failed to delete schedule ${schedule.id}`
+          );
+        }
+      }
+
+      await loadAccessSchedules();
+      await deviceAction(deviceId, "enforce");
+      setScheduleForm((current) => {
+        if (current.device_id === deviceId) {
+          return {
+            schedule_id: null,
+            device_id: null,
+            start_time: "08:00",
+            end_time: "17:00",
+            days: "daily",
+            enabled: true,
+          };
+        }
+
+        return current;
+      });
+    } catch (error) {
+      console.error(
+        "Access schedule reset error:",
+        error
+      );
+    } finally {
+      setScheduleLoading(null);
+    }
+  };
+  // ------------------------------------------------------------
+  // LOAD ACCESS SCHEDULES
+  // ------------------------------------------------------------
+
+  const loadAccessSchedules = async () => {
+    try {
+      const response = await fetch(
+        `${API_URL}/access-schedules/`
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          "Failed to load access schedules"
+        );
       }
 
       const data = await response.json();
 
-      setEvents(Array.isArray(data) ? data : []);
+      const groupedSchedules = {};
+
+      if (Array.isArray(data)) {
+        data.forEach((schedule) => {
+          if (!groupedSchedules[schedule.device_id]) {
+            groupedSchedules[schedule.device_id] = [];
+          }
+
+          groupedSchedules[schedule.device_id].push(
+            schedule
+          );
+        });
+      }
+
+      setAccessSchedules(groupedSchedules);
     } catch (error) {
-      console.error("Event loading error:", error);
+      console.error(
+        "Access schedule loading error:",
+        error
+      );
     }
   };
-
   // ------------------------------------------------------------
   // INITIAL LOAD + AUTO REFRESH
   // ------------------------------------------------------------
@@ -67,14 +273,12 @@ function App() {
   useEffect(() => {
     loadDevices();
     loadEvents();
-
-    const timer = setInterval(() => {
-      loadDevices();
-      loadEvents();
-    }, 10000);
-
-    return () => clearInterval(timer);
+    loadAccessSchedules();
   }, []);
+
+  useEffect(() => {
+    loadEvents();
+  }, [eventTypeFilter, eventLimit, eventOffset]);
 
   // ------------------------------------------------------------
   // WEBSOCKET
@@ -356,7 +560,6 @@ const DevicesPage = () => {
 
   return (
     <div className="page">
-
       <div className="page-header">
         <div>
           <div className="page-title">
@@ -371,13 +574,12 @@ const DevicesPage = () => {
 
         <button
           className="secondary-button"
+          type="button"
           onClick={loadDevices}
         >
           Refresh Devices
         </button>
       </div>
-
-      {/* NEW DEVICE NOTIFICATION */}
 
       {pendingDevices > 0 && (
         <div className="panel">
@@ -395,21 +597,116 @@ const DevicesPage = () => {
           </div>
         </div>
       )}
+      {devices.filter(
+        (device) => device.approval_status === "rejected"
+      ).length > 0 && (
+        <div className="panel">
+          <div className="panel-header">
+            <div>
+              <div className="panel-title">
+                🚫 Rejected Devices
+              </div>
 
-      {/* DEVICE TABLE */}
+              <div className="panel-subtitle">
+                Devices rejected by the administrator and
+                available for later review.
+              </div>
+            </div>
+
+            <div className="settings-status">
+              <span className="status-dot offline" />
+              {
+                devices.filter(
+                  (device) =>
+                    device.approval_status === "rejected"
+                ).length
+              } Rejected
+            </div>
+          </div>
+        
+
+          <div className="table-container">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>DEVICE</th>
+                  <th>TYPE</th>
+                  <th>VLAN</th>
+                  <th>INTERNET</th>
+                  <th>ACTION</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {devices
+                  .filter(
+                    (device) =>
+                      device.approval_status === "rejected"
+                  )
+                  .map((device) => (
+                    <tr key={device.id}>
+                      <td>
+                        <strong>
+                          {device.hostname ||
+                            device.ip_address ||
+                            device.mac_address}
+                        </strong>
+                      </td>
+
+                      <td>
+                        {getDeviceIcon(device.device_type)}{" "}
+                        {device.device_type || "Unknown"}
+                      </td>
+
+                      <td>
+                        VLAN {device.vlan_id || "—"}
+                      </td>
+
+                      <td>
+                        <span className="status-badge rejected">
+                          Blocked
+                        </span>
+                      </td>
+
+                      <td>
+                        <button
+                          className="approve-button"
+                          type="button"
+                          onClick={() =>
+                            deviceAction(
+                              device.id,
+                              "approve"
+                            )
+                          }
+                          disabled={
+                            actionLoading ===
+                            `approve-${device.id}`
+                          }
+                        >
+                          {actionLoading ===
+                          `approve-${device.id}`
+                            ? "Approving..."
+                            : "Approve"}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       <div className="panel">
-
         <div className="panel-header">
-
           <div>
             <div className="panel-title">
               LAN Device Inventory
             </div>
 
             <div className="panel-subtitle">
-              Select a device classification to assign
-              its VLAN.
+              Manage classification, approval and Internet
+              access for devices detected on the LAN.
             </div>
           </div>
 
@@ -417,13 +714,140 @@ const DevicesPage = () => {
             <span className="status-dot online" />
             {totalDevices} Devices
           </div>
-
         </div>
+        
+        {scheduleForm.device_id && (
+          <div
+            className="panel"
+            style={{
+              margin: "16px 0",
+              padding: "16px",
+            }}
+          >
+            <div className="panel-header">
+              <div>
+                <div className="panel-title">
+                  Access Schedule
+                </div>
 
+                <div className="panel-subtitle">
+                  Configure Internet access hours for device #
+                  {scheduleForm.device_id}
+                </div>
+              </div>
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                gap: "12px",
+                flexWrap: "wrap",
+                alignItems: "end",
+              }}
+            >
+              <div>
+                <label>Start Time</label>
+                <input
+                  type="time"
+                  value={scheduleForm.start_time}
+                  onChange={(e) =>
+                    setScheduleForm({
+                      ...scheduleForm,
+                      start_time: e.target.value,
+                    })
+                  }
+                />
+              </div>
+
+              <div>
+                <label>End Time</label>
+                <input
+                  type="time"
+                  value={scheduleForm.end_time}
+                  onChange={(e) =>
+                    setScheduleForm({
+                      ...scheduleForm,
+                      end_time: e.target.value,
+                    })
+                  }
+                />
+              </div>
+
+              <div>
+                <label>Days</label>
+                <select
+                  value={scheduleForm.days}
+                  onChange={(e) =>
+                    setScheduleForm({
+                      ...scheduleForm,
+                      days: e.target.value,
+                    })
+                  }
+                >
+                  <option value="daily">Daily</option>
+                  <option value="monday">Monday</option>
+                  <option value="tuesday">Tuesday</option>
+                  <option value="wednesday">Wednesday</option>
+                  <option value="thursday">Thursday</option>
+                  <option value="friday">Friday</option>
+                  <option value="saturday">Saturday</option>
+                  <option value="sunday">Sunday</option>
+                </select>
+              </div>
+
+              <label
+                style={{
+                  display: "flex",
+                  gap: "6px",
+                  alignItems: "center",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={scheduleForm.enabled}
+                  onChange={(e) =>
+                    setScheduleForm({
+                      ...scheduleForm,
+                      enabled: e.target.checked,
+                    })
+                  }
+                />
+                Enabled
+              </label>
+
+              <button
+                type="button"
+                className="primary-button small"
+                onClick={createAccessSchedule}
+                disabled={
+                  scheduleLoading === scheduleForm.device_id
+                }
+              >
+                {scheduleLoading === scheduleForm.device_id
+                  ? "Saving..."
+                  : "Save Schedule"}
+              </button>
+
+              <button
+                type="button"
+                className="secondary-button small"
+                onClick={() =>
+                  setScheduleForm({
+                    device_id: null,
+                    start_time: "08:00",
+                    end_time: "17:00",
+                    days: "daily",
+                    enabled: true,
+                  })
+                }
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
         <div className="table-container">
-
           <table className="data-table">
-
             <thead>
               <tr>
                 <th>DEVICE</th>
@@ -431,12 +855,12 @@ const DevicesPage = () => {
                 <th>VLAN</th>
                 <th>APPROVAL</th>
                 <th>INTERNET</th>
+                <th>SCHEDULE</th>
                 <th>ACTIONS</th>
               </tr>
             </thead>
 
             <tbody>
-
               {devices.length === 0 ? (
                 <tr>
                   <td colSpan="6">
@@ -446,17 +870,30 @@ const DevicesPage = () => {
                   </td>
                 </tr>
               ) : (
+                devices
+  .filter((device) => {
+    if (deviceFilter === "all") return true;
 
-                devices.map((device) => (
+    if (deviceFilter === "online") {
+      return device.status === "online";
+    }
 
+    if (deviceFilter === "pending") {
+      return device.approval_status === "pending";
+    }
+
+if (deviceFilter === "rejected") {
+  return device.approval_status === "rejected";
+}    
+if (deviceFilter === "quarantined") {
+  return device.enforcement_status === "quarantined";
+}
+    return true;
+  })
+  .map((device) => (
                   <tr key={device.id}>
-
-                    {/* DEVICE */}
-
                     <td>
-
                       <div className="device-primary">
-
                         <span
                           style={{
                             marginRight: "8px",
@@ -470,7 +907,6 @@ const DevicesPage = () => {
 
                         {device.hostname ||
                           "Unknown Device"}
-
                       </div>
 
                       <div className="device-secondary">
@@ -480,17 +916,17 @@ const DevicesPage = () => {
                       <div className="device-secondary">
                         {device.mac_address || "-"}
                       </div>
-
                     </td>
 
-                    {/* TYPE */}
-
                     <td>
-
                       <select
                         value={
                           device.device_type ||
                           "unknown"
+                        }
+                        disabled={
+                          actionLoading ===
+                          `type-${device.id}`
                         }
                         onChange={(event) =>
                           deviceAction(
@@ -499,12 +935,7 @@ const DevicesPage = () => {
                             event.target.value
                           )
                         }
-                        disabled={
-                          actionLoading ===
-                          `type-${device.id}`
-                        }
                       >
-
                         <option value="unknown">
                           ⚠️ Unknown
                         </option>
@@ -520,78 +951,105 @@ const DevicesPage = () => {
                         <option value="printer">
                           🖨️ Printer
                         </option>
-
                       </select>
-
                     </td>
 
-                    {/* VLAN */}
-
                     <td>
-
                       <span className="vlan-badge">
-
-                        VLAN{" "}
-
-                        {device.vlan_id || 90}
-
+                        VLAN {device.vlan_id || 90}
                       </span>
-
                     </td>
 
-                    {/* APPROVAL */}
-
                     <td>
-
                       {device.approval_status ===
                       "approved" ? (
-
                         <span className="status-badge allowed">
                           Approved
                         </span>
-
                       ) : device.approval_status ===
                         "rejected" ? (
-
                         <span className="status-badge blocked">
                           Rejected
                         </span>
-
                       ) : (
-
                         <span className="status-badge pending">
                           Pending
                         </span>
-
                       )}
-
+                    </td>
+                    <td>
+                      {device.internet_access_authorized ? (
+                        <span className="status-badge allowed">
+                          Authorized
+                        </span>
+                      ) : (
+                        <span className="status-badge blocked">
+                          Not Authorized
+                        </span>
+                      )}
                     </td>
 
-                    {/* INTERNET */}
-
                     <td>
-
                       {device.enforcement_status ===
                       "allowed" ? (
-
                         <span className="status-badge allowed">
                           Allowed
                         </span>
-
                       ) : (
-
                         <span className="status-badge blocked">
                           Quarantined
                         </span>
-
                       )}
-
                     </td>
-
-                    {/* ACTIONS */}
-
                     <td>
-
+                      {accessSchedules[device.id] &&
+                      accessSchedules[device.id].length > 0 ? (
+                        <div>
+                          {accessSchedules[device.id].map(
+                            (schedule) => (
+                              <div
+                                key={schedule.id}
+                                style={{
+                                  marginBottom: "4px",
+                                }}
+                              >
+                                <span className="status-badge allowed">
+                                  {schedule.start_time.slice(0, 5)}
+                                  {" - "}
+                                  {schedule.end_time.slice(0, 5)}
+                                </span>
+                                <div className="device-secondary">
+                                  {schedule.days}
+                                </div>
+                              </div>
+                            )
+                          )}
+                        </div>
+                      ) : (
+                        <span className="status-badge blocked">
+                          No Schedule
+                        </span>
+                      )}
+                      {accessSchedules[device.id] &&
+                        accessSchedules[device.id].length > 0 && (
+                          <button
+                            type="button"
+                            className="secondary-button small"
+                            style={{ marginTop: "6px" }}
+                            onClick={() =>
+                              resetAccessSchedule(device.id)
+                            }
+                            disabled={
+                              scheduleLoading === device.id
+                            }
+                          >
+                            {scheduleLoading === device.id
+                              ? "Resetting..."
+                              : "Reset Schedule"}
+                          </button>
+                        )}
+                    </td>
+                    <td>
                       <div
                         style={{
                           display: "flex",
@@ -599,13 +1057,37 @@ const DevicesPage = () => {
                           flexWrap: "wrap",
                         }}
                       >
+                        <button
+                          type="button"
+                          className="secondary-button small"
+onClick={() => {
+  const existingSchedule =
+    accessSchedules[device.id]?.[0];
 
-                        {/* APPROVE */}
-
+  setScheduleForm({
+    schedule_id: existingSchedule?.id || null,
+    device_id: device.id,
+    start_time:
+      existingSchedule?.start_time?.slice(0, 5) ||
+      "08:00",
+    end_time:
+      existingSchedule?.end_time?.slice(0, 5) ||
+      "17:00",
+    days:
+      existingSchedule?.days ||
+      "daily",
+    enabled:
+      existingSchedule?.enabled ??
+      true,
+  });
+}}
+                        >
+                          Set Schedule
+                        </button>
                         {device.approval_status !==
                           "approved" && (
-
                           <button
+                            type="button"
                             className="primary-button small"
                             disabled={
                               actionLoading ===
@@ -623,15 +1105,12 @@ const DevicesPage = () => {
                               ? "..."
                               : "Approve"}
                           </button>
-
                         )}
-
-                        {/* REJECT */}
 
                         {device.approval_status !==
                           "rejected" && (
-
                           <button
+                            type="button"
                             className="secondary-button small"
                             disabled={
                               actionLoading ===
@@ -649,15 +1128,14 @@ const DevicesPage = () => {
                               ? "..."
                               : "Reject"}
                           </button>
-
                         )}
 
-                        {/* ALLOW INTERNET */}
-
                         {device.approval_status ===
-                          "approved" && (
-
+                          "approved" &&
+                          device.enforcement_status !==
+                            "allowed" && (
                           <button
+                            type="button"
                             className="primary-button small"
                             disabled={
                               actionLoading ===
@@ -675,15 +1153,14 @@ const DevicesPage = () => {
                               ? "..."
                               : "Allow Internet"}
                           </button>
-
                         )}
 
-                        {/* DISALLOW INTERNET */}
-
                         {device.approval_status ===
-                          "approved" && (
-
+                          "approved" &&
+                          device.enforcement_status ===
+                            "allowed" && (
                           <button
+                            type="button"
                             className="secondary-button small"
                             disabled={
                               actionLoading ===
@@ -701,38 +1178,30 @@ const DevicesPage = () => {
                               ? "..."
                               : "Disconnect"}
                           </button>
-
                         )}
-
                       </div>
-
                     </td>
-
                   </tr>
-
                 ))
-
               )}
-
             </tbody>
-
           </table>
-
         </div>
-
       </div>
-
     </div>
   );
 };
-
 
 // ------------------------------------------------------------
 // ACCESS CONTROL PAGE
 // ------------------------------------------------------------
 
 const AccessPage = () => {
+  const totalDevices = devices.length;
 
+  const pendingDevices = devices.filter(
+    (device) => device.approval_status === "pending"
+  ).length;
   const allowed = devices.filter(
     (device) =>
       device.enforcement_status ===
@@ -775,7 +1244,15 @@ const AccessPage = () => {
 
       {/* SUMMARY */}
 
-      <div className="report-grid">
+<div className="report-section">
+  <div className="panel-title">
+    Device Overview
+  </div>
+  <div className="panel-subtitle">
+    Current LAN device status and access state.
+  </div>
+</div>      
+<div className="report-grid">
 
         <ReportCard
           title="Allowed"
@@ -837,6 +1314,7 @@ const AccessPage = () => {
                 <th>TYPE</th>
                 <th>VLAN</th>
                 <th>APPROVAL</th>
+                <th>AUTHORIZATION</th>
                 <th>ACCESS</th>
                 <th>ACTION</th>
               </tr>
@@ -850,7 +1328,7 @@ const AccessPage = () => {
 
                 <tr>
 
-                  <td colSpan="6">
+                  <td colSpan="8">
 
                     <div className="empty-state">
                       No devices found.
@@ -1367,6 +1845,70 @@ const AccessPage = () => {
         </button>
       </div>
 
+
+<div className="panel">
+  <div className="page-description">
+    Filter events and choose how many to display per page.
+  </div>
+
+  <div className="form-grid">
+    <label>
+      Event type
+      <select
+        value={eventTypeFilter}
+        onChange={(event) => {
+          setEventTypeFilter(event.target.value);
+          setEventOffset(0);
+        }}
+      >
+        <option value="all">All event types</option>
+        <option value="endpoint_stale">Endpoint stale</option>
+        <option value="endpoint_recovered">Endpoint recovered</option>
+        <option value="device_detected">Device detected</option>
+        <option value="unrecognized_endpoint">Unrecognized endpoint</option>
+        <option value="access_enforcement">Access enforcement</option>
+        <option value="vlan_automation">VLAN automation</option>
+      </select>
+    </label>
+
+    <label>
+      Events per page
+      <select
+        value={eventLimit}
+        onChange={(event) => {
+          setEventLimit(Number(event.target.value));
+          setEventOffset(0);
+        }}
+      >
+        <option value={10}>10</option>
+        <option value={25}>25</option>
+        <option value={50}>50</option>
+        <option value={100}>100</option>
+        <option value={200}>200</option>
+      </select>
+    </label>
+  </div>
+
+  <div className="button-row">
+    <button
+      className="secondary-button"
+      disabled={eventOffset === 0}
+      onClick={() => setEventOffset(Math.max(0, eventOffset - eventLimit))}
+    >
+      Previous
+    </button>
+
+    <button
+      className="secondary-button"
+      onClick={() => setEventOffset(eventOffset + eventLimit)}
+      disabled={events.length < eventLimit}
+    >
+      Next
+    </button>
+  </div>
+</div>
+
+
       <div className="panel">
         {events.length === 0 ? (
           <div className="empty-state">
@@ -1395,8 +1937,138 @@ const AccessPage = () => {
   // REPORTS
   // ------------------------------------------------------------
 
-  const ReportsPage = () => (
-    <div className="page">
+  const ReportsPage = () => {
+  const [reportType, setReportType] = useState("network_activity");
+  const [reportPeriod, setReportPeriod] = useState("daily");
+  const [reportDate, setReportDate] = useState(
+    new Date().toISOString().slice(0, 10)
+  );
+  const [reportStartDate, setReportStartDate] = useState(
+  new Date().toISOString().slice(0, 10)
+  );
+  const [reportEndDate, setReportEndDate] = useState(
+  new Date().toISOString().slice(0, 10)
+  );
+  const [reportStartTime, setReportStartTime] = useState("00:00");
+  const [reportEndTime, setReportEndTime] = useState("23:59");
+  const [reportData, setReportData] = useState(null);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportError, setReportError] = useState("");
+
+  const computerDevices = devices.filter(
+    (device) => device.device_type === "computer"
+  ).length;
+
+  const cctvDevices = devices.filter(
+    (device) => device.device_type === "cctv"
+  ).length;
+
+  const printerDevices = devices.filter(
+    (device) => device.device_type === "printer"
+  ).length;
+
+  const unknownDevices = devices.filter(
+    (device) =>
+      !["computer", "cctv", "printer"].includes(
+        device.device_type
+      )
+  ).length;
+
+ const rejectedDevices = devices.filter(
+    (device) => device.approval_status === "rejected"
+  ).length;
+const vlan20Devices = devices.filter(
+    (device) => Number(device.vlan_id) === 20
+  ).length;
+
+  const vlan30Devices = devices.filter(
+    (device) => Number(device.vlan_id) === 30
+  ).length;
+
+  const vlan40Devices = devices.filter(
+    (device) => Number(device.vlan_id) === 40
+  ).length;
+
+  const vlan90Devices = devices.filter(
+    (device) => Number(device.vlan_id) === 90
+  ).length;
+const enforcedAllowed = devices.filter(
+    (device) =>
+      device.enforcement_status === "allowed" ||
+      device.access_decision === "allow"
+  ).length;
+
+  const enforcedQuarantined = devices.filter(
+    (device) =>
+      device.enforcement_status === "quarantined" ||
+      device.access_decision === "quarantine"
+  ).length;
+
+ const generateReport = async () => {
+    setReportLoading(true);
+    setReportError("");
+    setReportData(null);
+    const today = new Date().toISOString().slice(0, 10);
+if (reportPeriod === "custom") {
+      if (
+        reportStartDate > today ||
+        reportEndDate > today ||
+        reportEndDate < reportStartDate
+      ) {
+        setReportError(
+          "Date input invalid, please select a valid date."
+        );
+        setReportLoading(false);
+        return;
+      }
+    } else {
+      if (reportDate > today) {
+        setReportError(
+          "Date input invalid, please select a valid date."
+        );
+        setReportLoading(false);
+        return;
+      }
+    }
+
+
+    try {
+      const params = new URLSearchParams({
+    report_type: reportType,
+    period: reportPeriod,
+  });
+
+if (reportPeriod === "custom") {
+  params.append(
+    "start_datetime",
+    `${reportStartDate}T${reportStartTime}`
+  );
+  params.append(
+    "end_datetime",
+    `${reportEndDate}T${reportEndTime}`
+  );
+} else {
+  params.append("date", reportDate);
+}
+      const response = await fetch(
+        `${API_URL}/reports/generate?${params.toString()}`
+      );
+
+      if (!response.ok) {
+        throw new Error("Failed to generate report.");
+      }
+
+      const data = await response.json();
+      setReportData(data);
+    } catch (error) {
+      setReportError(error.message || "Failed to generate report.");
+    } finally {
+      setReportLoading(false);
+    }
+  };
+
+return (
+  <div className="page">
       <div className="page-header">
         <div>
           <div className="page-title">
@@ -1415,24 +2087,146 @@ const AccessPage = () => {
           title="Device Inventory"
           value={totalDevices}
           description="Current LAN device inventory."
+ onClick={() => {
+    setDeviceFilter("all");
+    setActivePage("devices");
+  }}
         />
 
         <ReportCard
           title="Online Devices"
           value={onlineDevices}
           description="Devices currently detected online."
+         
+           onClick={() => {
+    setDeviceFilter("online");
+    setActivePage("devices");
+  }}
         />
 
         <ReportCard
           title="Pending Approvals"
           value={pendingDevices}
           description="Devices awaiting administrator action."
+ onClick={() => {
+    setDeviceFilter("pending");
+    setActivePage("devices");
+  }}
         />
 
-        <ReportCard
+<ReportCard
+  title="Rejected Devices"
+  value={rejectedDevices}
+  description="Devices rejected by the administrator."
+  onClick={() => {
+    setDeviceFilter("rejected");
+    setActivePage("devices");
+  }}
+/>        
+<ReportCard
           title="Quarantine"
           value={quarantinedDevices}
           description="Devices blocked from network access."
+  onClick={() => {
+    setDeviceFilter("quarantined");
+    setActivePage("devices");
+  }}
+        />
+       
+<div className="report-section">
+  <div className="panel-title">
+    Device Classification
+  </div>
+  <div className="panel-subtitle">
+    Devices grouped by detected type.
+  </div>
+</div>         
+<ReportCard
+          title="Computers"
+          value={computerDevices}
+          description="Detected computer devices."
+ onClick={() => {
+    setDeviceFilter("computer");
+    setActivePage("devices");
+  }}
+        />
+
+        <ReportCard
+          title="CCTV"
+          value={cctvDevices}
+          description="Detected CCTV devices."
+  onClick={() => {
+    setDeviceFilter("cctv");
+    setActivePage("devices");
+  }}
+        />
+
+        <ReportCard
+          title="Printers"
+          value={printerDevices}
+          description="Detected printer devices."
+ onClick={() => {
+    setDeviceFilter("printer");
+    setActivePage("devices");
+  }}
+        />
+
+        <ReportCard
+          title="Unknown"
+          value={unknownDevices}
+          description="Devices not yet classified."
+ onClick={() => {
+    setDeviceFilter("unknown");
+    setActivePage("devices");
+  }}
+        />
+<div className="report-section">
+  <div className="panel-title">
+    VLAN Distribution
+  </div>
+  <div className="panel-subtitle">
+    Devices assigned to each network segment.
+  </div>
+</div>
+
+<ReportCard
+          title="VLAN 20"
+          value={vlan20Devices}
+          description="Devices assigned to VLAN 20."
+ onClick={() => {
+    setDeviceFilter("vlan20");
+    setActivePage("devices");
+  }}
+        />
+
+        <ReportCard
+          title="VLAN 30"
+          value={vlan30Devices}
+          description="Devices assigned to VLAN 30."
+ onClick={() => {
+    setDeviceFilter("vlan30");
+    setActivePage("devices");
+  }}
+        />
+
+        <ReportCard
+          title="VLAN 40"
+          value={vlan40Devices}
+          description="Devices assigned to VLAN 40."
+ onClick={() => {
+    setDeviceFilter("vlan40");
+    setActivePage("devices");
+  }}
+        />
+
+        <ReportCard
+          title="VLAN 90"
+          value={vlan90Devices}
+          description="Devices assigned to VLAN 90."
+ onClick={() => {
+    setDeviceFilter("vlan90");
+    setActivePage("devices");
+  }}
         />
       </div>
 
@@ -1463,10 +2257,308 @@ const AccessPage = () => {
             type="unknown"
             value={enforcedQuarantined}
           />
+          </div>
         </div>
+
+      <div className="panel">
+        <div className="panel-header">
+          <div>
+            <div className="panel-title">
+              Historical Reports
+            </div>
+            <div className="panel-subtitle">
+              Generate reports from recorded NETOPS events.
+            </div>
+          </div>
+        </div>
+
+        <div className="settings-grid">
+          <div className="settings-row">
+            <label>Report Type</label>
+            <select
+              value={reportType}
+              onChange={(event) => setReportType(event.target.value)}
+            >
+              <option value="network_activity">
+                Network Activity
+              </option>
+              <option value="device_inventory">
+                Device Inventory
+              </option>
+              <option value="device_discovery">
+                Device Discovery
+              </option>
+              <option value="network_events">
+                Network Events
+              </option>
+              <option value="access_enforcement">
+                Access Enforcement
+              </option>
+              <option value="approvals">
+                Approvals
+              </option>
+              <option value="quarantine">
+                Quarantine
+              </option>
+              <option value="device_classification">
+                Device Classification
+              </option>
+              <option value="vlan_automation">
+                VLAN Automation
+              </option>
+              <option value="system_activity">
+                System Activity
+              </option>
+            </select>
+          </div>
+
+          <div className="settings-row">
+            <label>Period</label>
+            <select
+              value={reportPeriod}
+              onChange={(event) => setReportPeriod(event.target.value)}
+            >
+              <option value="hourly">Hourly</option>
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="monthly">Monthly</option>
+              <option value="annually">Annually</option>
+              <option value="custom">Custom Range</option>
+            </select>
+          </div>
+
+{reportPeriod === "custom" ? (
+  <>
+    <div className="settings-row">
+      <label>Starting</label>
+      <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+        <input
+          type="date"
+          value={reportStartDate}
+          onChange={(event) => setReportStartDate(event.target.value)}
+        />
+        <input
+          type="time"
+          value={reportStartTime}
+          onChange={(event) => setReportStartTime(event.target.value)}
+        />
+      </div>
+    </div>
+
+    <div className="settings-row">
+      <label>Ending</label>
+      <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+        <input
+          type="date"
+          value={reportEndDate}
+          onChange={(event) => setReportEndDate(event.target.value)}
+        />
+        <input
+          type="time"
+          value={reportEndTime}
+          onChange={(event) => setReportEndTime(event.target.value)}
+        />
+      </div>
+    </div>
+  </>
+) : (
+  <div className="settings-row">
+    <label>Date</label>
+    <input
+      type="date"
+      value={reportDate}
+      onChange={(event) => setReportDate(event.target.value)}
+    />
+  </div>
+)}
+        </div>
+
+        <div style={{ marginTop: "16px" }}>
+          <button
+            className="primary-button"
+            onClick={generateReport}
+            disabled={reportLoading}
+          >
+            {reportLoading ? "Generating..." : "Generate Report"}
+          </button>
+        </div>
+
+        {reportError && (
+          <div className="panel" style={{ marginTop: "16px" }}>
+            <div className="panel-title">
+              Report Error
+            </div>
+            <div className="panel-subtitle">
+              {reportError}
+            </div>
+          </div>
+        )}
+
+        {reportData && (
+          <div className="panel" style={{ marginTop: "16px" }}>
+            <div className="panel-title">
+              Report Results
+            </div>
+            <div className="panel-subtitle">
+              {reportData.report_type} · {reportData.period}
+            </div>
+
+             <div
+              style={{
+                display: "flex",
+                gap: "10px",
+                marginTop: "16px",
+                flexWrap: "wrap",
+              }}
+            >
+              <button
+                type="button"
+                className="primary-button"
+                onClick={() => {
+                  const today = new Date().toISOString().slice(0, 10);
+
+                  if (reportPeriod === "custom") {
+                    if (
+                      reportStartDate > today ||
+                      reportEndDate > today ||
+                      reportEndDate < reportStartDate
+                    ) {
+                      setReportError(
+                        "Date input invalid, please select a valid date."
+                      );
+                      return;
+                    }
+                  } else {
+                    if (reportDate > today) {
+                      setReportError(
+                        "Date input invalid, please select a valid date."
+                      );
+                      return;
+                    }
+                  }
+                  const params = new URLSearchParams({
+                    report_type: reportType,
+                    period: reportPeriod,
+                  });
+
+                  if (reportPeriod === "custom") {
+  params.append(
+    "start_datetime",
+    `${reportStartDate}T${reportStartTime}`
+  );
+  params.append(
+    "end_datetime",
+    `${reportEndDate}T${reportEndTime}`
+  );
+} else if (reportDate) {
+  params.append("date", reportDate);
+}
+
+                  window.open(
+                    `${API_URL}/reports/export/excel?${params.toString()}`,
+                    "_blank"
+                  );
+                }}
+              >
+                Download Excel
+              </button>
+
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => {
+                  const today = new Date().toISOString().slice(0, 10);
+
+                  if (reportPeriod === "custom") {
+                    if (
+                      reportStartDate > today ||
+                      reportEndDate > today ||
+                      reportEndDate < reportStartDate
+                    ) {
+                      setReportError(
+                        "Date input invalid, please select a valid date."
+                      );
+                      return;
+                    }
+                  } else {
+                    if (reportDate > today) {
+                      setReportError(
+                        "Date input invalid, please select a valid date."
+                      );
+                      return;
+                    }
+                  }
+                  const params = new URLSearchParams({
+                    report_type: reportType,
+                    period: reportPeriod,
+                  });
+
+                  if (reportPeriod === "custom") {
+                   params.append(
+    "start_datetime",
+    `${reportStartDate}T${reportStartTime}`
+  );
+  params.append(
+    "end_datetime",
+    `${reportEndDate}T${reportEndTime}`
+  );
+                  } else if (reportDate) {
+                    params.append("date", reportDate);
+                  }
+                  window.open(
+                    `${API_URL}/reports/export/pdf?${params.toString()}`,
+                    "_blank"
+                  );
+                }}
+              >
+                Download PDF
+              </button>
+            </div>
+            <div className="classification-list">
+              <div className="settings-row">
+                <span>Start</span>
+                <code>{reportData.start}</code>
+              </div>
+
+              <div className="settings-row">
+                <span>End</span>
+                <code>{reportData.end}</code>
+              </div>
+
+              <div className="settings-row">
+                <span>Total Events</span>
+                <strong>{reportData.summary?.total_events ?? 0}</strong>
+              </div>
+            </div>
+
+            {reportData.event_types &&
+              Object.keys(reportData.event_types).length > 0 && (
+                <div style={{ marginTop: "20px" }}>
+                  <div className="panel-title">
+                    Event Breakdown
+                  </div>
+
+                  <div className="classification-list">
+                  {Object.entries(reportData.summary?.event_types || {}).map( 
+                      ([eventType, count]) => (
+                        <div
+                          className="settings-row"
+                          key={eventType}
+                        >
+                          <span>{eventType}</span>
+                          <strong>{count}</strong>
+                        </div>
+                      )
+                    )}
+                  </div>
+                </div>
+              )}
+          </div>
+        )}
       </div>
     </div>
   );
+};
 
   // ------------------------------------------------------------
   // SETTINGS
@@ -1564,6 +2656,70 @@ const AccessPage = () => {
 // ------------------------------------------------------------
 
 const Dashboard = () => {
+
+  const [dashboardEndpointUpdates, setDashboardEndpointUpdates] =
+    useState([]);
+  const [dashboardUpdatesLoading, setDashboardUpdatesLoading] =
+    useState(true);
+  const [dashboardUpdatesError, setDashboardUpdatesError] =
+    useState("");
+  useEffect(() => {
+    const loadDashboardEndpointUpdates = async () => {
+      try {
+        const response = await fetch(
+          `${API_URL}/endpoint-updates/`
+        );
+
+        if (!response.ok) {
+          throw new Error("Failed to load endpoint updates");
+        }
+
+        const data = await response.json();
+
+        setDashboardEndpointUpdates(
+          Array.isArray(data) ? data : []
+        );
+      } catch (error) {
+        setDashboardUpdatesError(error.message);
+      } finally {
+        setDashboardUpdatesLoading(false);
+      }
+    };
+
+    loadDashboardEndpointUpdates();
+
+    const refreshInterval = setInterval(() => {
+      loadDashboardEndpointUpdates();
+    }, 60000);
+
+    return () => {
+      clearInterval(refreshInterval);
+    };
+  }, []);  
+
+  const freshDashboardUpdates = dashboardEndpointUpdates.filter(
+    (endpoint) => {
+      if (!endpoint.last_checked) return false;
+
+      const checkedAt = new Date(`${endpoint.last_checked}Z`);
+      const ageMinutes = (Date.now() - checkedAt.getTime()) / 60000;
+
+      return ageMinutes >= 0 && ageMinutes <= 15;
+    }
+  );
+
+  const dashboardUpdatesNeeded = freshDashboardUpdates.filter(
+    (endpoint) => endpoint.update_status === "updates_available"
+  ).length;
+
+  const dashboardUpToDate = freshDashboardUpdates.filter(
+    (endpoint) => endpoint.update_status === "up_to_date"
+  ).length;
+
+  const dashboardPendingUpdates = freshDashboardUpdates.reduce(
+    (total, endpoint) => total + (endpoint.pending_updates || 0),
+    0
+  );
   const totalDevices = devices.length;
 
   const onlineDevices = devices.filter(
@@ -1625,31 +2781,230 @@ const Dashboard = () => {
           title="Total Devices"
           value={totalDevices}
           text="Devices detected on the LAN"
-          onClick={() => setActivePage("devices")}
+          onClick={() => {
+  setDeviceFilter("all");
+  setActivePage("devices");
+}}
         />
 
         <AccessSummary
           title="Online"
           value={onlineDevices}
           text="Currently connected"
-          onClick={() => setActivePage("devices")}
+          onClick={() => {
+  setDeviceFilter("online");
+  setActivePage("devices");
+}}
         />
 
         <AccessSummary
           title="Pending"
           value={pendingDevices}
           text="Awaiting administrator approval"
-          onClick={() => setActivePage("access")}
+         onClick={() => {
+  setDeviceFilter("pending");
+  setActivePage("devices");
+}}
         />
 
         <AccessSummary
           title="Quarantined"
           value={quarantinedDevices}
           text="Internet access blocked"
-          onClick={() => setActivePage("access")}
+         onClick={() => {
+  setDeviceFilter("quarantined");
+  setActivePage("devices");
+}}
+        />
+
+ <AccessSummary
+          title="Rejected"
+          value={rejectedDevices}
+          text="Devices rejected by administrator"
+          onClick={() => {
+            setDeviceFilter("rejected");
+            setActivePage("devices");
+          }}
         />
 
       </div>
+
+      <div className="panel">
+        <div className="panel-header">
+          <div>
+            <div className="panel-title">
+              Endpoint Update Status
+            </div>
+            <div className="panel-subtitle">
+              Update status of monitored machines
+            </div>
+          </div>
+
+          <button
+            className="secondary-button"
+            onClick={() => setActivePage("endpoint-updates")}
+          >
+            View Details
+          </button>
+        </div>
+
+        {dashboardUpdatesError && (
+          <div className="error-message">
+            {dashboardUpdatesError}
+          </div>
+        )}
+
+        <div className="access-summary">
+          <div className="summary-card">
+            <div className="summary-card-title">
+              Monitored Machines
+            </div>
+            <div className="summary-card-value">
+              {dashboardUpdatesLoading
+                ? "..."
+                : dashboardEndpointUpdates.length}
+            </div>
+          </div>
+
+          <div className="summary-card">
+            <div className="summary-card-title">
+              Needs Updates
+            </div>
+            <div className="summary-card-value">
+              {dashboardUpdatesLoading
+                ? "..."
+                : dashboardUpdatesNeeded}
+            </div>
+          </div>
+
+          <div className="summary-card">
+            <div className="summary-card-title">
+              Up to Date
+            </div>
+            <div className="summary-card-value">
+              {dashboardUpdatesLoading
+                ? "..."
+                : dashboardUpToDate}
+            </div>
+          </div>
+
+          <div className="summary-card">
+            <div className="summary-card-title">
+              Pending Updates
+            </div>
+            <div className="summary-card-value">
+              {dashboardUpdatesLoading
+                ? "..."
+                : dashboardPendingUpdates.toLocaleString()}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="panel">
+        <div className="panel-header">
+          <div>
+            <div className="panel-title">
+              Machine Update Details
+            </div>
+            <div className="panel-subtitle">
+              Latest update report from each monitored endpoint
+            </div>
+          </div>
+        </div>
+
+        <div className="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>MACHINE</th>
+                <th>IP ADDRESS</th>
+                <th>OPERATING SYSTEM</th>
+                <th>UPDATE STATUS</th>
+                <th>PENDING</th>
+                <th>LAST CHECKED</th>
+                <th>REPORT AGE</th>
+              </tr>
+            </thead>
+            <tbody>
+              {dashboardUpdatesLoading ? (
+                <tr>
+                  <td colSpan="7">Loading endpoint reports...</td>
+                </tr>
+              ) : dashboardEndpointUpdates.length === 0 ? (
+                <tr>
+                  <td colSpan="7">
+                    No endpoint update reports available.
+                  </td>
+                </tr>
+              ) : (
+                dashboardEndpointUpdates.map((endpoint) => {
+                  const checkedAt = endpoint.last_checked
+                    ? new Date(`${endpoint.last_checked}Z`)
+                    : null;
+
+                  const ageMinutes = checkedAt
+                    ? (Date.now() - checkedAt.getTime()) / 60000
+                    : Infinity;
+
+                  const isFresh =
+                    ageMinutes >= 0 && ageMinutes <= 15;
+
+                  return (
+                    <tr key={endpoint.id}>
+                      <td>{endpoint.hostname}</td>
+                      <td>{endpoint.device_ip || endpoint.ip_address || "—"}</td>
+                      <td>
+                        {endpoint.operating_system}
+                        {endpoint.os_version
+                          ? ` ${endpoint.os_version}`
+                          : ""}
+                      </td>
+                      <td>
+                        <span
+                          className={`status-badge ${
+                            !isFresh
+                              ? "blocked"
+                              : endpoint.update_status === "up_to_date"
+                              ? "allowed"
+                              : endpoint.update_status === "updates_available"
+                              ? "warning"
+                              : "blocked"
+                          }`}
+                        >
+                          {!isFresh
+                            ? "STALE / UNKNOWN"
+                            : endpoint.update_status === "up_to_date"
+                            ? "UP TO DATE"
+                            : endpoint.update_status === "updates_available"
+                            ? "NEEDS UPDATES"
+                            : endpoint.update_status}
+                        </span>
+                      </td>
+                      <td>{endpoint.pending_updates ?? "—"}</td>
+                      <td>
+                        {checkedAt
+                          ? checkedAt.toLocaleString()
+                          : "Never"}
+                      </td>
+                      <td>
+                        {!checkedAt
+                          ? "Unknown"
+                          : ageMinutes < 0
+                          ? "Invalid timestamp"
+                          : ageMinutes <= 15
+                          ? "Recent"
+                          : `${Math.floor(ageMinutes)} min ago`}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
 
       <div className="panel">
 
@@ -1880,6 +3235,332 @@ const Dashboard = () => {
   );
 };
 
+const EndpointUpdatesPage = () => {
+  const [endpointUpdates, setEndpointUpdates] = useState([]);
+  const [endpointUpdatesLoading, setEndpointUpdatesLoading] =
+    useState(false);
+  const [endpointUpdatesError, setEndpointUpdatesError] =
+    useState("");
+const endpointFreshness = (lastChecked) => {
+  if (!lastChecked) {
+    return "stale";
+  }
+const lastCheckedTime = new Date(`${lastChecked}Z`);
+  const now = new Date();
+console.log("FRESHNESS DEBUG:", lastChecked, new Date(lastChecked), now);
+  const ageMinutes =
+    (now.getTime() - lastCheckedTime.getTime()) / 60000;
+
+  return ageMinutes <= 15
+    ? "online"
+    : "stale";
+};  
+  const freshEndpointUpdates = endpointUpdates.filter(
+    (endpoint) => {
+      if (!endpoint.last_checked) return false;
+
+      const checkedAt = new Date(`${endpoint.last_checked}Z`);
+      const ageMinutes = (Date.now() - checkedAt.getTime()) / 60000;
+
+      return ageMinutes >= 0 && ageMinutes <= 15;
+    }
+  );
+
+  const endpointsWithUpdates = freshEndpointUpdates.filter(
+    (endpoint) =>
+      endpoint.update_status === "updates_available"
+  ).length;
+
+  const endpointsUpToDate = freshEndpointUpdates.filter(
+    (endpoint) =>
+      endpoint.update_status === "up_to_date"
+  ).length;
+
+  const totalPendingUpdates = freshEndpointUpdates.reduce(
+    (total, endpoint) =>
+      total + (endpoint.pending_updates || 0),
+    0
+  );
+
+  const loadEndpointUpdates = async () => {
+    setEndpointUpdatesLoading(true);
+    setEndpointUpdatesError("");
+
+    try {
+      const response = await fetch(
+        `${API_URL}/endpoint-updates/`
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          `Failed to load endpoint updates: ${response.status}`
+        );
+      }
+
+      const data = await response.json();
+      setEndpointUpdates(data);
+    } catch (error) {
+      setEndpointUpdatesError(error.message);
+    } finally {
+      setEndpointUpdatesLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadEndpointUpdates();
+
+    const refreshInterval = setInterval(() => {
+      loadEndpointUpdates();
+    }, 60000);
+
+    return () => {
+      clearInterval(refreshInterval);
+    };
+  }, []);
+
+  return (
+    <div className="page">
+      <div className="page-header">
+        <div>
+          <div className="page-title">
+            Endpoint Updates
+          </div>
+
+          <div className="page-description">
+            Monitor pending software updates on managed
+            network endpoints.
+          </div>
+        </div>
+
+        <button
+          className="btn secondary"
+          onClick={loadEndpointUpdates}
+          disabled={endpointUpdatesLoading}
+        >
+          {endpointUpdatesLoading
+            ? "Refreshing..."
+            : "Refresh"}
+        </button>
+      </div>
+
+      {endpointUpdatesError && (
+        <div className="error-message">
+          {endpointUpdatesError}
+        </div>
+      )}
+      <div className="stats-grid">
+        <div className="card">
+          <div className="card-subtitle">
+            KNOWN ENDPOINTS
+          </div>
+
+          <div className="stat-value">
+            {endpointUpdates.length}
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-subtitle">
+            REPORTING NOW
+          </div>
+
+          <div className="stat-value">
+            {freshEndpointUpdates.length}
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-subtitle">
+            UPDATES NEEDED
+          </div>
+
+          <div className="stat-value">
+            {endpointsWithUpdates}
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-subtitle">
+            PENDING UPDATES
+          </div>
+
+          <div className="stat-value">
+            {totalPendingUpdates.toLocaleString()}
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-subtitle">
+            UP TO DATE
+          </div>
+
+          <div className="stat-value">
+            {endpointsUpToDate}
+          </div>
+        </div>
+      </div>
+
+
+      <div className="card">
+        <div className="card-header">
+          <div>
+            <div className="card-title">
+              Endpoint Update Status
+            </div>
+
+            <div className="card-subtitle">
+              {endpointUpdates.length} endpoint
+              {endpointUpdates.length === 1 ? "" : "s"} reported
+            </div>
+          </div>
+        </div>
+
+        <div className="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>DEVICE</th>
+                <th>IP ADDRESS</th>
+                <th>MAC ADDRESS</th>
+                <th>OS</th>
+                <th>VERSION</th>
+                <th>ARCHITECTURE</th>
+                <th>STATUS</th>
+                <th>PENDING</th>
+                <th>SECURITY</th>
+                <th>LAST CHECKED</th>
+                <th>CONNECTION</th>
+                <th>ACCESS</th>
+              </tr>
+            </thead>
+
+<tbody>
+  {endpointUpdates.length === 0 ? (
+    <tr>
+      <td colSpan="11">
+        No endpoint update information available.
+      </td>
+    </tr>
+  ) : (
+    endpointUpdates.map((endpoint) => (
+      <tr key={endpoint.id}>
+        <td>
+          {endpoint.hostname}
+        </td>
+
+        <td>
+          {endpoint.device_ip || "—"}
+        </td>
+
+        <td>
+          {endpoint.mac_address || "—"}
+        </td>
+
+        <td>
+          {endpoint.operating_system}
+        </td>
+
+        <td>
+          {endpoint.os_version}
+        </td>
+
+        <td>
+          {endpoint.architecture}
+        </td>
+
+
+        <td>
+          <span
+            className={`status-badge ${
+              endpointFreshness(endpoint.last_checked) !== "online"
+                ? "blocked"
+                : endpoint.update_status === "up_to_date"
+                ? "allowed"
+                : endpoint.update_status === "updates_available"
+                ? "warning"
+                : "blocked"
+            }`}
+          >
+            {endpointFreshness(endpoint.last_checked) !== "online"
+              ? "STALE / UNKNOWN"
+              : endpoint.update_status === "updates_available"
+              ? "Updates Available"
+              : endpoint.update_status === "up_to_date"
+              ? "Up to Date"
+              : endpoint.update_status}
+          </span>
+        </td>
+
+
+                    <td>
+                      <strong>
+                        {endpoint.pending_updates}
+                      </strong>
+                    </td>
+
+                    <td>
+                      {endpoint.security_updates ?? "—"}
+                    </td>
+
+                    <td>
+                      {new Date(
+                        `${endpoint.last_checked}Z`
+                      ).toLocaleString()}
+                    </td>
+
+                    <td>
+                      <span
+                        className={`status-badge ${
+                          endpointFreshness(
+                            endpoint.last_checked
+                          ) === "online"
+                            ? "allowed"
+                            : "blocked"
+                        }`}
+                      >
+                        {endpointFreshness(
+                          endpoint.last_checked
+                        ) === "online"
+                          ? "ONLINE"
+                          : "STALE"}
+                      </span>
+                    </td>
+
+<td>
+  {!endpoint.device_id ? (
+    <span className="status-badge blocked">
+      UNRECOGNIZED
+    </span>
+  ) : endpoint.approval_status === "pending" ? (
+    <span className="status-badge blocked">
+      PENDING
+    </span>
+  ) : endpoint.approval_status === "rejected" ? (
+    <span className="status-badge blocked">
+      REJECTED
+    </span>
+  ) : endpoint.enforcement_status === "allowed" &&
+    endpoint.internet_access_authorized ? (
+    <span className="status-badge allowed">
+      INTERNET ALLOWED
+    </span>
+  ) : (
+    <span className="status-badge blocked">
+      QUARANTINED
+    </span>
+  )}
+</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+};
+
   // ------------------------------------------------------------
   // PAGE ROUTER
   // ------------------------------------------------------------
@@ -1888,13 +3569,15 @@ const Dashboard = () => {
   console.log("NETOPS activePage:", activePage);
     switch (activePage) {
       case "devices":
-        return <DevicesPage />;
-
+  return <DevicesPage />;
       case "events":
         return <EventsPage />;
 
       case "access":
         return <AccessPage />;
+      
+      case "endpoint-updates":
+        return <EndpointUpdatesPage />;
 
       case "vlans":
         return <VLANPage />;
@@ -3059,6 +4742,32 @@ const Dashboard = () => {
           color: #64748b;
           font-size: 10px;
         }
+        .report-date-row {
+        min-height: 52px;
+        padding: 12px 17px;
+        border-bottom: 1px solid #172033;
+        display: flex;
+        align-items: center;
+        gap: 15px;
+        color: #64748b;
+        font-size: 10px;
+        }
+
+        .report-date-row > label {
+        min-width: 70px;
+        }
+
+        .report-date-fields {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex: 1;
+        }
+
+        .report-date-fields input {
+        flex: 1;
+        min-width: 0;
+        }
 
         .settings-row code {
           color: #60a5fa;
@@ -3443,6 +5152,16 @@ const Dashboard = () => {
                 setActivePage("access");
               }}
             />
+           <NavItem
+  icon="U"
+  label="Endpoint Updates"
+  active={
+    activePage === "endpoint-updates"
+  }
+  onClick={() =>
+    setActivePage("endpoint-updates")
+  }
+/>
 
             <div className="nav-section-title">
               AUTOMATION
@@ -3510,7 +5229,9 @@ const Dashboard = () => {
             <div style={{position:"fixed",bottom:10,right:10,zIndex:99999,background:"#000",color:"#0f0",padding:"8px",fontSize:"12px"}}>PAGE: {activePage}</div>
           </header>
 
-          {renderPage()}
+          <PageErrorBoundary>
+  {renderPage()}
+</PageErrorBoundary>
         </main>
 
         {newDeviceAlert && (
@@ -3558,6 +5279,65 @@ const Dashboard = () => {
 // COMPONENTS
 // ============================================================
 
+class PageErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+
+    this.state = {
+      hasError: false,
+      error: null,
+    };
+  }
+
+  static getDerivedStateFromError(error) {
+    return {
+      hasError: true,
+      error,
+    };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error(
+      "NETOPS PAGE RENDER ERROR:",
+      error,
+      errorInfo
+    );
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="page">
+          <div className="panel">
+            <div className="panel-title">
+              NETOPS Page Error
+            </div>
+
+            <div className="panel-subtitle">
+              The selected module encountered a rendering error.
+            </div>
+
+            <pre
+              style={{
+                marginTop: "20px",
+                whiteSpace: "pre-wrap",
+                color: "#ff6b6b",
+                background: "#111827",
+                padding: "16px",
+                borderRadius: "8px",
+              }}
+            >
+              {this.state.error?.message ||
+                "Unknown React rendering error"}
+            </pre>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
 function NavItem({
   icon,
   label,
@@ -4035,10 +5815,18 @@ function ReportCard({
   title,
   value,
   description,
+onClick,
 }) {
   return (
-    <div className="report-card">
-      <div className="report-card-title">
+
+   <div
+  className="report-card"
+  onClick={onClick}
+  style={{
+    cursor: onClick ? "pointer" : "default",
+  }}
+>  
+ <div className="report-card-title">
         {title}
       </div>
 
@@ -4059,12 +5847,14 @@ function EventRow({ event }) {
 
   let dotClass = "event-dot";
 
-  if (
-    type.includes("reject") ||
-    type.includes("quarantine")
-  ) {
-    dotClass += " warning";
-  }
+
+if (
+  type.includes("reject") ||
+  type.includes("quarantine") ||
+  type.includes("unrecognized")
+) {
+  dotClass += " warning";
+}
 
   if (
     type.includes("approve") ||

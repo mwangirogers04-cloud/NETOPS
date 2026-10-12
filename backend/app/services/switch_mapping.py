@@ -174,3 +174,99 @@ def identify_switch_port(device: Device) -> dict:
         ),
     }
 
+def identify_switch_port_from_mac_table(
+    device: Device,
+    mac_table: list[dict],
+    switch_name: str,
+) -> dict:
+    """
+    Identify a device's MAC address in a supplied Cisco
+    MAC address table.
+
+    This function only processes data already retrieved.
+    It does not connect to or configure a switch.
+    """
+
+    if not device.mac_address:
+        return {
+            "identified": False,
+            "switch_name": None,
+            "switch_port": None,
+            "source": "supplied_mac_table",
+            "reason": "Device does not have a MAC address",
+        }
+
+    target_mac = (
+        device.mac_address
+        .strip()
+        .replace("-", ":")
+        .replace(".", "")
+        .upper()
+    )
+
+    if ":" in target_mac:
+        target_mac = target_mac.replace(":", "")
+
+    matches = []
+
+    for entry in mac_table:
+        raw_mac = str(entry.get("mac_address", ""))
+        candidate_mac = (
+            raw_mac
+            .strip()
+            .replace("-", "")
+            .replace(":", "")
+            .replace(".", "")
+            .upper()
+        )
+
+        if candidate_mac == target_mac:
+            matches.append(entry)
+
+    if not matches:
+        return {
+            "identified": False,
+            "switch_name": switch_name,
+            "switch_port": None,
+            "source": "supplied_mac_table",
+            "reason": "Device MAC address not found in supplied MAC table",
+        }
+
+    interfaces = {
+        str(entry.get("interface", "")).strip()
+        for entry in matches
+        if entry.get("interface")
+    }
+
+    vlans = {
+        entry.get("vlan_id")
+        for entry in matches
+    }
+
+    if (
+        len(interfaces) != 1
+        or len(vlans) != 1
+        or None in vlans
+    ):
+        return {
+            "identified": False,
+            "switch_name": switch_name,
+            "switch_port": None,
+            "source": "supplied_mac_table",
+            "reason": (
+                "MAC address has missing or conflicting "
+                "interface or VLAN entries"
+            ),
+        }
+
+    switch_port = interfaces.pop()
+
+    return {
+        "identified": True,
+        "switch_name": switch_name,
+        "switch_port": switch_port,
+        "source": "supplied_mac_table",
+        "reason": "Device MAC address matched the supplied Cisco MAC table",
+        "vlan_id": next(iter(vlans)),
+    }
+

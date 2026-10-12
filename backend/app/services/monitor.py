@@ -2,7 +2,7 @@ import time
 
 from ..database import SessionLocal
 from .discovery import discover_devices, save_discovered_devices
-
+from .enforcement_monitor import enforce_all_devices_once
 
 def monitor_network(
     network: str,
@@ -39,6 +39,35 @@ def monitor_network(
                 print(
                     f"[MONITOR] Pending approval: "
                     f"{len(pending_devices)}"
+                )
+                enforcement_results = enforce_all_devices_once(db)
+                db.commit()
+
+                allowed_devices = [
+                    result
+                    for result in enforcement_results
+                    if result["enforcement_status"] == "allowed"
+                ]
+
+                quarantined_devices = [
+                    result
+                    for result in enforcement_results
+                    if result["enforcement_status"] == "quarantined"
+                ]
+
+                print(
+                    f"[ENFORCEMENT] Devices checked: "
+                    f"{len(enforcement_results)}"
+                )
+
+                print(
+                    f"[ENFORCEMENT] Allowed: "
+                    f"{len(allowed_devices)}"
+                )
+
+                print(
+                    f"[ENFORCEMENT] Quarantined: "
+                    f"{len(quarantined_devices)}"
                 )
 
                 for device in pending_devices:

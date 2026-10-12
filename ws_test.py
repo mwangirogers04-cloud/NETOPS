@@ -2,7 +2,7 @@ import asyncio
 import websockets
 
 
-async def test_websocket():
+async def listen_for_events():
     async with websockets.connect(
         "ws://192.168.0.101:8000/ws/events"
     ) as websocket:
@@ -17,4 +17,6 @@ async def test_websocket():
             print(message)
 
 
-asyncio.run(test_websocket())
+if __name__ == "__main__":
+    asyncio.run(listen_for_events())
+
