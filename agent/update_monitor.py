@@ -6,15 +6,39 @@ import json
 from datetime import datetime
 import time
 
+import os
+import sys
+
+def get_default_interface():
+    """Determine the active default gateway network interface or fallback."""
+    try:
+        result = subprocess.run(
+            ["ip", "route", "show", "default"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        for line in result.stdout.splitlines():
+            parts = line.split()
+            if "dev" in parts:
+                dev_idx = parts.index("dev") + 1
+                if dev_idx < len(parts):
+                    return parts[dev_idx]
+    except (FileNotFoundError, OSError):
+        pass
+    return "wlan0"
+
+
 def get_mac_address():
-    """Return the MAC address of the discovery interface."""
+    """Return the MAC address of the active network interface."""
+    interface = get_default_interface()
     try:
         result = subprocess.run(
             [
                 "ip",
                 "link",
                 "show",
-                "wlan0",
+                interface,
             ],
             capture_output=True,
             text=True,
@@ -33,7 +57,8 @@ def get_mac_address():
         return None
 
 def get_ip_address():
-    """Return the IPv4 address of the discovery interface."""
+    """Return the IPv4 address of the active network interface."""
+    interface = get_default_interface()
     try:
         result = subprocess.run(
             [
@@ -41,7 +66,7 @@ def get_ip_address():
                 "-4",
                 "addr",
                 "show",
-                "wlan0",
+                interface,
             ],
             capture_output=True,
             text=True,
@@ -114,9 +139,28 @@ def check_linux_updates():
             "security_updates": None,
         }
 
-def send_update_status(information):
+def get_server_url():
+    """Determine the NETOPS server URL from CLI arg, ENV, or default."""
+    for arg in sys.argv[1:]:
+        if arg.startswith("http://") or arg.startswith("https://"):
+            url = arg.rstrip("/")
+            if not url.endswith("/endpoint-updates"):
+                url += "/endpoint-updates/"
+            return url
+
+    env_url = os.environ.get("NETOPS_SERVER_URL")
+    if env_url:
+        url = env_url.rstrip("/")
+        if not url.endswith("/endpoint-updates"):
+            url += "/endpoint-updates/"
+        return url
+
+    return "http://127.0.0.1:8000/endpoint-updates/"
+
+
+def send_update_status(information, server_url=None):
     """Send endpoint update status to the NETOPS backend."""
-    api_url = "http://127.0.0.1:8000/endpoint-updates/"
+    api_url = server_url or get_server_url()
 
     data = json.dumps(information).encode("utf-8")
 
@@ -135,7 +179,9 @@ def send_update_status(information):
             return response_data
 
     except urllib.error.URLError as error:
-        return f"Unable to contact NETOPS server: {error}"
+        return f"Unable to contact NETOPS server at {api_url}: {error}"
+
+
 def collect_update_status():
     """Collect the complete endpoint update status."""
     system_info = get_system_info()
@@ -158,6 +204,7 @@ def collect_update_status():
 
 if __name__ == "__main__":
     REPORT_INTERVAL = 300
+    run_once = "--once" in sys.argv
 
     while True:
         information = collect_update_status()
@@ -168,9 +215,13 @@ if __name__ == "__main__":
         for key, value in information.items():
             print(f"{key}: {value}")
 
-        print("\nSending update status to NETOPS...")
-        response = send_update_status(information)
+        target_url = get_server_url()
+        print(f"\nSending update status to NETOPS ({target_url})...")
+        response = send_update_status(information, target_url)
         print(response)
+
+        if run_once:
+            break
 
         print(
             f"\nNext update check in "

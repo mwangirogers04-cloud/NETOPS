@@ -58,3 +58,28 @@ def test_authorized_and_allowed_device_has_correct_reason():
     assert response.access_reason == (
         "Approved recognized device with internet access allowed"
     )
+
+
+def test_device_response_includes_update_telemetry_fields():
+    response = make_response(
+        update_status="updates_available",
+        pending_updates=5,
+        security_updates=2,
+        operating_system="Linux",
+        os_version="Debian 12",
+    )
+
+    data = response.model_dump()
+    assert data["update_status"] == "updates_available"
+    assert data["pending_updates"] == 5
+    assert data["security_updates"] == 2
+    assert data["operating_system"] == "Linux"
+    assert data["os_version"] == "Debian 12"
+
+
+def test_device_response_defaults_update_fields_to_none():
+    response = make_response()
+    data = response.model_dump()
+    assert data["update_status"] is None
+    assert data["pending_updates"] is None
+

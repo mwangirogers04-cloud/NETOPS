@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models.device import Device
+from ..models.endpoint_update import EndpointUpdate
 from ..schemas.device import (
     DeviceCreate,
     DeviceResponse,
@@ -72,7 +73,75 @@ def add_access_information(device: Device):
             "Approved recognized device with internet access allowed"
         )
 
+    if not hasattr(device, "update_status") or device.update_status is None:
+        device.update_status = "unmonitored"
+        device.pending_updates = None
+        device.security_updates = None
+        device.last_update_check = None
+        device.operating_system = None
+        device.os_version = None
+
     return device
+
+
+def attach_update_information(devices: list[Device], db: Session):
+    """
+    Attach the latest endpoint update telemetry to each device.
+    Matches primarily by normalized MAC address, with IP fallback.
+    """
+    if not devices:
+        return devices
+
+    endpoint_updates = (
+        db.query(EndpointUpdate)
+        .order_by(EndpointUpdate.last_checked.desc())
+        .all()
+    )
+
+    mac_to_update = {}
+    ip_to_update = {}
+
+    for report in endpoint_updates:
+        if report.mac_address:
+            norm_mac = (
+                report.mac_address.replace(":", "").replace("-", "").upper()
+            )
+            if norm_mac not in mac_to_update:
+                mac_to_update[norm_mac] = report
+
+        if report.ip_address and report.ip_address not in ip_to_update:
+            ip_to_update[report.ip_address] = report
+
+    for device in devices:
+        matched_report = None
+        if device.mac_address:
+            norm_dev_mac = (
+                device.mac_address.replace(":", "").replace("-", "").upper()
+            )
+            matched_report = mac_to_update.get(norm_dev_mac)
+
+        if not matched_report and device.ip_address:
+            matched_report = ip_to_update.get(device.ip_address)
+
+        if matched_report:
+            if not device.hostname and matched_report.hostname:
+                device.hostname = matched_report.hostname
+            device.update_status = matched_report.update_status
+            device.pending_updates = matched_report.pending_updates
+            device.security_updates = matched_report.security_updates
+            device.last_update_check = matched_report.last_checked
+            device.operating_system = matched_report.operating_system
+            device.os_version = matched_report.os_version
+        else:
+            device.update_status = "unmonitored"
+            device.pending_updates = None
+            device.security_updates = None
+            device.last_update_check = None
+            device.operating_system = None
+            device.os_version = None
+
+    return devices
+
 
 # ------------------------------------------------------------
 # GET ALL DEVICES
@@ -88,6 +157,8 @@ def get_devices(
     devices = db.scalars(
         select(Device).order_by(Device.id)
     ).all()
+
+    attach_update_information(devices, db)
 
     for device in devices:
         add_access_information(device)

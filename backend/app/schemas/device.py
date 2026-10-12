@@ -25,6 +25,13 @@ class DeviceResponse(DeviceCreate):
 
     access_decision: str | None = None
 
+    update_status: str | None = None
+    pending_updates: int | None = None
+    security_updates: int | None = None
+    last_update_check: datetime | None = None
+    operating_system: str | None = None
+    os_version: str | None = None
+
     first_seen: datetime
     last_seen: datetime
 

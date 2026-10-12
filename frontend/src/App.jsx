@@ -716,6 +716,64 @@ const DevicesPage = () => {
           </div>
         </div>
         
+        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", padding: "12px 0", borderBottom: "1px solid var(--border-color, #27272a)", marginBottom: "16px" }}>
+          <button
+            type="button"
+            className={`secondary-button small ${deviceFilter === "all" ? "active" : ""}`}
+            style={deviceFilter === "all" ? { background: "var(--accent-color, #3b82f6)", color: "#fff" } : {}}
+            onClick={() => setDeviceFilter("all")}
+          >
+            All LAN Devices ({devices.length})
+          </button>
+          <button
+            type="button"
+            className={`secondary-button small ${deviceFilter === "needs_updates" ? "active" : ""}`}
+            style={deviceFilter === "needs_updates" ? { background: "#d97706", color: "#fff" } : { borderColor: "#f59e0b" }}
+            onClick={() => setDeviceFilter("needs_updates")}
+          >
+            ⚠️ Needs Updates ({devices.filter(d => d.update_status === "updates_available").length})
+          </button>
+          <button
+            type="button"
+            className={`secondary-button small ${deviceFilter === "up_to_date" ? "active" : ""}`}
+            style={deviceFilter === "up_to_date" ? { background: "#059669", color: "#fff" } : { borderColor: "#10b981" }}
+            onClick={() => setDeviceFilter("up_to_date")}
+          >
+            ✓ Up to Date ({devices.filter(d => d.update_status === "up_to_date").length})
+          </button>
+          <button
+            type="button"
+            className={`secondary-button small ${deviceFilter === "unmonitored" ? "active" : ""}`}
+            style={deviceFilter === "unmonitored" ? { background: "#4b5563", color: "#fff" } : {}}
+            onClick={() => setDeviceFilter("unmonitored")}
+          >
+            ⚪ Unmonitored ({devices.filter(d => !d.update_status || d.update_status === "unmonitored").length})
+          </button>
+          <button
+            type="button"
+            className={`secondary-button small ${deviceFilter === "online" ? "active" : ""}`}
+            style={deviceFilter === "online" ? { background: "var(--accent-color, #3b82f6)", color: "#fff" } : {}}
+            onClick={() => setDeviceFilter("online")}
+          >
+            Online ({devices.filter(d => d.status === "online").length})
+          </button>
+          <button
+            type="button"
+            className={`secondary-button small ${deviceFilter === "pending" ? "active" : ""}`}
+            style={deviceFilter === "pending" ? { background: "#d97706", color: "#fff" } : {}}
+            onClick={() => setDeviceFilter("pending")}
+          >
+            Pending ({pendingDevices})
+          </button>
+          <button
+            type="button"
+            className={`secondary-button small ${deviceFilter === "quarantined" ? "active" : ""}`}
+            style={deviceFilter === "quarantined" ? { background: "#dc2626", color: "#fff" } : {}}
+            onClick={() => setDeviceFilter("quarantined")}
+          >
+            Quarantined ({quarantinedDevices})
+          </button>
+        </div>
         {scheduleForm.device_id && (
           <div
             className="panel"
@@ -853,8 +911,10 @@ const DevicesPage = () => {
                 <th>DEVICE</th>
                 <th>TYPE</th>
                 <th>VLAN</th>
+                <th>UPDATE STATUS</th>
                 <th>APPROVAL</th>
                 <th>INTERNET</th>
+                <th>ENFORCEMENT</th>
                 <th>SCHEDULE</th>
                 <th>ACTIONS</th>
               </tr>
@@ -863,7 +923,7 @@ const DevicesPage = () => {
             <tbody>
               {devices.length === 0 ? (
                 <tr>
-                  <td colSpan="6">
+                  <td colSpan="9">
                     <div className="empty-state">
                       No devices detected.
                     </div>
@@ -876,6 +936,18 @@ const DevicesPage = () => {
 
     if (deviceFilter === "online") {
       return device.status === "online";
+    }
+
+    if (deviceFilter === "needs_updates") {
+      return device.update_status === "updates_available";
+    }
+
+    if (deviceFilter === "up_to_date") {
+      return device.update_status === "up_to_date";
+    }
+
+    if (deviceFilter === "unmonitored") {
+      return !device.update_status || device.update_status === "unmonitored";
     }
 
     if (deviceFilter === "pending") {
@@ -958,6 +1030,38 @@ if (deviceFilter === "quarantined") {
                       <span className="vlan-badge">
                         VLAN {device.vlan_id || 90}
                       </span>
+                    </td>
+
+                    <td>
+                      {device.update_status === "up_to_date" ? (
+                        <div>
+                          <span className="status-badge allowed" title={`Last checked: ${device.last_update_check || 'recently'}`}>
+                            ✓ UP TO DATE
+                          </span>
+                          {device.operating_system && (
+                            <div className="device-secondary" style={{ fontSize: "11px", marginTop: "3px" }}>
+                              {device.operating_system} {device.os_version || ""}
+                            </div>
+                          )}
+                        </div>
+                      ) : device.update_status === "updates_available" ? (
+                        <div>
+                          <span className="status-badge warning" title={`${device.pending_updates} updates pending`}>
+                            ⚠️ {device.pending_updates ?? "—"} UPDATES
+                          </span>
+                          {device.operating_system && (
+                            <div className="device-secondary" style={{ fontSize: "11px", marginTop: "3px" }}>
+                              {device.operating_system} {device.os_version || ""}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div>
+                          <span className="status-badge offline" style={{ opacity: 0.6 }} title="No telemetry agent reporting for this LAN machine">
+                            ⚪ NO AGENT
+                          </span>
+                        </div>
+                      )}
                     </td>
 
                     <td>
@@ -2697,26 +2801,20 @@ const Dashboard = () => {
     };
   }, []);  
 
-  const freshDashboardUpdates = dashboardEndpointUpdates.filter(
-    (endpoint) => {
-      if (!endpoint.last_checked) return false;
+  const parseEndpointDate = (d) => {
+    if (!d) return null;
+    return new Date(d.endsWith("Z") || d.includes("+") ? d : d + "Z");
+  };
 
-      const checkedAt = new Date(`${endpoint.last_checked}Z`);
-      const ageMinutes = (Date.now() - checkedAt.getTime()) / 60000;
-
-      return ageMinutes >= 0 && ageMinutes <= 15;
-    }
-  );
-
-  const dashboardUpdatesNeeded = freshDashboardUpdates.filter(
+  const dashboardUpdatesNeeded = dashboardEndpointUpdates.filter(
     (endpoint) => endpoint.update_status === "updates_available"
   ).length;
 
-  const dashboardUpToDate = freshDashboardUpdates.filter(
+  const dashboardUpToDate = dashboardEndpointUpdates.filter(
     (endpoint) => endpoint.update_status === "up_to_date"
   ).length;
 
-  const dashboardPendingUpdates = freshDashboardUpdates.reduce(
+  const dashboardPendingUpdates = dashboardEndpointUpdates.reduce(
     (total, endpoint) => total + (endpoint.pending_updates || 0),
     0
   );
@@ -2855,7 +2953,15 @@ const Dashboard = () => {
         )}
 
         <div className="access-summary">
-          <div className="summary-card">
+          <div
+            className="summary-card"
+            style={{ cursor: "pointer" }}
+            onClick={() => {
+              setDeviceFilter("all");
+              setActivePage("devices");
+            }}
+            title="Click to view all LAN devices"
+          >
             <div className="summary-card-title">
               Monitored Machines
             </div>
@@ -2866,29 +2972,52 @@ const Dashboard = () => {
             </div>
           </div>
 
-          <div className="summary-card">
-            <div className="summary-card-title">
+          <div
+            className="summary-card"
+            style={{ cursor: "pointer" }}
+            onClick={() => {
+              setDeviceFilter("needs_updates");
+              setActivePage("devices");
+            }}
+            title="Click to filter machines with pending updates"
+          >
+            <div className="summary-card-title" style={{ color: "#f59e0b" }}>
               Needs Updates
             </div>
-            <div className="summary-card-value">
+            <div className="summary-card-value" style={{ color: "#f59e0b" }}>
               {dashboardUpdatesLoading
                 ? "..."
                 : dashboardUpdatesNeeded}
             </div>
           </div>
 
-          <div className="summary-card">
-            <div className="summary-card-title">
+          <div
+            className="summary-card"
+            style={{ cursor: "pointer" }}
+            onClick={() => {
+              setDeviceFilter("up_to_date");
+              setActivePage("devices");
+            }}
+            title="Click to filter up-to-date machines"
+          >
+            <div className="summary-card-title" style={{ color: "#10b981" }}>
               Up to Date
             </div>
-            <div className="summary-card-value">
+            <div className="summary-card-value" style={{ color: "#10b981" }}>
               {dashboardUpdatesLoading
                 ? "..."
                 : dashboardUpToDate}
             </div>
           </div>
 
-          <div className="summary-card">
+          <div
+            className="summary-card"
+            style={{ cursor: "pointer" }}
+            onClick={() => {
+              setActivePage("endpoint-updates");
+            }}
+            title="Click to view detailed endpoint telemetry"
+          >
             <div className="summary-card-title">
               Pending Updates
             </div>
