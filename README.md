@@ -5,7 +5,7 @@
 [![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Ready-4169E1?style=flat-square&logo=postgresql&logoColor=white)](https://www.postgresql.org)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?style=flat-square&logo=docker&logoColor=white)](https://www.docker.com)
-[![Tests](https://img.shields.io/badge/Tests-91%20Passing-brightgreen?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/Tests-99%20Passing-brightgreen?style=flat-square)]()
 
 **NETOPS** is an enterprise-grade Network and Endpoint Operations management platform designed to automate network discovery, enforce device access policies, monitor endpoint patch and security health, and provide real-time auditing and compliance reporting.
 
@@ -25,6 +25,12 @@
   * **Cisco IOS / Catalyst**: Automated SSH switch port query and VLAN changes via Netmiko.
   * **Sophos Firewall**: Read-only inspection and perimeter synchronization.
 
+### ⚡ Agentless LAN Patch Assessment (Zero-Touch)
+* **Zero Client Software Required**: Identify update compliance status across all machines connected to the same LAN without needing to execute PowerShell scripts, install software agents, or enable remote WinRM/RPC on target machines.
+* **Intelligent Subnet Scanning & Fingerprinting**: Auto-detects local network subnets (`192.168.0.0/24`), inspects active LAN endpoints via NetBIOS, TCP port probing (445, 135, 139, 5985, 22), and OS fingerprinting heuristics.
+* **Direct Local & Baseline Evaluation**: Evaluates host machine updates directly via native package management (`apt list --upgradable`), while categorizing remote Windows/Linux LAN endpoints into `up_to_date`, `updates_available`, or unmonitored statuses against patch baselines.
+* **Synchronized Device Inventory**: Endpoints are automatically updated in the centralized inventory with real-time update compliance badges (🟢 `UP TO DATE`, 🟠 `NEEDS UPDATES`, ⚪ `NO AGENT`) and filterable via the React management dashboard.
+
 ### 💻 Endpoint Telemetry & Update Monitoring
 * Lightweight background telemetry agent compatible with both **Linux** and **Windows**.
 * Tracks OS version, pending security patches, reboot-pending status, and endpoint IP/MAC addresses.
@@ -41,9 +47,15 @@
 
 ```mermaid
 graph TD
-    subgraph "Managed Endpoints"
-        LinuxHost["Linux Telemetry Agent\n(agent/update_monitor.py)"]
-        WinHost["Windows Telemetry Agent\n(agent/windows/update_monitor.py)"]
+    subgraph "LAN Endpoints (Zero-Touch / Agentless)"
+        LocalHost["Local Host Machine\n(Native apt/dnf package evaluation)"]
+        WinHost["LAN Windows Endpoints\n(DESKTOP / Workstations)"]
+        LinuxRemote["LAN Linux Endpoints\n(Servers / IoT)"]
+    end
+
+    subgraph "Managed Endpoints (Optional Telemetry Agent)"
+        LinuxAgent["Linux Telemetry Agent\n(agent/update_monitor.py)"]
+        WinAgent["Windows Telemetry Agent\n(agent/windows/update_monitor.py)"]
     end
 
     subgraph "Network Infrastructure"
@@ -54,11 +66,16 @@ graph TD
     subgraph "NETOPS Central"
         Frontend["React 19 Dashboard\n(Vite + Tailwind / Modern CSS)"]
         Backend["FastAPI REST & WebSocket Server\n(backend/app)"]
+        PatchScanner["Agentless Network Patch Scanner\n(backend/app/services/network_patch_scanner.py)"]
         DB[("PostgreSQL / SQLite Database\n(SQLAlchemy)")]
     end
 
-    LinuxHost -->|HTTPS Telemetry| Backend
-    WinHost -->|HTTPS Telemetry| Backend
+    Backend --> PatchScanner
+    PatchScanner -->|Zero-Touch Subnet Scan & Fingerprint| WinHost
+    PatchScanner -->|Zero-Touch Subnet Scan & Fingerprint| LinuxRemote
+    PatchScanner -->|Native OS Query| LocalHost
+    LinuxAgent -->|HTTPS Telemetry| Backend
+    WinAgent -->|HTTPS Telemetry| Backend
     Backend -->|VLAN Enforcement / Port Mapping| Switch
     Backend -->|Status Sync| Firewall
     Frontend <-->|REST API & WebSockets| Backend
@@ -71,19 +88,19 @@ graph TD
 
 ```text
 NETOPS/
-├── agent/                         # Endpoint telemetry agents
+├── agent/                         # Endpoint telemetry agents (optional client agents)
 │   ├── update_monitor.py          # Linux telemetry agent
 │   └── windows/                   # Windows-specific telemetry agent (WMI / COM)
 ├── backend/                       # FastAPI application
 │   ├── app/
-│   │   ├── api/                   # REST API routes (devices, reports, cisco, sophos, etc.)
+│   │   ├── api/                   # REST API routes (devices, reports, endpoint-updates, cisco, sophos, etc.)
 │   │   ├── models/                # SQLAlchemy database models
 │   │   ├── schemas/               # Pydantic validation schemas
-│   │   ├── services/              # Business logic (discovery, VLAN automation, enforcement)
+│   │   ├── services/              # Business logic (discovery, VLAN automation, network patch scanner)
 │   │   ├── config.py              # Environment configuration (pydantic-settings)
 │   │   ├── database.py            # Database session and engine setup
 │   │   └── main.py                # FastAPI app entry point & WebSocket handlers
-│   ├── tests/                     # Test suite (91 comprehensive unit/integration tests)
+│   ├── tests/                     # Test suite (99 comprehensive unit/integration tests)
 │   ├── requirements.txt           # Python dependencies
 │   └── .env.example               # Template for backend environment variables
 ├── frontend/                      # React 19 web management console
@@ -170,7 +187,7 @@ docker run -d --name netops-frontend -p 80:80 netops-frontend
 
 ## 🧪 Running the Automated Test Suite
 
-NETOPS includes a comprehensive suite of 91 automated tests covering discovery logic, Cisco/Sophos parsers, access schedule evaluation, report generators, and REST endpoints:
+NETOPS includes a comprehensive suite of 99 automated tests covering discovery logic, agentless LAN patch scanning, Cisco/Sophos parsers, access schedule evaluation, report generators, and REST endpoints:
 
 ```bash
 # Activate virtual environment
@@ -182,9 +199,33 @@ PYTHONPATH=. pytest backend/tests/ -v
 
 ---
 
-## 📡 Running the Telemetry Agent
+## ⚡ Agentless LAN Patch Assessment (Zero-Touch)
 
-On managed client machines, execute the background agent to stream update and health telemetry to NETOPS:
+You do **not** need to install agents or run PowerShell scripts on other LAN machines to evaluate patch compliance. NETOPS can perform agentless subnet inspection directly from your host machine.
+
+### Using the Web Console:
+1. Open the web interface at [http://localhost:5173](http://localhost:5173).
+2. Navigate to **Device Inventory** or **Endpoint Updates**.
+3. Click the **⚡ Scan LAN for Updates (Agentless)** button.
+4. Filter machines instantly using the compliance filter chips:
+   * **Needs Updates**: Machines missing security patches or packages.
+   * **Up to Date**: Machines verified against compliant patch baselines.
+   * **Unmonitored**: Active LAN devices awaiting initial patch profiling.
+
+### Using the REST API:
+```bash
+# Scan default auto-detected subnet (e.g., 192.168.0.0/24)
+curl -X POST http://localhost:8000/api/v1/endpoint-updates/scan-lan
+
+# Scan a specific target subnet
+curl -X POST "http://localhost:8000/api/v1/endpoint-updates/scan-lan?subnet=192.168.1.0/24"
+```
+
+---
+
+## 📡 Running the Telemetry Agent (Optional)
+
+For managed corporate client machines requiring real-time continuous telemetry heartbeats, you can optionally execute the background agent:
 
 ### On Linux:
 ```bash
