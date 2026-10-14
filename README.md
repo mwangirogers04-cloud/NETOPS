@@ -46,40 +46,41 @@
 ## 🏛️ System Architecture
 
 ```mermaid
-graph TD
-    subgraph "LAN Endpoints (Zero-Touch / Agentless)"
-        LocalHost["Local Host Machine\n(Native apt/dnf package evaluation)"]
-        WinHost["LAN Windows Endpoints\n(DESKTOP / Workstations)"]
-        LinuxRemote["LAN Linux Endpoints\n(Servers / IoT)"]
+flowchart TD
+    subgraph LAN_Endpoints ["LAN Endpoints - Zero-Touch Assessment"]
+        LocalHost["Local Host Machine<br/>Native Package Evaluation"]
+        WinHost["LAN Windows Endpoints<br/>Workstations and Laptops"]
+        LinuxRemote["LAN Linux Endpoints<br/>Servers and Devices"]
     end
 
-    subgraph "Managed Endpoints (Optional Telemetry Agent)"
-        LinuxAgent["Linux Telemetry Agent\n(agent/update_monitor.py)"]
-        WinAgent["Windows Telemetry Agent\n(agent/windows/update_monitor.py)"]
+    subgraph Managed_Endpoints ["Managed Endpoints - Optional Agent"]
+        LinuxAgent["Linux Telemetry Agent<br/>agent/update_monitor.py"]
+        WinAgent["Windows Telemetry Agent<br/>agent/windows/update_monitor.py"]
     end
 
-    subgraph "Network Infrastructure"
-        Switch["Cisco Switches\n(SSH / Netmiko)"]
-        Firewall["Sophos Firewall\n(REST API)"]
+    subgraph Network_Infrastructure ["Network Infrastructure"]
+        Switch["Cisco Switches<br/>SSH and Netmiko"]
+        Firewall["Sophos Firewall<br/>REST API"]
     end
 
-    subgraph "NETOPS Central"
-        Frontend["React 19 Dashboard\n(Vite + Tailwind / Modern CSS)"]
-        Backend["FastAPI REST & WebSocket Server\n(backend/app)"]
-        PatchScanner["Agentless Network Patch Scanner\n(backend/app/services/network_patch_scanner.py)"]
-        DB[("PostgreSQL / SQLite Database\n(SQLAlchemy)")]
+    subgraph NETOPS_Central ["NETOPS Central Platform"]
+        Frontend["React 19 Dashboard<br/>Vite and Modern UI"]
+        Backend["FastAPI Server<br/>REST and WebSockets"]
+        PatchScanner["Agentless Patch Scanner<br/>network_patch_scanner.py"]
+        DB[("Database<br/>PostgreSQL or SQLite")]
     end
 
     Backend --> PatchScanner
-    PatchScanner -->|Zero-Touch Subnet Scan & Fingerprint| WinHost
-    PatchScanner -->|Zero-Touch Subnet Scan & Fingerprint| LinuxRemote
-    PatchScanner -->|Native OS Query| LocalHost
-    LinuxAgent -->|HTTPS Telemetry| Backend
-    WinAgent -->|HTTPS Telemetry| Backend
-    Backend -->|VLAN Enforcement / Port Mapping| Switch
-    Backend -->|Status Sync| Firewall
-    Frontend <-->|REST API & WebSockets| Backend
-    Backend <--> DB
+    PatchScanner -->|"LAN Subnet Scan"| WinHost
+    PatchScanner -->|"LAN Subnet Scan"| LinuxRemote
+    PatchScanner -->|"Native OS Query"| LocalHost
+    LinuxAgent -->|"HTTPS Telemetry"| Backend
+    WinAgent -->|"HTTPS Telemetry"| Backend
+    Backend -->|"VLAN Enforcement"| Switch
+    Backend -->|"Status Sync"| Firewall
+    Frontend -->|"REST API Requests"| Backend
+    Backend -->|"WebSocket Live Stream"| Frontend
+    Backend ---|"SQLAlchemy ORM"| DB
 ```
 
 ---
