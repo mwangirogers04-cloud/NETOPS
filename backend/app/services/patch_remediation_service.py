@@ -356,13 +356,37 @@ def create_patch_job(
         local = is_local_machine(existing.hostname, existing.ip_address, existing.mac_address)
         return existing, local
 
-    # Resolve Device ID or Operating System if omitted
+    # Resolve and validate Device ID
+    valid_device_id = None
     resolved_os = None
     if device_id:
         dev = db.get(Device, device_id)
         if dev:
+            valid_device_id = dev.id
             ip_address = ip_address or dev.ip_address
             mac_address = mac_address or dev.mac_address
+
+    # Try correlating device by MAC if device_id was not valid or not provided
+    if not valid_device_id and mac_address:
+        norm_mac = mac_address.replace(":", "").replace("-", "").upper()
+        devices = db.scalars(select(Device)).all()
+        for dev in devices:
+            if dev.mac_address and dev.mac_address.replace(":", "").replace("-", "").upper() == norm_mac:
+                valid_device_id = dev.id
+                ip_address = ip_address or dev.ip_address
+                break
+
+    # Try correlating device by IP
+    if not valid_device_id and ip_address:
+        dev = db.scalars(select(Device).where(Device.ip_address == ip_address)).first()
+        if dev:
+            valid_device_id = dev.id
+
+    # Try correlating device by hostname
+    if not valid_device_id and hostname:
+        dev = db.scalars(select(Device).where(Device.hostname == hostname)).first()
+        if dev:
+            valid_device_id = dev.id
 
     # Try resolving operating system from EndpointUpdate
     latest_update = db.scalars(
@@ -379,7 +403,7 @@ def create_patch_job(
         hostname=hostname,
         ip_address=ip_address,
         mac_address=mac_address,
-        device_id=device_id,
+        device_id=valid_device_id,
         operating_system=resolved_os,
         action=action,
         status="PENDING",
@@ -399,7 +423,7 @@ def create_patch_job(
             f"Update deployment job #{job.id} ({action}) queued for {hostname} "
             f"({ip_address or 'LAN'}) [{'LOCAL' if local else 'REMOTE AGENT QUEUE'}]."
         ),
-        device_id=device_id,
+        device_id=valid_device_id,
     )
     db.commit()
     db.refresh(job)

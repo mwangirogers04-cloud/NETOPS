@@ -93,7 +93,7 @@ function App() {
     const hostname = target.hostname || "local";
     const ip_address = target.ip_address || target.device_ip || null;
     const mac_address = target.mac_address || null;
-    const device_id = target.id || target.device_id || null;
+    const device_id = target.device_id || (target.vlan_id !== undefined ? target.id : null);
 
     setDeployingStatus("dispatching");
     try {

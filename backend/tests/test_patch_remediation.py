@@ -237,3 +237,20 @@ def test_api_heartbeat_includes_pending_command(client, db_session):
     report_data = report_res.json()
     assert report_data["pending_command"] is not None
     assert report_data["pending_command"]["action"] == "INSTALL_ALL_UPDATES"
+
+
+def test_api_trigger_with_invalid_device_id_succeeds(client, db_session):
+    res = client.post(
+        "/endpoint-updates/jobs",
+        json={
+            "hostname": "FOREIGN-KEY-TEST",
+            "ip_address": "192.168.0.210",
+            "device_id": 999999,
+            "action": "INSTALL_ALL_UPDATES",
+        },
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["hostname"] == "FOREIGN-KEY-TEST"
+    assert data["status"] == "PENDING"
+
