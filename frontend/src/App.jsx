@@ -32,6 +32,31 @@ function App() {
   const [eventTypeFilter, setEventTypeFilter] = useState("all");
   const [eventLimit, setEventLimit] = useState(50);
   const [eventOffset, setEventOffset] = useState(0);
+  const [lanScanLoading, setLanScanLoading] = useState(false);
+  const [lanScanResult, setLanScanResult] = useState(null);
+
+  const scanLanUpdates = async () => {
+    setLanScanLoading(true);
+    setLanScanResult(null);
+    try {
+      const response = await fetch(`${API_URL}/endpoint-updates/scan-lan`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      if (!response.ok) {
+        throw new Error(`LAN scan failed: ${response.status}`);
+      }
+      const data = await response.json();
+      setLanScanResult(data);
+      await loadDevices();
+    } catch (err) {
+      console.error("LAN scan error:", err);
+      alert("Failed to complete LAN update scan: " + err.message);
+    } finally {
+      setLanScanLoading(false);
+    }
+  };
 
 
 
@@ -572,14 +597,47 @@ const DevicesPage = () => {
           </div>
         </div>
 
-        <button
-          className="secondary-button"
-          type="button"
-          onClick={loadDevices}
-        >
-          Refresh Devices
-        </button>
+        <div style={{ display: "flex", gap: "8px" }}>
+          <button
+            className="primary-button"
+            type="button"
+            onClick={scanLanUpdates}
+            disabled={lanScanLoading}
+            style={{ display: "flex", alignItems: "center", gap: "6px" }}
+          >
+            {lanScanLoading ? "⏳ Scanning LAN Machines..." : "⚡ Scan LAN for Updates (Agentless)"}
+          </button>
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={loadDevices}
+            disabled={lanScanLoading}
+          >
+            Refresh Devices
+          </button>
+        </div>
       </div>
+
+      {lanScanResult && (
+        <div className="panel" style={{ background: "rgba(16, 185, 129, 0.12)", border: "1px solid #10b981", margin: "12px 0 16px", padding: "12px 16px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <div style={{ fontWeight: "600", color: "#10b981" }}>
+                ✓ Agentless LAN Scan Complete ({lanScanResult.network})
+              </div>
+              <div style={{ fontSize: "13px", color: "var(--text-secondary, #9ca3af)", marginTop: "4px" }}>
+                Assessed {lanScanResult.machines_assessed} machine(s) across the LAN: <strong>{lanScanResult.updates_available_count} need updates</strong>, <strong>{lanScanResult.up_to_date_count} up to date</strong>.
+              </div>
+            </div>
+            <button
+              className="secondary-button small"
+              onClick={() => setLanScanResult(null)}
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
 
       {pendingDevices > 0 && (
         <div className="panel">
@@ -2938,12 +2996,24 @@ const Dashboard = () => {
             </div>
           </div>
 
-          <button
-            className="secondary-button"
-            onClick={() => setActivePage("endpoint-updates")}
-          >
-            View Details
-          </button>
+          <div style={{ display: "flex", gap: "8px" }}>
+            <button
+              className="primary-button small"
+              onClick={async () => {
+                await scanLanUpdates();
+              }}
+              disabled={lanScanLoading}
+              style={{ display: "flex", alignItems: "center", gap: "4px" }}
+            >
+              {lanScanLoading ? "⏳ Scanning..." : "⚡ Scan LAN Updates"}
+            </button>
+            <button
+              className="secondary-button small"
+              onClick={() => setActivePage("endpoint-updates")}
+            >
+              View Details
+            </button>
+          </div>
         </div>
 
         {dashboardUpdatesError && (
@@ -3461,15 +3531,26 @@ console.log("FRESHNESS DEBUG:", lastChecked, new Date(lastChecked), now);
           </div>
         </div>
 
-        <button
-          className="btn secondary"
-          onClick={loadEndpointUpdates}
-          disabled={endpointUpdatesLoading}
-        >
-          {endpointUpdatesLoading
-            ? "Refreshing..."
-            : "Refresh"}
-        </button>
+        <div style={{ display: "flex", gap: "8px" }}>
+          <button
+            className="primary-button"
+            onClick={async () => {
+              await scanLanUpdates();
+              await loadEndpointUpdates();
+            }}
+            disabled={lanScanLoading || endpointUpdatesLoading}
+            style={{ display: "flex", alignItems: "center", gap: "6px" }}
+          >
+            {lanScanLoading ? "⏳ Scanning LAN..." : "⚡ Scan LAN for Updates (Agentless)"}
+          </button>
+          <button
+            className="secondary-button"
+            onClick={loadEndpointUpdates}
+            disabled={endpointUpdatesLoading || lanScanLoading}
+          >
+            {endpointUpdatesLoading ? "Refreshing..." : "Refresh"}
+          </button>
+        </div>
       </div>
 
       {endpointUpdatesError && (

@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -8,6 +8,7 @@ from ..database import get_db
 from ..models.endpoint_update import EndpointUpdate
 from ..models.device import Device
 from ..services.event_service import create_event
+from ..services.network_patch_scanner import scan_lan_for_updates
 
 router = APIRouter(
     prefix="/endpoint-updates",
@@ -240,3 +241,27 @@ def get_endpoint_updates(
         )
 
     return enriched_results
+
+
+class LanScanRequest(BaseModel):
+    network: str | None = None
+
+
+@router.post("/scan-lan")
+def run_lan_patch_scan(
+    payload: LanScanRequest | None = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Agentless LAN scan: discovers all machines connected to the same LAN
+    and evaluates their update/patch status directly from the central machine.
+    """
+    target_net = payload.network if payload else None
+    try:
+        results = scan_lan_for_updates(network=target_net, db=db)
+        return results
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Agentless LAN scan failed: {exc}",
+        ) from exc
