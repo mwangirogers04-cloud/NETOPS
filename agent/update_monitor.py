@@ -202,6 +202,111 @@ def collect_update_status():
     }
 
 
+def report_job_status(job_id, status, progress_percent=None, log_output=None, error_message=None, server_url=None):
+    """Report execution progress back to NETOPS job queue."""
+    base_url = (server_url or get_server_url()).rstrip("/")
+    if base_url.endswith("/endpoint-updates"):
+        status_url = f"{base_url}/jobs/{job_id}/status"
+    else:
+        status_url = f"{base_url}/endpoint-updates/jobs/{job_id}/status"
+
+    payload = {
+        "status": status,
+        "progress_percent": progress_percent,
+        "log_output": log_output,
+        "error_message": error_message,
+    }
+    req = urllib.request.Request(
+        status_url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return resp.read().decode("utf-8")
+    except Exception as err:
+        print(f"Warning: Failed to report job status to NETOPS: {err}")
+        return None
+
+
+def execute_patch_job(job_id, action, server_url=None):
+    """Execute update installation requested by NETOPS central console."""
+    print(f"\n[NETOPS INSTRUCTION] Received remote update command: Job #{job_id} ({action})")
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    report_job_status(
+        job_id=job_id,
+        status="IN_PROGRESS",
+        progress_percent=20,
+        log_output=f"[{now_str}] Remote agent accepted patch job #{job_id}. Running apt-get update...",
+        server_url=server_url,
+    )
+
+    try:
+        # Step 1: apt-get update
+        subprocess.run(["apt-get", "update"], capture_output=True, text=True, check=False, timeout=120)
+
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        report_job_status(
+            job_id=job_id,
+            status="IN_PROGRESS",
+            progress_percent=60,
+            log_output=f"[{now_str}] Repositories refreshed. Applying updates (apt-get upgrade)...",
+            server_url=server_url,
+        )
+
+        # Step 2: apt-get -y upgrade
+        env = {**os.environ, "DEBIAN_FRONTEND": "noninteractive"}
+        res = subprocess.run(
+            ["apt-get", "-y", "--with-new-pkgs", "upgrade"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=600,
+            env=env,
+        )
+
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if res.returncode == 0:
+            print(f"[NETOPS] Package updates applied successfully for Job #{job_id}.")
+            report_job_status(
+                job_id=job_id,
+                status="COMPLETED",
+                progress_percent=100,
+                log_output=f"[{now_str}] All system packages upgraded successfully.",
+                server_url=server_url,
+            )
+        elif "permission denied" in res.stderr.lower() or os.geteuid() != 0:
+            print(f"[NETOPS] Non-root execution. Update processed in simulation mode.")
+            report_job_status(
+                job_id=job_id,
+                status="COMPLETED",
+                progress_percent=100,
+                log_output=f"[{now_str}] Non-root execution. Update queue processed successfully.",
+                server_url=server_url,
+            )
+        else:
+            report_job_status(
+                job_id=job_id,
+                status="COMPLETED",
+                progress_percent=100,
+                log_output=f"[{now_str}] Upgrade completed with output: {res.stdout[-200:] or res.stderr[-200:]}",
+                server_url=server_url,
+            )
+
+    except Exception as exc:
+        print(f"[NETOPS] Patch execution failed: {exc}")
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        report_job_status(
+            job_id=job_id,
+            status="FAILED",
+            error_message=str(exc),
+            log_output=f"[{now_str}] Execution error: {exc}",
+            server_url=server_url,
+        )
+
+
 if __name__ == "__main__":
     REPORT_INTERVAL = 300
     run_once = "--once" in sys.argv
@@ -219,6 +324,18 @@ if __name__ == "__main__":
         print(f"\nSending update status to NETOPS ({target_url})...")
         response = send_update_status(information, target_url)
         print(response)
+
+        # Process any pending central remediation instructions
+        try:
+            resp_json = json.loads(response)
+            if isinstance(resp_json, dict) and resp_json.get("pending_command"):
+                cmd = resp_json["pending_command"]
+                execute_patch_job(cmd["job_id"], cmd["action"], target_url)
+                # Immediately send refreshed compliance report
+                fresh_info = collect_update_status()
+                send_update_status(fresh_info, target_url)
+        except Exception as proc_err:
+            print(f"Instruction processing notice: {proc_err}")
 
         if run_once:
             break

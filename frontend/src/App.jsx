@@ -60,6 +60,74 @@ function App() {
 
 
 
+  const [patchJobs, setPatchJobs] = useState([]);
+  const [deployModalDevice, setDeployModalDevice] = useState(null);
+  const [deployingStatus, setDeployingStatus] = useState(null);
+  const [showJobsModal, setShowJobsModal] = useState(false);
+  const [selectedJobDetails, setSelectedJobDetails] = useState(null);
+
+  const loadPatchJobs = async () => {
+    try {
+      const response = await fetch(`${API_URL}/endpoint-updates/jobs?limit=50`);
+      if (response.ok) {
+        const data = await response.json();
+        setPatchJobs(Array.isArray(data) ? data : []);
+      }
+    } catch (err) {
+      console.error("Failed to load patch jobs:", err);
+    }
+  };
+
+  const getActiveJobForDevice = (device) => {
+    if (!device || !Array.isArray(patchJobs)) return null;
+    return patchJobs.find(
+      (job) =>
+        (job.status === "PENDING" || job.status === "IN_PROGRESS") &&
+        ((device.hostname && job.hostname && device.hostname.toLowerCase() === job.hostname.toLowerCase()) ||
+         (device.mac_address && job.mac_address && device.mac_address.replace(/[:-]/g, "").toUpperCase() === job.mac_address.replace(/[:-]/g, "").toUpperCase()) ||
+         (device.id && job.device_id && device.id === job.device_id))
+    );
+  };
+
+  const deployUpdates = async (target) => {
+    const hostname = target.hostname || "local";
+    const ip_address = target.ip_address || target.device_ip || null;
+    const mac_address = target.mac_address || null;
+    const device_id = target.id || target.device_id || null;
+
+    setDeployingStatus("dispatching");
+    try {
+      const response = await fetch(`${API_URL}/endpoint-updates/jobs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          hostname,
+          ip_address,
+          mac_address,
+          device_id,
+          action: "INSTALL_ALL_UPDATES",
+          initiated_by: "Admin Console",
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to queue update job (${response.status})`);
+      }
+
+      const job = await response.json();
+      setDeployingStatus("success");
+      setSelectedJobDetails(job);
+      await loadPatchJobs();
+      await loadDevices();
+      return job;
+    } catch (err) {
+      console.error("Deploy updates error:", err);
+      alert("Failed to deploy updates: " + err.message);
+      setDeployingStatus("error");
+      return null;
+    }
+  };
+
   // ------------------------------------------------------------
   // LOAD DEVICES
   // ------------------------------------------------------------
@@ -299,7 +367,20 @@ const loadEvents = async () => {
     loadDevices();
     loadEvents();
     loadAccessSchedules();
+    loadPatchJobs();
   }, []);
+
+  useEffect(() => {
+    const hasActiveJob = patchJobs.some((j) => j.status === "PENDING" || j.status === "IN_PROGRESS");
+    if (!hasActiveJob) return;
+
+    const timer = setInterval(() => {
+      loadPatchJobs();
+      loadDevices();
+    }, 4000);
+
+    return () => clearInterval(timer);
+  }, [patchJobs]);
 
   useEffect(() => {
     loadEvents();
@@ -340,6 +421,11 @@ const loadEvents = async () => {
 
               return [event, ...previous];
             });
+
+            if (event.event_type && event.event_type.startsWith("patch_job_")) {
+              loadPatchJobs();
+              loadDevices();
+            }
 
             if (event.event_type === "new_device") {
               setNewDeviceAlert(event);
@@ -606,6 +692,14 @@ const DevicesPage = () => {
             style={{ display: "flex", alignItems: "center", gap: "6px" }}
           >
             {lanScanLoading ? "⏳ Scanning LAN Machines..." : "⚡ Scan LAN for Updates (Agentless)"}
+          </button>
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={() => { loadPatchJobs(); setShowJobsModal(true); }}
+            style={{ display: "flex", alignItems: "center", gap: "6px" }}
+          >
+            📋 Update Jobs ({patchJobs.length})
           </button>
           <button
             className="secondary-button"
@@ -1091,35 +1185,97 @@ if (deviceFilter === "quarantined") {
                     </td>
 
                     <td>
-                      {device.update_status === "up_to_date" ? (
-                        <div>
-                          <span className="status-badge allowed" title={`Last checked: ${device.last_update_check || 'recently'}`}>
-                            ✓ UP TO DATE
-                          </span>
-                          {device.operating_system && (
-                            <div className="device-secondary" style={{ fontSize: "11px", marginTop: "3px" }}>
-                              {device.operating_system} {device.os_version || ""}
+                      {(() => {
+                        const activeJob = getActiveJobForDevice(device);
+                        if (activeJob) {
+                          return (
+                            <div>
+                              <span
+                                className="status-badge warning"
+                                style={{
+                                  cursor: "pointer",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "5px",
+                                  background: "#f59e0b",
+                                  color: "#000",
+                                  fontWeight: "700",
+                                }}
+                                onClick={() => {
+                                  setSelectedJobDetails(activeJob);
+                                  setShowJobsModal(true);
+                                }}
+                                title="Click to view update progress and logs"
+                              >
+                                <span>⚡</span>
+                                {activeJob.status === "IN_PROGRESS"
+                                  ? `UPDATING ${activeJob.progress_percent}%`
+                                  : "QUEUED"}
+                              </span>
+                              <div className="device-secondary" style={{ fontSize: "11px", marginTop: "3px" }}>
+                                Job #{activeJob.id} {activeJob.is_local ? "(Local)" : "(Remote Agent)"}
+                              </div>
                             </div>
-                          )}
-                        </div>
-                      ) : device.update_status === "updates_available" ? (
-                        <div>
-                          <span className="status-badge warning" title={`${device.pending_updates} updates pending`}>
-                            ⚠️ {device.pending_updates ?? "—"} UPDATES
-                          </span>
-                          {device.operating_system && (
-                            <div className="device-secondary" style={{ fontSize: "11px", marginTop: "3px" }}>
-                              {device.operating_system} {device.os_version || ""}
+                          );
+                        }
+
+                        if (device.update_status === "up_to_date") {
+                          return (
+                            <div>
+                              <span className="status-badge allowed" title={`Last checked: ${device.last_update_check || 'recently'}`}>
+                                ✓ UP TO DATE
+                              </span>
+                              {device.operating_system && (
+                                <div className="device-secondary" style={{ fontSize: "11px", marginTop: "3px" }}>
+                                  {device.operating_system} {device.os_version || ""}
+                                </div>
+                              )}
                             </div>
-                          )}
-                        </div>
-                      ) : (
-                        <div>
-                          <span className="status-badge offline" style={{ opacity: 0.6 }} title="No telemetry agent reporting for this LAN machine">
-                            ⚪ NO AGENT
-                          </span>
-                        </div>
-                      )}
+                          );
+                        }
+
+                        if (device.update_status === "updates_available") {
+                          return (
+                            <div>
+                              <span className="status-badge warning" title={`${device.pending_updates} updates pending`}>
+                                ⚠️ {device.pending_updates ?? "—"} UPDATES
+                              </span>
+                              {device.operating_system && (
+                                <div className="device-secondary" style={{ fontSize: "11px", marginTop: "3px" }}>
+                                  {device.operating_system} {device.os_version || ""}
+                                </div>
+                              )}
+                              <button
+                                type="button"
+                                className="primary-button small"
+                                style={{
+                                  marginTop: "6px",
+                                  fontSize: "11px",
+                                  padding: "3px 8px",
+                                  backgroundColor: "#10b981",
+                                  borderColor: "#059669",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "4px",
+                                  fontWeight: "600",
+                                }}
+                                onClick={() => setDeployModalDevice(device)}
+                                title="Centrally deploy pending updates to this machine"
+                              >
+                                ⚡ Deploy Updates
+                              </button>
+                            </div>
+                          );
+                        }
+
+                        return (
+                          <div>
+                            <span className="status-badge offline" style={{ opacity: 0.6 }} title="No telemetry agent reporting for this LAN machine">
+                              ⚪ NO AGENT
+                            </span>
+                          </div>
+                        );
+                      })()}
                     </td>
 
                     <td>
@@ -3110,6 +3266,25 @@ const Dashboard = () => {
               Latest update report from each monitored endpoint
             </div>
           </div>
+          <div style={{ display: "flex", gap: "8px" }}>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => { loadPatchJobs(); setShowJobsModal(true); }}
+              style={{ display: "flex", alignItems: "center", gap: "6px" }}
+            >
+              📋 Remediation Jobs ({patchJobs.length})
+            </button>
+            <button
+              type="button"
+              className="primary-button"
+              onClick={scanLanUpdates}
+              disabled={lanScanLoading}
+              style={{ display: "flex", alignItems: "center", gap: "6px" }}
+            >
+              {lanScanLoading ? "⏳ Scanning..." : "⚡ Scan LAN Updates"}
+            </button>
+          </div>
         </div>
 
         <div className="table-container">
@@ -3123,24 +3298,23 @@ const Dashboard = () => {
                 <th>PENDING</th>
                 <th>LAST CHECKED</th>
                 <th>REPORT AGE</th>
+                <th>ACTION</th>
               </tr>
             </thead>
             <tbody>
               {dashboardUpdatesLoading ? (
                 <tr>
-                  <td colSpan="7">Loading endpoint reports...</td>
+                  <td colSpan="8">Loading endpoint reports...</td>
                 </tr>
               ) : dashboardEndpointUpdates.length === 0 ? (
                 <tr>
-                  <td colSpan="7">
+                  <td colSpan="8">
                     No endpoint update reports available.
                   </td>
                 </tr>
               ) : (
                 dashboardEndpointUpdates.map((endpoint) => {
-                  const checkedAt = endpoint.last_checked
-                    ? new Date(`${endpoint.last_checked}Z`)
-                    : null;
+                  const checkedAt = parseEndpointDate(endpoint.last_checked);
 
                   const ageMinutes = checkedAt
                     ? (Date.now() - checkedAt.getTime()) / 60000
@@ -3148,6 +3322,8 @@ const Dashboard = () => {
 
                   const isFresh =
                     ageMinutes >= 0 && ageMinutes <= 15;
+
+                  const activeJob = getActiveJobForDevice(endpoint);
 
                   return (
                     <tr key={endpoint.id}>
@@ -3194,6 +3370,43 @@ const Dashboard = () => {
                           : ageMinutes <= 15
                           ? "Recent"
                           : `${Math.floor(ageMinutes)} min ago`}
+                      </td>
+                      <td>
+                        {activeJob ? (
+                          <button
+                            type="button"
+                            className="secondary-button small"
+                            style={{
+                              fontSize: "11px",
+                              padding: "3px 8px",
+                              color: "#f59e0b",
+                              borderColor: "#f59e0b",
+                              fontWeight: "700",
+                            }}
+                            onClick={() => {
+                              setSelectedJobDetails(activeJob);
+                              setShowJobsModal(true);
+                            }}
+                          >
+                            ⚡ {activeJob.status === "IN_PROGRESS" ? `${activeJob.progress_percent}%` : "Queued"}
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="primary-button small"
+                            style={{
+                              fontSize: "11px",
+                              padding: "3px 8px",
+                              background: "#10b981",
+                              borderColor: "#059669",
+                              fontWeight: "600",
+                            }}
+                            onClick={() => setDeployModalDevice(endpoint)}
+                            title="Centrally deploy updates to this machine"
+                          >
+                            ⚡ Deploy Updates
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );
@@ -3801,6 +4014,290 @@ console.log("FRESHNESS DEBUG:", lastChecked, new Date(lastChecked), now);
       default:
         return <Dashboard />;
     }
+  };
+
+  // ------------------------------------------------------------
+  // PATCH REMEDIATION MODALS
+  // ------------------------------------------------------------
+
+  const renderPatchModals = () => {
+    return (
+      <>
+        {deployModalDevice && (
+          <div
+            className="modal-overlay"
+            onClick={() => {
+              if (deployingStatus !== "dispatching") {
+                setDeployModalDevice(null);
+                setDeployingStatus(null);
+              }
+            }}
+          >
+            <div
+              className="automation-modal"
+              onClick={(e) => e.stopPropagation()}
+              style={{ maxWidth: "580px" }}
+            >
+              <div className="automation-modal-header">
+                <div>
+                  <div className="automation-label">CENTRAL PATCH REMEDIATION</div>
+                  <div className="automation-title">Deploy Updates</div>
+                </div>
+                <button
+                  type="button"
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    color: "#94a3b8",
+                    fontSize: "20px",
+                    cursor: "pointer",
+                  }}
+                  onClick={() => {
+                    setDeployModalDevice(null);
+                    setDeployingStatus(null);
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div style={{ marginTop: "16px" }}>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: "12px",
+                    background: "#090d16",
+                    border: "1px solid #1e293b",
+                    borderRadius: "8px",
+                    padding: "16px",
+                  }}
+                >
+                  <div>
+                    <span style={{ fontSize: "11px", color: "#64748b", textTransform: "uppercase" }}>Target Machine</span>
+                    <div style={{ fontWeight: "700", color: "#f8fafc", fontSize: "15px", marginTop: "2px" }}>
+                      {deployModalDevice.hostname || "Unknown Host"}
+                    </div>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: "11px", color: "#64748b", textTransform: "uppercase" }}>IP Address</span>
+                    <div style={{ fontWeight: "600", color: "#f8fafc", fontSize: "15px", marginTop: "2px" }}>
+                      {deployModalDevice.ip_address || deployModalDevice.device_ip || "LAN Interface"}
+                    </div>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: "11px", color: "#64748b", textTransform: "uppercase" }}>Operating System</span>
+                    <div style={{ color: "#cbd5e1", fontSize: "13px", marginTop: "2px" }}>
+                      {deployModalDevice.operating_system || "Linux / Windows"} {deployModalDevice.os_version || ""}
+                    </div>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: "11px", color: "#64748b", textTransform: "uppercase" }}>Pending Patches</span>
+                    <div style={{ color: "#f59e0b", fontWeight: "700", fontSize: "13px", marginTop: "2px" }}>
+                      ⚠️ {deployModalDevice.pending_updates ?? "Available"} Updates Pending
+                    </div>
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    margin: "16px 0",
+                    padding: "12px 14px",
+                    background: "rgba(59, 130, 246, 0.08)",
+                    border: "1px solid rgba(59, 130, 246, 0.25)",
+                    borderRadius: "6px",
+                    fontSize: "13px",
+                    color: "#93c5fd",
+                    lineHeight: "1.5",
+                  }}
+                >
+                  {(deployModalDevice.hostname === "kali" ||
+                    deployModalDevice.ip_address === "127.0.0.1" ||
+                    deployModalDevice.ip_address === "192.168.0.101") ? (
+                    <div>
+                      🖥️ <strong>Local Machine Remediation:</strong> Updates will be applied immediately using the native package manager (<code>apt-get upgrade -y</code>).
+                    </div>
+                  ) : (
+                    <div>
+                      📡 <strong>LAN Remote Remediation (Approach 1):</strong> An update installation job will be dispatched. When this machine's agent reports its check-in, it will automatically download and install updates natively and sync completion back to NETOPS.
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "20px" }}>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => {
+                      setDeployModalDevice(null);
+                      setDeployingStatus(null);
+                    }}
+                    disabled={deployingStatus === "dispatching"}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="primary-button"
+                    style={{ background: "#10b981", borderColor: "#059669" }}
+                    disabled={deployingStatus === "dispatching"}
+                    onClick={async () => {
+                      const target = deployModalDevice;
+                      const job = await deployUpdates(target);
+                      if (job) {
+                        setDeployModalDevice(null);
+                        setDeployingStatus(null);
+                        setSelectedJobDetails(job);
+                        setShowJobsModal(true);
+                      }
+                    }}
+                  >
+                    {deployingStatus === "dispatching" ? "⏳ Queueing Update Job..." : "⚡ Confirm & Deploy Updates"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showJobsModal && (
+          <div
+            className="modal-overlay"
+            onClick={() => setShowJobsModal(false)}
+          >
+            <div
+              className="automation-modal"
+              onClick={(e) => e.stopPropagation()}
+              style={{ width: "min(850px, 95%)" }}
+            >
+              <div className="automation-modal-header">
+                <div>
+                  <div className="automation-label">NETOPS REMEDIATION</div>
+                  <div className="automation-title">Central Update Jobs & Logs</div>
+                </div>
+                <button
+                  type="button"
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    color: "#94a3b8",
+                    fontSize: "20px",
+                    cursor: "pointer",
+                  }}
+                  onClick={() => setShowJobsModal(false)}
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div style={{ marginTop: "16px" }}>
+                {patchJobs.length === 0 ? (
+                  <div style={{ textAlign: "center", padding: "30px", color: "#64748b" }}>
+                    No update deployment jobs have been triggered yet.
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "10px", maxHeight: "260px", overflowY: "auto", marginBottom: "16px" }}>
+                    {patchJobs.map((job) => (
+                      <div
+                        key={job.id}
+                        onClick={() => setSelectedJobDetails(job)}
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          padding: "10px 14px",
+                          borderRadius: "6px",
+                          cursor: "pointer",
+                          background: selectedJobDetails?.id === job.id ? "#1e293b" : "#0f172a",
+                          border: selectedJobDetails?.id === job.id ? "1px solid #3b82f6" : "1px solid #1e293b",
+                        }}
+                      >
+                        <div>
+                          <div style={{ fontWeight: "700", color: "#f8fafc", fontSize: "14px" }}>
+                            Job #{job.id} — {job.hostname} ({job.ip_address || "LAN"})
+                          </div>
+                          <div style={{ fontSize: "12px", color: "#94a3b8", marginTop: "2px" }}>
+                            {job.is_local ? "🖥️ Local Host Execution" : "📡 Remote Agent Queue"} • {job.created_at ? new Date(job.created_at.endsWith("Z") ? job.created_at : job.created_at + "Z").toLocaleTimeString() : ""}
+                          </div>
+                        </div>
+
+                        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                          <span
+                            className={`status-badge ${
+                              job.status === "COMPLETED"
+                                ? "allowed"
+                                : job.status === "IN_PROGRESS"
+                                ? "warning"
+                                : job.status === "FAILED"
+                                ? "blocked"
+                                : "offline"
+                            }`}
+                          >
+                            {job.status === "IN_PROGRESS" ? `UPDATING ${job.progress_percent}%` : job.status}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {selectedJobDetails && (
+                  <div style={{ background: "#06090e", border: "1px solid #1e293b", borderRadius: "8px", padding: "14px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px" }}>
+                      <span style={{ fontSize: "12px", fontWeight: "700", color: "#94a3b8" }}>
+                        LIVE EXECUTION LOGS (JOB #{selectedJobDetails.id} - {selectedJobDetails.hostname})
+                      </span>
+                      <span style={{ fontSize: "12px", color: "#64748b" }}>
+                        Progress: {selectedJobDetails.progress_percent}%
+                      </span>
+                    </div>
+
+                    <div style={{ background: "#111827", height: "6px", borderRadius: "3px", overflow: "hidden", marginBottom: "12px" }}>
+                      <div
+                        style={{
+                          height: "100%",
+                          width: `${selectedJobDetails.progress_percent}%`,
+                          background: selectedJobDetails.status === "FAILED" ? "#ef4444" : "#10b981",
+                          transition: "width 0.3s ease",
+                        }}
+                      />
+                    </div>
+
+                    <pre
+                      style={{
+                        background: "#030712",
+                        color: "#4ade80",
+                        padding: "12px",
+                        borderRadius: "6px",
+                        fontSize: "12px",
+                        fontFamily: "monospace",
+                        maxHeight: "180px",
+                        overflowY: "auto",
+                        whiteSpace: "pre-wrap",
+                        margin: 0,
+                      }}
+                    >
+                      {selectedJobDetails.log_output || "Awaiting execution..."}
+                      {selectedJobDetails.error_message ? `\nError: ${selectedJobDetails.error_message}` : ""}
+                    </pre>
+                  </div>
+                )}
+
+                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "16px" }}>
+                  <button
+                    type="button"
+                    className="primary-button small"
+                    onClick={() => setShowJobsModal(false)}
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </>
+    );
   };
 
   // ------------------------------------------------------------
@@ -5480,6 +5977,7 @@ console.log("FRESHNESS DEBUG:", lastChecked, new Date(lastChecked), now);
         )}
 
         {renderAutomationResult()}
+        {renderPatchModals()}
       </div>
     </>
   );

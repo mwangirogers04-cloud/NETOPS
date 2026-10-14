@@ -7,8 +7,21 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models.endpoint_update import EndpointUpdate
 from ..models.device import Device
+from ..models.patch_job import PatchJob
+from ..schemas.patch_job import (
+    CreatePatchJobRequest,
+    UpdateJobStatusRequest,
+    PatchJobResponse,
+)
 from ..services.event_service import create_event
 from ..services.network_patch_scanner import scan_lan_for_updates
+from ..services.patch_remediation_service import (
+    create_patch_job,
+    get_pending_job_for_agent,
+    update_patch_job_status,
+    list_patch_jobs,
+    is_local_machine,
+)
 
 router = APIRouter(
     prefix="/endpoint-updates",
@@ -128,6 +141,20 @@ def report_endpoint_update(
     db.commit()
     db.refresh(endpoint_update)
 
+    # Check for queued patch commands for this endpoint
+    pending_job = get_pending_job_for_agent(
+        db=db,
+        hostname=endpoint_update.hostname,
+        mac_address=endpoint_update.mac_address,
+        machine_id=endpoint_update.machine_id,
+    )
+    pending_cmd = None
+    if pending_job:
+        pending_cmd = {
+            "job_id": pending_job.id,
+            "action": pending_job.action,
+        }
+
     return {
         "message": "Endpoint update status recorded",
         "id": endpoint_update.id,
@@ -146,6 +173,7 @@ def report_endpoint_update(
         "pending_updates": endpoint_update.pending_updates,
         "security_updates": endpoint_update.security_updates,
         "last_checked": endpoint_update.last_checked,
+        "pending_command": pending_cmd,
     }
 
 
@@ -265,3 +293,111 @@ def run_lan_patch_scan(
             status_code=500,
             detail=f"Agentless LAN scan failed: {exc}",
         ) from exc
+
+
+@router.post("/jobs", response_model=PatchJobResponse)
+def trigger_patch_job(
+    payload: CreatePatchJobRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Queue an update deployment job for an endpoint.
+    If the target is the local host, starts native update execution immediately.
+    If remote, queues command for the machine's agent to execute on check-in.
+    """
+    try:
+        job, is_local = create_patch_job(
+            db=db,
+            hostname=payload.hostname,
+            ip_address=payload.ip_address,
+            mac_address=payload.mac_address,
+            device_id=payload.device_id,
+            action=payload.action,
+            initiated_by=payload.initiated_by,
+        )
+        resp = PatchJobResponse.model_validate(job)
+        resp.is_local = is_local
+        return resp
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to create update job: {exc}",
+        ) from exc
+
+
+@router.get("/jobs", response_model=list[PatchJobResponse])
+def get_patch_jobs(
+    limit: int = 50,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+):
+    """List recent update deployment jobs and their status."""
+    jobs = list_patch_jobs(db, limit=limit, offset=offset)
+    results = []
+    for j in jobs:
+        resp = PatchJobResponse.model_validate(j)
+        resp.is_local = is_local_machine(j.hostname, j.ip_address, j.mac_address)
+        results.append(resp)
+    return results
+
+
+@router.get("/jobs/{job_id}", response_model=PatchJobResponse)
+def get_patch_job_by_id(
+    job_id: int,
+    db: Session = Depends(get_db),
+):
+    """Retrieve details, status, and logs for a specific patch job."""
+    job = db.get(PatchJob, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Patch job not found")
+    resp = PatchJobResponse.model_validate(job)
+    resp.is_local = is_local_machine(job.hostname, job.ip_address, job.mac_address)
+    return resp
+
+
+@router.post("/jobs/{job_id}/status", response_model=PatchJobResponse)
+def report_job_status(
+    job_id: int,
+    payload: UpdateJobStatusRequest,
+    db: Session = Depends(get_db),
+):
+    """Agent status callback to report execution progress, completion, and logs."""
+    job = update_patch_job_status(
+        db=db,
+        job_id=job_id,
+        status=payload.status,
+        progress_percent=payload.progress_percent,
+        log_output=payload.log_output,
+        error_message=payload.error_message,
+    )
+    if not job:
+        raise HTTPException(status_code=404, detail="Patch job not found")
+    resp = PatchJobResponse.model_validate(job)
+    resp.is_local = is_local_machine(job.hostname, job.ip_address, job.mac_address)
+    return resp
+
+
+@router.get("/commands/{identifier}")
+def poll_pending_command(
+    identifier: str,
+    db: Session = Depends(get_db),
+):
+    """
+    Agent polling endpoint: returns any pending patch job for the given
+    hostname, MAC address, or machine ID.
+    """
+    job = get_pending_job_for_agent(
+        db=db,
+        hostname=identifier,
+        mac_address=identifier if ":" in identifier or "-" in identifier else None,
+        machine_id=identifier,
+    )
+    if not job:
+        return {"command": None}
+
+    return {
+        "command": job.action,
+        "job_id": job.id,
+        "hostname": job.hostname,
+        "created_at": job.created_at,
+    }

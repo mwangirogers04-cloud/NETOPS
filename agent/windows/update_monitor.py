@@ -177,9 +177,31 @@ def collect_update_status():
     }
 
 
-def send_update_status(data):
+import os
+import sys
+
+def get_server_url():
+    """Determine the NETOPS server URL from CLI arg, ENV, or default."""
+    for arg in sys.argv[1:]:
+        if arg.startswith("http://") or arg.startswith("https://"):
+            url = arg.rstrip("/")
+            if not url.endswith("/endpoint-updates"):
+                url += "/endpoint-updates/"
+            return url
+
+    env_url = os.environ.get("NETOPS_SERVER_URL")
+    if env_url:
+        url = env_url.rstrip("/")
+        if not url.endswith("/endpoint-updates"):
+            url += "/endpoint-updates/"
+        return url
+
+    return "http://192.168.0.101:8000/endpoint-updates/"
+
+
+def send_update_status(data, server_url=None):
     """Send Windows endpoint update status to the NETOPS backend."""
-    url = "http://192.168.0.101:8000/endpoint-updates/"
+    url = server_url or get_server_url()
 
     payload = json.dumps(data).encode("utf-8")
 
@@ -203,9 +225,128 @@ def send_update_status(data):
         return f"Error sending update status: {error}"
 
 
+def report_job_status(job_id, status, progress_percent=None, log_output=None, error_message=None, server_url=None):
+    """Report Windows update execution progress back to NETOPS."""
+    base_url = (server_url or get_server_url()).rstrip("/")
+    if base_url.endswith("/endpoint-updates"):
+        status_url = f"{base_url}/jobs/{job_id}/status"
+    else:
+        status_url = f"{base_url}/endpoint-updates/jobs/{job_id}/status"
+
+    payload = {
+        "status": status,
+        "progress_percent": progress_percent,
+        "log_output": log_output,
+        "error_message": error_message,
+    }
+    req = urllib.request.Request(
+        status_url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return resp.read().decode("utf-8")
+    except Exception as err:
+        print(f"Warning: Failed to report Windows job status to NETOPS: {err}")
+        return None
+
+
+def execute_patch_job(job_id, action, server_url=None):
+    """Execute Windows Update installation requested by NETOPS central console."""
+    print(f"\n[NETOPS INSTRUCTION] Received remote update command: Job #{job_id} ({action})")
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    report_job_status(
+        job_id=job_id,
+        status="IN_PROGRESS",
+        progress_percent=25,
+        log_output=f"[{now_str}] Windows agent accepted patch job #{job_id}. Initializing Windows Update session...",
+        server_url=server_url,
+    )
+
+    ps_script = r"""
+$ErrorActionPreference = 'Continue'
+try {
+    $session = New-Object -ComObject Microsoft.Update.Session
+    $searcher = $session.CreateUpdateSearcher()
+    $result = $searcher.Search("IsInstalled=0 and IsHidden=0")
+    if ($result.Updates.Count -eq 0) {
+        Write-Output "No pending updates found."
+        exit 0
+    }
+    Write-Output "Found $($result.Updates.Count) updates to install."
+    $updatesToInstall = New-Object -ComObject Microsoft.Update.UpdateColl
+    foreach ($update in $result.Updates) {
+        $updatesToInstall.Add($update) | Out-Null
+    }
+    $downloader = $session.CreateUpdateDownloader()
+    $downloader.Updates = $updatesToInstall
+    $downloader.Download()
+    $installer = $session.CreateUpdateInstaller()
+    $installer.Updates = $updatesToInstall
+    $res = $installer.Install()
+    Write-Output "Installation complete. ResultCode: $($res.ResultCode)"
+} catch {
+    # Fallback to USOClient command
+    Start-Process usoclient.exe StartInteractiveScan
+    Write-Output "Triggered USOClient interactive update scan."
+}
+"""
+    try:
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        report_job_status(
+            job_id=job_id,
+            status="IN_PROGRESS",
+            progress_percent=60,
+            log_output=f"[{now_str}] Downloading and applying Windows Updates via WUA...",
+            server_url=server_url,
+        )
+
+        res = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                ps_script,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=900,
+        )
+
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        output = res.stdout.strip() or res.stderr.strip()
+        print(f"[NETOPS] Windows update completed: {output}")
+
+        report_job_status(
+            job_id=job_id,
+            status="COMPLETED",
+            progress_percent=100,
+            log_output=f"[{now_str}] Windows Update finished: {output[-300:]}",
+            server_url=server_url,
+        )
+
+    except Exception as exc:
+        print(f"[NETOPS] Windows patch execution failed: {exc}")
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        report_job_status(
+            job_id=job_id,
+            status="FAILED",
+            error_message=str(exc),
+            log_output=f"[{now_str}] Windows execution error: {exc}",
+            server_url=server_url,
+        )
+
 
 if __name__ == "__main__":
     REPORT_INTERVAL = 300  # 5 minutes
+    run_once = "--once" in sys.argv
 
     while True:
         try:
@@ -217,12 +358,28 @@ if __name__ == "__main__":
             for key, value in information.items():
                 print(f"{key}: {value}")
 
-            print("\nSending update status to NETOPS...")
-            response = send_update_status(information)
+            target_url = get_server_url()
+            print(f"\nSending update status to NETOPS ({target_url})...")
+            response = send_update_status(information, target_url)
             print(response)
+
+            # Process central remediation instructions
+            try:
+                resp_json = json.loads(response)
+                if isinstance(resp_json, dict) and resp_json.get("pending_command"):
+                    cmd = resp_json["pending_command"]
+                    execute_patch_job(cmd["job_id"], cmd["action"], target_url)
+                    # Refresh and send updated status
+                    fresh_info = collect_update_status()
+                    send_update_status(fresh_info, target_url)
+            except Exception as proc_err:
+                print(f"Instruction processing notice: {proc_err}")
 
         except Exception as error:
             print(f"Endpoint monitoring error: {error}")
+
+        if run_once:
+            break
 
         print(
             f"\nNext update check in "

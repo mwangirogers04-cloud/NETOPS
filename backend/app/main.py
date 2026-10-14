@@ -10,6 +10,7 @@ from .models.device import Device
 from .models.event import Event
 from .models.access_schedule import AccessSchedule
 from .models.endpoint_update import EndpointUpdate
+from .models.patch_job import PatchJob
 
 from .api.devices import router as devices_router
 from .api.events import router as events_router
