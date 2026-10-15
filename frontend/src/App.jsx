@@ -4237,6 +4237,28 @@ console.log("FRESHNESS DEBUG:", lastChecked, new Date(lastChecked), now);
                           >
                             {job.status === "IN_PROGRESS" ? `UPDATING ${job.progress_percent}%` : job.status}
                           </span>
+
+                          {job.status === "PENDING" && (
+                            <button
+                              type="button"
+                              className="secondary-button small"
+                              style={{ fontSize: "11px", padding: "2px 8px", color: "#f87171", borderColor: "#7f1d1d" }}
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                if (window.confirm(`Cancel pending update job #${job.id} for ${job.hostname}?`)) {
+                                  try {
+                                    await fetch(`${API_URL}/endpoint-updates/jobs/${job.id}/cancel`, { method: "POST" });
+                                    await loadPatchJobs();
+                                  } catch (err) {
+                                    alert("Failed to cancel job: " + err.message);
+                                  }
+                                }
+                              }}
+                              title="Cancel this pending job from queue"
+                            >
+                              Cancel
+                            </button>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -4253,6 +4275,32 @@ console.log("FRESHNESS DEBUG:", lastChecked, new Date(lastChecked), now);
                         Progress: {selectedJobDetails.progress_percent}%
                       </span>
                     </div>
+
+                    {selectedJobDetails.status === "PENDING" && (
+                      <div style={{ background: "rgba(59, 130, 246, 0.1)", border: "1px solid #1d4ed8", borderRadius: "6px", padding: "10px 12px", marginBottom: "12px", fontSize: "12px", color: "#93c5fd", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <div>
+                          <strong>⏳ Queued for Remote Agent:</strong> This command is waiting in queue for <strong>{selectedJobDetails.hostname}</strong> to check in.
+                        </div>
+                        <button
+                          type="button"
+                          className="secondary-button small"
+                          style={{ fontSize: "11px", padding: "2px 8px", color: "#f87171", borderColor: "#7f1d1d", marginLeft: "10px", whiteSpace: "nowrap" }}
+                          onClick={async () => {
+                            if (window.confirm(`Cancel pending update job #${selectedJobDetails.id}?`)) {
+                              try {
+                                await fetch(`${API_URL}/endpoint-updates/jobs/${selectedJobDetails.id}/cancel`, { method: "POST" });
+                                await loadPatchJobs();
+                                setSelectedJobDetails((prev) => prev ? { ...prev, status: "CANCELLED" } : null);
+                              } catch (err) {
+                                alert("Failed to cancel job: " + err.message);
+                              }
+                            }
+                          }}
+                        >
+                          Cancel Job
+                        </button>
+                      </div>
+                    )}
 
                     <div style={{ background: "#111827", height: "6px", borderRadius: "3px", overflow: "hidden", marginBottom: "12px" }}>
                       <div

@@ -385,6 +385,48 @@ def report_job_status(
     return resp
 
 
+@router.post("/jobs/{job_id}/cancel", response_model=PatchJobResponse)
+def cancel_patch_job(
+    job_id: int,
+    db: Session = Depends(get_db),
+):
+    """Cancel a pending or in-progress update deployment job."""
+    job = db.get(PatchJob, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Patch job not found")
+
+    if job.status in ("COMPLETED", "FAILED", "CANCELLED"):
+        resp = PatchJobResponse.model_validate(job)
+        resp.is_local = is_local_machine(job.hostname, job.ip_address, job.mac_address)
+        return resp
+
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    job = update_patch_job_status(
+        db=db,
+        job_id=job.id,
+        status="CANCELLED",
+        error_message="Cancelled by Administrator from console.",
+        log_output=f"[{now_str}] Job cancelled by Administrator.",
+    )
+    resp = PatchJobResponse.model_validate(job)
+    resp.is_local = is_local_machine(job.hostname, job.ip_address, job.mac_address)
+    return resp
+
+
+@router.delete("/jobs/{job_id}")
+def delete_patch_job(
+    job_id: int,
+    db: Session = Depends(get_db),
+):
+    """Delete a patch deployment job from history."""
+    job = db.get(PatchJob, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Patch job not found")
+    db.delete(job)
+    db.commit()
+    return {"message": f"Job #{job_id} deleted successfully"}
+
+
 @router.get("/commands/{identifier}")
 def poll_pending_command(
     identifier: str,
@@ -409,3 +451,4 @@ def poll_pending_command(
         "hostname": job.hostname,
         "created_at": job.created_at,
     }
+

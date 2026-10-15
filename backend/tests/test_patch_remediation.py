@@ -313,3 +313,30 @@ def test_endpoint_updates_deduplication_and_patch_completion(client, db_session)
     assert endpoints2[0]["pending_updates"] == 0
     assert endpoints2[0]["update_status"] == "up_to_date"
 
+
+def test_cancel_and_delete_patch_job(client, db_session):
+    # Queue a job
+    create_res = client.post(
+        "/endpoint-updates/jobs",
+        json={
+            "hostname": "CANCEL-TEST-HOST",
+            "ip_address": "192.168.0.77",
+            "action": "INSTALL_ALL_UPDATES",
+        },
+    )
+    assert create_res.status_code == 200
+    job_id = create_res.json()["id"]
+
+    # Cancel the job
+    cancel_res = client.post(f"/endpoint-updates/jobs/{job_id}/cancel")
+    assert cancel_res.status_code == 200
+    assert cancel_res.json()["status"] == "CANCELLED"
+
+    # Delete the job
+    del_res = client.delete(f"/endpoint-updates/jobs/{job_id}")
+    assert del_res.status_code == 200
+
+    # Verify not found
+    get_res = client.get(f"/endpoint-updates/jobs/{job_id}")
+    assert get_res.status_code == 404
+
