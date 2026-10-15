@@ -21,6 +21,7 @@ from ..services.patch_remediation_service import (
     update_patch_job_status,
     list_patch_jobs,
     is_local_machine,
+    execute_patch_job_now,
 )
 
 router = APIRouter(
@@ -412,6 +413,23 @@ def cancel_patch_job(
     resp = PatchJobResponse.model_validate(job)
     resp.is_local = is_local_machine(job.hostname, job.ip_address, job.mac_address)
     return resp
+
+
+@router.post("/jobs/{job_id}/run-now", response_model=PatchJobResponse)
+def run_patch_job_now(
+    job_id: int,
+    db: Session = Depends(get_db),
+):
+    """
+    Manually trigger immediate execution / continuation of a queued, scheduled, or pending patch job.
+    """
+    try:
+        job = execute_patch_job_now(db=db, job_id=job_id)
+        resp = PatchJobResponse.model_validate(job)
+        resp.is_local = is_local_machine(job.hostname, job.ip_address, job.mac_address)
+        return resp
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.delete("/jobs/{job_id}")

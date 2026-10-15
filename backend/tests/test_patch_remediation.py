@@ -420,3 +420,25 @@ def test_cancel_scheduled_patch_job(client, db_session):
     assert not any(j.id == job_id for j in dispatched)
 
 
+def test_run_patch_job_now_pending_and_scheduled(client, db_session):
+    # 1. Create a pending job
+    create_res = client.post(
+        "/endpoint-updates/jobs",
+        json={
+            "hostname": "REMOTE-QUEUE-TEST",
+            "ip_address": "192.168.1.77",
+            "action": "INSTALL_ALL_UPDATES",
+        },
+    )
+    assert create_res.status_code == 200
+    job_id = create_res.json()["id"]
+    assert create_res.json()["status"] == "PENDING"
+
+    # 2. Trigger run-now / continue update
+    run_res = client.post(f"/endpoint-updates/jobs/{job_id}/run-now")
+    assert run_res.status_code == 200
+    data = run_res.json()
+    assert data["status"] in ("IN_PROGRESS", "COMPLETED")
+    assert "Manual execution triggered" in data["log_output"]
+
+

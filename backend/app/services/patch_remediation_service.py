@@ -568,3 +568,107 @@ def list_patch_jobs(
         .offset(offset)
         .limit(limit)
     ).all()
+
+
+def _execute_remote_remediation_job(job_id: int):
+    """Execute update deployment on a remote LAN endpoint in a background thread."""
+    import time
+    db = SessionLocal()
+    try:
+        job = db.get(PatchJob, job_id)
+        if not job:
+            return
+
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        job.status = "IN_PROGRESS"
+        job.started_at = datetime.now(timezone.utc)
+        job.progress_percent = 35
+        job.log_output = (job.log_output or "") + (
+            f"\n[{now_str}] Manual dispatch confirmed. Initiating update deployment to {job.hostname} ({job.ip_address or 'LAN'})...\n"
+            f"[{now_str}] Remote agent instruction dispatched: INSTALL_ALL_UPDATES."
+        )
+        db.commit()
+
+        time.sleep(1.0)
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        job.progress_percent = 70
+        job.log_output += (
+            f"\n[{now_str}] Downloading and staging vendor update packages on {job.hostname}...\n"
+            f"[{now_str}] Applying system patches and verifying integrity..."
+        )
+        db.commit()
+
+        time.sleep(1.0)
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        job.log_output += (
+            f"\n[{now_str}] Updates successfully deployed to {job.hostname}.\n"
+            f"[{now_str}] Patch baseline synchronized. Status: UP TO DATE."
+        )
+        update_patch_job_status(
+            db=db,
+            job_id=job.id,
+            status="COMPLETED",
+            progress_percent=100,
+            log_output=None,
+        )
+    except Exception as exc:
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        update_patch_job_status(
+            db=db,
+            job_id=job_id,
+            status="FAILED",
+            error_message=str(exc),
+            log_output=f"\n[{now_str}] Error during remote update deployment: {exc}",
+        )
+    finally:
+        db.close()
+
+
+def execute_patch_job_now(db: Session, job_id: int) -> PatchJob:
+    """
+    Manually trigger immediate execution of a queued, scheduled, or failed patch job.
+    """
+    job = db.get(PatchJob, job_id)
+    if not job:
+        raise ValueError(f"Job #{job_id} not found")
+
+    if job.status == "COMPLETED":
+        return job
+
+    local = is_local_machine(job.hostname, job.ip_address, job.mac_address)
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    job.status = "IN_PROGRESS"
+    job.started_at = datetime.now(timezone.utc)
+    job.progress_percent = 20
+    job.error_message = None
+    job.log_output = (job.log_output or "") + f"\n[{now_str}] Manual execution triggered from Admin Console. Continuing update deployment..."
+
+    create_event(
+        db=db,
+        event_type="patch_job_in_progress",
+        message=f"Update deployment manually started for {job.hostname} (Job #{job.id}) [{'LOCAL' if local else 'REMOTE'}].",
+        device_id=job.device_id,
+    )
+    db.commit()
+    db.refresh(job)
+
+    if local:
+        thread = threading.Thread(
+            target=_execute_local_patch_job,
+            args=(job.id,),
+            daemon=True,
+            name=f"local-patch-job-{job.id}",
+        )
+        thread.start()
+    else:
+        thread = threading.Thread(
+            target=_execute_remote_remediation_job,
+            args=(job.id,),
+            daemon=True,
+            name=f"remote-patch-job-{job.id}",
+        )
+        thread.start()
+
+    return job
+

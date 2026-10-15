@@ -140,6 +140,27 @@ function App() {
     }
   };
 
+  const runJobNow = async (jobId) => {
+    try {
+      const response = await fetch(`${API_URL}/endpoint-updates/jobs/${jobId}/run-now`, {
+        method: "POST",
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.detail || `Server error (${response.status})`);
+      }
+      const updatedJob = await response.json();
+      setSelectedJobDetails(updatedJob);
+      await loadPatchJobs();
+      await loadDevices();
+      return updatedJob;
+    } catch (err) {
+      console.error("Run job error:", err);
+      alert("Failed to start update: " + err.message);
+      return null;
+    }
+  };
+
   // ------------------------------------------------------------
   // LOAD DEVICES
   // ------------------------------------------------------------
@@ -899,6 +920,14 @@ const DevicesPage = () => {
           </button>
           <button
             type="button"
+            className={`secondary-button small ${deviceFilter === "queued" ? "active" : ""}`}
+            style={deviceFilter === "queued" ? { background: "#f59e0b", color: "#000", fontWeight: "700" } : { borderColor: "#f59e0b", color: "#f59e0b" }}
+            onClick={() => setDeviceFilter("queued")}
+          >
+            ⚡ Queued / Updating ({devices.filter(d => Boolean(getActiveJobForDevice(d))).length})
+          </button>
+          <button
+            type="button"
             className={`secondary-button small ${deviceFilter === "up_to_date" ? "active" : ""}`}
             style={deviceFilter === "up_to_date" ? { background: "#059669", color: "#fff" } : { borderColor: "#10b981" }}
             onClick={() => setDeviceFilter("up_to_date")}
@@ -1106,6 +1135,10 @@ const DevicesPage = () => {
       return device.update_status === "updates_available";
     }
 
+    if (deviceFilter === "queued") {
+      return Boolean(getActiveJobForDevice(device));
+    }
+
     if (deviceFilter === "up_to_date") {
       return device.update_status === "up_to_date";
     }
@@ -1229,6 +1262,31 @@ if (deviceFilter === "quarantined") {
                               <div className="device-secondary" style={{ fontSize: "11px", marginTop: "3px" }}>
                                 Job #{activeJob.id} {activeJob.status === "SCHEDULED" && activeJob.scheduled_at ? `(At ${new Date(activeJob.scheduled_at.endsWith("Z") ? activeJob.scheduled_at : activeJob.scheduled_at + "Z").toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})` : activeJob.is_local ? "(Local)" : "(Remote Agent)"}
                               </div>
+                              {(activeJob.status === "PENDING" || activeJob.status === "SCHEDULED") && (
+                                <button
+                                  type="button"
+                                  className="primary-button small"
+                                  style={{
+                                    marginTop: "5px",
+                                    fontSize: "11px",
+                                    padding: "3px 8px",
+                                    backgroundColor: "#10b981",
+                                    borderColor: "#059669",
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: "4px",
+                                    fontWeight: "600",
+                                  }}
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    await runJobNow(activeJob.id);
+                                    setShowJobsModal(true);
+                                  }}
+                                  title="Continue update deployment immediately"
+                                >
+                                  ▶️ Continue Update
+                                </button>
+                              )}
                             </div>
                           );
                         }
@@ -3387,27 +3445,49 @@ const Dashboard = () => {
                       </td>
                       <td>
                         {activeJob ? (
-                          <button
-                            type="button"
-                            className="secondary-button small"
-                            style={{
-                              fontSize: "11px",
-                              padding: "3px 8px",
-                              color: activeJob.status === "SCHEDULED" ? "#a5b4fc" : "#f59e0b",
-                              borderColor: activeJob.status === "SCHEDULED" ? "#6366f1" : "#f59e0b",
-                              fontWeight: "700",
-                            }}
-                            onClick={() => {
-                              setSelectedJobDetails(activeJob);
-                              setShowJobsModal(true);
-                            }}
-                          >
-                            {activeJob.status === "SCHEDULED"
-                              ? "📅 Scheduled"
-                              : activeJob.status === "IN_PROGRESS"
-                              ? `⚡ ${activeJob.progress_percent}%`
-                              : "⚡ Queued"}
-                          </button>
+                          <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
+                            <button
+                              type="button"
+                              className="secondary-button small"
+                              style={{
+                                fontSize: "11px",
+                                padding: "3px 8px",
+                                color: activeJob.status === "SCHEDULED" ? "#a5b4fc" : "#f59e0b",
+                                borderColor: activeJob.status === "SCHEDULED" ? "#6366f1" : "#f59e0b",
+                                fontWeight: "700",
+                              }}
+                              onClick={() => {
+                                setSelectedJobDetails(activeJob);
+                                setShowJobsModal(true);
+                              }}
+                            >
+                              {activeJob.status === "SCHEDULED"
+                                ? "📅 Scheduled"
+                                : activeJob.status === "IN_PROGRESS"
+                                ? `⚡ ${activeJob.progress_percent}%`
+                                : "⚡ Queued"}
+                            </button>
+                            {(activeJob.status === "PENDING" || activeJob.status === "SCHEDULED") && (
+                              <button
+                                type="button"
+                                className="primary-button small"
+                                style={{
+                                  fontSize: "11px",
+                                  padding: "3px 8px",
+                                  backgroundColor: "#10b981",
+                                  borderColor: "#059669",
+                                  fontWeight: "600",
+                                }}
+                                onClick={async () => {
+                                  await runJobNow(activeJob.id);
+                                  setShowJobsModal(true);
+                                }}
+                                title="Continue update deployment immediately"
+                              >
+                                ▶️ Continue
+                              </button>
+                            )}
+                          </div>
                         ) : (
                           <button
                             type="button"
@@ -4429,25 +4509,53 @@ console.log("FRESHNESS DEBUG:", lastChecked, new Date(lastChecked), now);
                           </span>
 
                           {(job.status === "PENDING" || job.status === "SCHEDULED") && (
+                            <>
+                              <button
+                                type="button"
+                                className="primary-button small"
+                                style={{ fontSize: "11px", padding: "2px 8px", background: "#10b981", borderColor: "#059669", fontWeight: "600" }}
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  await runJobNow(job.id);
+                                }}
+                                title="Continue and execute update immediately"
+                              >
+                                ▶️ Continue Update
+                              </button>
+                              <button
+                                type="button"
+                                className="secondary-button small"
+                                style={{ fontSize: "11px", padding: "2px 8px", color: "#f87171", borderColor: "#7f1d1d" }}
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  const label = job.status === "SCHEDULED" ? "scheduled update" : "pending update";
+                                  if (window.confirm(`Cancel ${label} job #${job.id} for ${job.hostname}?`)) {
+                                    try {
+                                      await fetch(`${API_URL}/endpoint-updates/jobs/${job.id}/cancel`, { method: "POST" });
+                                      await loadPatchJobs();
+                                    } catch (err) {
+                                      alert("Failed to cancel job: " + err.message);
+                                    }
+                                  }
+                                }}
+                                title={job.status === "SCHEDULED" ? "Cancel scheduled maintenance job" : "Cancel this pending job from queue"}
+                              >
+                                Cancel
+                              </button>
+                            </>
+                          )}
+                          {(job.status === "CANCELLED" || job.status === "FAILED") && (
                             <button
                               type="button"
                               className="secondary-button small"
-                              style={{ fontSize: "11px", padding: "2px 8px", color: "#f87171", borderColor: "#7f1d1d" }}
+                              style={{ fontSize: "11px", padding: "2px 8px", color: "#60a5fa", borderColor: "#2563eb", fontWeight: "600" }}
                               onClick={async (e) => {
                                 e.stopPropagation();
-                                const label = job.status === "SCHEDULED" ? "scheduled update" : "pending update";
-                                if (window.confirm(`Cancel ${label} job #${job.id} for ${job.hostname}?`)) {
-                                  try {
-                                    await fetch(`${API_URL}/endpoint-updates/jobs/${job.id}/cancel`, { method: "POST" });
-                                    await loadPatchJobs();
-                                  } catch (err) {
-                                    alert("Failed to cancel job: " + err.message);
-                                  }
-                                }
+                                await runJobNow(job.id);
                               }}
-                              title={job.status === "SCHEDULED" ? "Cancel scheduled maintenance job" : "Cancel this pending job from queue"}
+                              title="Restart or retry this update job"
                             >
-                              Cancel
+                              🔄 Retry Update
                             </button>
                           )}
                         </div>
@@ -4468,53 +4576,97 @@ console.log("FRESHNESS DEBUG:", lastChecked, new Date(lastChecked), now);
                     </div>
 
                     {selectedJobDetails.status === "SCHEDULED" && (
-                      <div style={{ background: "rgba(99, 102, 241, 0.1)", border: "1px solid #4f46e5", borderRadius: "6px", padding: "10px 12px", marginBottom: "12px", fontSize: "12px", color: "#c7d2fe", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <div style={{ background: "rgba(99, 102, 241, 0.1)", border: "1px solid #4f46e5", borderRadius: "6px", padding: "10px 12px", marginBottom: "12px", fontSize: "12px", color: "#c7d2fe", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px" }}>
                         <div>
                           <strong>📅 Scheduled Maintenance Window:</strong> Updates for <strong>{selectedJobDetails.hostname}</strong> are scheduled to run at <strong>{selectedJobDetails.scheduled_at ? new Date(selectedJobDetails.scheduled_at.endsWith("Z") ? selectedJobDetails.scheduled_at : selectedJobDetails.scheduled_at + "Z").toLocaleString() : "the scheduled time"}</strong>.
                         </div>
-                        <button
-                          type="button"
-                          className="secondary-button small"
-                          style={{ fontSize: "11px", padding: "2px 8px", color: "#f87171", borderColor: "#7f1d1d", marginLeft: "10px", whiteSpace: "nowrap" }}
-                          onClick={async () => {
-                            if (window.confirm(`Cancel scheduled update job #${selectedJobDetails.id}?`)) {
-                              try {
-                                await fetch(`${API_URL}/endpoint-updates/jobs/${selectedJobDetails.id}/cancel`, { method: "POST" });
-                                await loadPatchJobs();
-                                setSelectedJobDetails((prev) => prev ? { ...prev, status: "CANCELLED" } : null);
-                              } catch (err) {
-                                alert("Failed to cancel job: " + err.message);
+                        <div style={{ display: "flex", gap: "8px", flexShrink: 0 }}>
+                          <button
+                            type="button"
+                            className="primary-button small"
+                            style={{ fontSize: "11px", padding: "2px 8px", background: "#10b981", borderColor: "#059669", fontWeight: "600", whiteSpace: "nowrap" }}
+                            onClick={async () => {
+                              await runJobNow(selectedJobDetails.id);
+                            }}
+                            title="Execute updates immediately without waiting for scheduled time"
+                          >
+                            ▶️ Run Now
+                          </button>
+                          <button
+                            type="button"
+                            className="secondary-button small"
+                            style={{ fontSize: "11px", padding: "2px 8px", color: "#f87171", borderColor: "#7f1d1d", whiteSpace: "nowrap" }}
+                            onClick={async () => {
+                              if (window.confirm(`Cancel scheduled update job #${selectedJobDetails.id}?`)) {
+                                try {
+                                  await fetch(`${API_URL}/endpoint-updates/jobs/${selectedJobDetails.id}/cancel`, { method: "POST" });
+                                  await loadPatchJobs();
+                                  setSelectedJobDetails((prev) => prev ? { ...prev, status: "CANCELLED" } : null);
+                                } catch (err) {
+                                  alert("Failed to cancel job: " + err.message);
+                                }
                               }
-                            }
-                          }}
-                        >
-                          Cancel Schedule
-                        </button>
+                            }}
+                          >
+                            Cancel Schedule
+                          </button>
+                        </div>
                       </div>
                     )}
 
                     {selectedJobDetails.status === "PENDING" && (
-                      <div style={{ background: "rgba(59, 130, 246, 0.1)", border: "1px solid #1d4ed8", borderRadius: "6px", padding: "10px 12px", marginBottom: "12px", fontSize: "12px", color: "#93c5fd", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <div style={{ background: "rgba(59, 130, 246, 0.1)", border: "1px solid #1d4ed8", borderRadius: "6px", padding: "10px 12px", marginBottom: "12px", fontSize: "12px", color: "#93c5fd", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px" }}>
                         <div>
-                          <strong>⏳ Queued for Remote Agent:</strong> This command is waiting in queue for <strong>{selectedJobDetails.hostname}</strong> to check in.
+                          <strong>⏳ Queued for Updates:</strong> This command is waiting in queue for <strong>{selectedJobDetails.hostname}</strong> ({selectedJobDetails.ip_address || "LAN"}).
+                        </div>
+                        <div style={{ display: "flex", gap: "8px", flexShrink: 0 }}>
+                          <button
+                            type="button"
+                            className="primary-button small"
+                            style={{ fontSize: "11px", padding: "3px 10px", background: "#10b981", borderColor: "#059669", fontWeight: "600", whiteSpace: "nowrap" }}
+                            onClick={async () => {
+                              await runJobNow(selectedJobDetails.id);
+                            }}
+                            title="Continue update deployment immediately"
+                          >
+                            ▶️ Continue to Update Now
+                          </button>
+                          <button
+                            type="button"
+                            className="secondary-button small"
+                            style={{ fontSize: "11px", padding: "2px 8px", color: "#f87171", borderColor: "#7f1d1d", whiteSpace: "nowrap" }}
+                            onClick={async () => {
+                              if (window.confirm(`Cancel pending update job #${selectedJobDetails.id}?`)) {
+                                try {
+                                  await fetch(`${API_URL}/endpoint-updates/jobs/${selectedJobDetails.id}/cancel`, { method: "POST" });
+                                  await loadPatchJobs();
+                                  setSelectedJobDetails((prev) => prev ? { ...prev, status: "CANCELLED" } : null);
+                                } catch (err) {
+                                  alert("Failed to cancel job: " + err.message);
+                                }
+                              }
+                            }}
+                          >
+                            Cancel Job
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {(selectedJobDetails.status === "CANCELLED" || selectedJobDetails.status === "FAILED") && (
+                      <div style={{ background: "rgba(239, 68, 68, 0.1)", border: "1px solid #b91c1c", borderRadius: "6px", padding: "10px 12px", marginBottom: "12px", fontSize: "12px", color: "#fca5a5", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px" }}>
+                        <div>
+                          <strong>{selectedJobDetails.status === "CANCELLED" ? "✕ Update Job Cancelled:" : "⚠️ Update Job Failed:"}</strong> You can restart and continue update deployment anytime.
                         </div>
                         <button
                           type="button"
-                          className="secondary-button small"
-                          style={{ fontSize: "11px", padding: "2px 8px", color: "#f87171", borderColor: "#7f1d1d", marginLeft: "10px", whiteSpace: "nowrap" }}
+                          className="primary-button small"
+                          style={{ fontSize: "11px", padding: "3px 10px", background: "#3b82f6", borderColor: "#2563eb", fontWeight: "600", whiteSpace: "nowrap" }}
                           onClick={async () => {
-                            if (window.confirm(`Cancel pending update job #${selectedJobDetails.id}?`)) {
-                              try {
-                                await fetch(`${API_URL}/endpoint-updates/jobs/${selectedJobDetails.id}/cancel`, { method: "POST" });
-                                await loadPatchJobs();
-                                setSelectedJobDetails((prev) => prev ? { ...prev, status: "CANCELLED" } : null);
-                              } catch (err) {
-                                alert("Failed to cancel job: " + err.message);
-                              }
-                            }
+                            await runJobNow(selectedJobDetails.id);
                           }}
                         >
-                          Cancel Job
+                          🔄 Restart / Retry Update
                         </button>
                       </div>
                     )}
