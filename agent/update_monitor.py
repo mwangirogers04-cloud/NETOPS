@@ -235,6 +235,13 @@ def execute_patch_job(job_id, action, server_url=None):
     print(f"\n[NETOPS INSTRUCTION] Received remote update command: Job #{job_id} ({action})")
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+    # Check for elevated privileges or passwordless sudo
+    cmd_prefix = []
+    if os.geteuid() != 0:
+        sudo_check = subprocess.run(["sudo", "-n", "true"], capture_output=True, check=False)
+        if sudo_check.returncode == 0:
+            cmd_prefix = ["sudo", "-n"]
+
     report_job_status(
         job_id=job_id,
         status="IN_PROGRESS",
@@ -245,7 +252,7 @@ def execute_patch_job(job_id, action, server_url=None):
 
     try:
         # Step 1: apt-get update
-        subprocess.run(["apt-get", "update"], capture_output=True, text=True, check=False, timeout=120)
+        subprocess.run(cmd_prefix + ["apt-get", "update"], capture_output=True, text=True, check=False, timeout=180)
 
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         report_job_status(
@@ -259,11 +266,11 @@ def execute_patch_job(job_id, action, server_url=None):
         # Step 2: apt-get -y upgrade
         env = {**os.environ, "DEBIAN_FRONTEND": "noninteractive"}
         res = subprocess.run(
-            ["apt-get", "-y", "--with-new-pkgs", "upgrade"],
+            cmd_prefix + ["apt-get", "-y", "--with-new-pkgs", "upgrade"],
             capture_output=True,
             text=True,
             check=False,
-            timeout=600,
+            timeout=1200,
             env=env,
         )
 
@@ -277,8 +284,8 @@ def execute_patch_job(job_id, action, server_url=None):
                 log_output=f"[{now_str}] All system packages upgraded successfully.",
                 server_url=server_url,
             )
-        elif "permission denied" in res.stderr.lower() or os.geteuid() != 0:
-            print(f"[NETOPS] Non-root execution. Update processed in simulation mode.")
+        elif not cmd_prefix and os.geteuid() != 0:
+            print(f"[NETOPS] Non-root execution without elevated rights. Update processed in simulation mode.")
             report_job_status(
                 job_id=job_id,
                 status="COMPLETED",
