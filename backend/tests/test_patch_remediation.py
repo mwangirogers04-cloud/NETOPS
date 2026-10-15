@@ -1,4 +1,5 @@
 import pytest
+from datetime import datetime, timedelta, timezone
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -11,6 +12,7 @@ from backend.app.models.endpoint_update import EndpointUpdate
 from backend.app.models.patch_job import PatchJob
 from backend.app.services.patch_remediation_service import (
     create_patch_job,
+    dispatch_due_scheduled_jobs,
     get_pending_job_for_agent,
     is_local_machine,
     list_patch_jobs,
@@ -339,4 +341,82 @@ def test_cancel_and_delete_patch_job(client, db_session):
     # Verify not found
     get_res = client.get(f"/endpoint-updates/jobs/{job_id}")
     assert get_res.status_code == 404
+
+
+def test_schedule_patch_job_future_and_dispatch_due(client, db_session):
+    now_utc = datetime.now(timezone.utc)
+    future_time = now_utc + timedelta(hours=2)
+
+    # 1. Create a job scheduled in the future
+    create_res = client.post(
+        "/endpoint-updates/jobs",
+        json={
+            "hostname": "SCHEDULED-AGENT-1",
+            "ip_address": "192.168.1.188",
+            "action": "INSTALL_ALL_UPDATES",
+            "scheduled_at": future_time.isoformat(),
+        },
+    )
+    assert create_res.status_code == 200
+    job_data = create_res.json()
+    job_id = job_data["id"]
+    assert job_data["status"] == "SCHEDULED"
+    assert job_data["scheduled_at"] is not None
+
+    # 2. Verify agent check-in polling ignores this job because it's not due yet
+    pending = get_pending_job_for_agent(db_session, hostname="SCHEDULED-AGENT-1")
+    assert pending is None
+
+    # 3. Running dispatch when not due should return 0 jobs
+    dispatched = dispatch_due_scheduled_jobs(db_session)
+    assert len(dispatched) == 0
+
+    # 4. Fast-forward scheduled time to the past
+    job_db = db_session.query(PatchJob).filter(PatchJob.id == job_id).first()
+    assert job_db is not None
+    job_db.scheduled_at = now_utc - timedelta(minutes=5)
+    db_session.commit()
+
+    # 5. Dispatch due jobs
+    dispatched_due = dispatch_due_scheduled_jobs(db_session)
+    assert len(dispatched_due) == 1
+    assert dispatched_due[0].id == job_id
+    assert dispatched_due[0].status == "PENDING"
+
+    # 6. Now the agent polling should find this job ready to execute
+    pending_now = get_pending_job_for_agent(db_session, hostname="SCHEDULED-AGENT-1")
+    assert pending_now is not None
+    assert pending_now.id == job_id
+
+
+def test_cancel_scheduled_patch_job(client, db_session):
+    now_utc = datetime.now(timezone.utc)
+    future_time = now_utc + timedelta(hours=4)
+
+    create_res = client.post(
+        "/endpoint-updates/jobs",
+        json={
+            "hostname": "CANCEL-SCHEDULED-HOST",
+            "ip_address": "192.168.1.199",
+            "action": "INSTALL_ALL_UPDATES",
+            "scheduled_at": future_time.isoformat(),
+        },
+    )
+    assert create_res.status_code == 200
+    job_id = create_res.json()["id"]
+    assert create_res.json()["status"] == "SCHEDULED"
+
+    # Cancel the scheduled job
+    cancel_res = client.post(f"/endpoint-updates/jobs/{job_id}/cancel")
+    assert cancel_res.status_code == 200
+    assert cancel_res.json()["status"] == "CANCELLED"
+
+    # Make the time past and verify dispatch does not pick up cancelled job
+    job_db = db_session.query(PatchJob).filter(PatchJob.id == job_id).first()
+    job_db.scheduled_at = now_utc - timedelta(minutes=10)
+    db_session.commit()
+
+    dispatched = dispatch_due_scheduled_jobs(db_session)
+    assert not any(j.id == job_id for j in dispatched)
+
 

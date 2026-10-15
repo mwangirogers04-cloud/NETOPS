@@ -25,6 +25,7 @@ from .api.simulation import router as simulation_router
 from .services.websocket_manager import manager
 from .services.schedule_enforcement import schedule_enforcement_loop
 from .services.endpoint_health_monitor import endpoint_health_monitor_loop
+from .services.patch_remediation_service import dispatch_due_scheduled_jobs
 
 
 # ---------------------------------------------------------
@@ -159,6 +160,20 @@ async def event_broadcaster():
 # ---------------------------------------------------------
 
 
+async def scheduled_patch_loop():
+    """Evaluate scheduled patch remediation jobs every 10 seconds."""
+    while True:
+        db = SessionLocal()
+        try:
+            dispatch_due_scheduled_jobs(db)
+        except Exception as err:
+            db.rollback()
+            print(f"[PATCH-SCHEDULER] Error in patch scheduler loop: {err}")
+        finally:
+            db.close()
+        await asyncio.sleep(10)
+
+
 @app.on_event("startup")
 async def startup_event_broadcaster():
     asyncio.create_task(
@@ -171,6 +186,10 @@ async def startup_event_broadcaster():
 
     asyncio.create_task(
         endpoint_health_monitor_loop()
+    )
+
+    asyncio.create_task(
+        scheduled_patch_loop()
     )
 
 

@@ -87,6 +87,12 @@ class PatchJob(Base):
         nullable=True,
     )
 
+    scheduled_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+        index=True,
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=lambda: datetime.now(timezone.utc),

@@ -32,10 +32,11 @@
 * **Synchronized Device Inventory**: Endpoints are automatically updated in the centralized inventory with real-time update compliance badges (🟢 `UP TO DATE`, 🟠 `NEEDS UPDATES`, ⚪ `NO AGENT`) and filterable via the React management dashboard.
 
 ### 🔄 Centralized Update Remediation & Command Queue
-* **1-Click Local & Remote Deployment**: Centrally trigger update installation for any machine on the LAN directly from the web console.
-* **Local Machine Instant Remediation**: Automatically invokes native system package managers (`apt-get upgrade -y`) on the host machine in background threads with live progress and streaming logs.
+* **1-Click Immediate Deployment & Scheduled Maintenance Windows**: Centrally deploy updates immediately or schedule them for a specific date/time (e.g., off-peak hours, tonight 11 PM, weekend maintenance).
+* **Local Machine Native Remediation**: Automatically invokes native system package managers (`apt-get upgrade -y`) on the host machine in background threads with live progress and streaming logs.
 * **Asynchronous Remote Agent Command Queue**: Bypasses Windows Firewall and network port blockages by queueing instructions in NETOPS (`INSTALL_ALL_UPDATES`). Target Windows and Linux agents receive commands during check-in, execute patches natively, and sync status back to NETOPS.
-* **Real-Time Job Tracking & Audit Logs**: Inspect live execution logs, progress percentage (0-100%), and completion status in the web console or REST API.
+* **Automated Background Dispatcher**: Evaluates scheduled maintenance windows every 10 seconds and automatically activates pending jobs when their scheduled execution time arrives.
+* **Real-Time Job Tracking & Audit Logs**: Inspect live execution logs, progress percentage (0-100%), cancel scheduled jobs, and review completion status in the web console or REST API.
 
 ### 💻 Endpoint Telemetry & Update Monitoring
 * Lightweight background telemetry agent compatible with both **Linux** and **Windows**.
@@ -107,7 +108,7 @@ NETOPS/
 │   │   ├── config.py              # Environment configuration (pydantic-settings)
 │   │   ├── database.py            # Database session and engine setup
 │   │   └── main.py                # FastAPI app entry point & WebSocket handlers
-│   ├── tests/                     # Test suite (106 comprehensive unit/integration tests)
+│   ├── tests/                     # Test suite (111 comprehensive unit/integration tests)
 │   ├── requirements.txt           # Python dependencies
 │   └── .env.example               # Template for backend environment variables
 ├── frontend/                      # React 19 web management console
@@ -194,7 +195,7 @@ docker run -d --name netops-frontend -p 80:80 netops-frontend
 
 ## 🧪 Running the Automated Test Suite
 
-NETOPS includes a comprehensive suite of 106 automated tests covering discovery logic, agentless LAN patch scanning, centralized patch remediation, Cisco/Sophos parsers, access schedule evaluation, report generators, and REST endpoints:
+NETOPS includes a comprehensive suite of 111 automated tests covering discovery logic, agentless LAN patch scanning, centralized patch remediation & scheduled maintenance windows, Cisco/Sophos parsers, access schedule evaluation, report generators, and REST endpoints:
 
 ```bash
 # Activate virtual environment
@@ -232,28 +233,38 @@ curl -X POST "http://localhost:8000/endpoint-updates/scan-lan?network=192.168.1.
 
 ## 🔄 Centralized Update Remediation & Command Queue
 
-You can centrally deploy updates to any machine on the LAN directly from NETOPS:
+You can centrally deploy updates to any machine on the LAN directly from NETOPS, either immediately or scheduled for off-peak maintenance hours:
 
 ### Using the Web Console:
 1. In **Device Inventory** or **Endpoint Updates**, locate any machine displaying `⚠️ UPDATES`.
-2. Click the **⚡ Deploy Updates** button.
-3. Confirm deployment:
-   * **Local Machine**: NETOPS triggers the native update engine (`apt-get upgrade -y`) in a background thread and streams live execution logs.
-   * **Remote LAN Machines**: NETOPS queues an update instruction. When the machine's background agent heartbeats, it automatically runs the native update engine and reports completion.
-4. Click **📋 Update Jobs** to inspect live job execution logs, percentages, and historical results.
+2. Click the **⚡ Deploy Updates** button to open the deployment modal.
+3. Select your desired **Deployment Timing**:
+   * **⚡ Deploy Now**:
+     * **Local Machine**: NETOPS triggers native package manager (`apt-get upgrade -y`) in a background thread and streams live execution logs.
+     * **Remote LAN Machines**: NETOPS queues an active command. When the machine's background agent heartbeats, it automatically runs the native update engine and reports completion.
+   * **📅 Schedule for Date & Time**:
+     * Pick a future date and time using the interactive picker, or choose quick off-peak presets (**Tonight 11:00 PM**, **Tomorrow 2:00 AM**, **Weekend Sat 3:00 AM**).
+     * The job enters `SCHEDULED` status and remains dormant until the target time arrives.
+     * When due, the NETOPS automated background dispatcher automatically triggers the update or activates it for agent check-in.
+4. Click **📋 Update Jobs** to inspect live execution logs, view progress percentages, or cancel scheduled maintenance windows anytime before execution.
 
 ### Using the REST API:
 ```bash
-# Queue an update deployment job for an endpoint
+# 1. Queue an immediate update deployment job
 curl -X POST http://localhost:8000/endpoint-updates/jobs \
   -H "Content-Type: application/json" \
   -d '{"hostname": "DESKTOP-8N0NNSL", "action": "INSTALL_ALL_UPDATES"}'
 
-# View all patch jobs and real-time execution logs
+# 2. Schedule an update deployment job for a future maintenance window
+curl -X POST http://localhost:8000/endpoint-updates/jobs \
+  -H "Content-Type: application/json" \
+  -d '{"hostname": "DESKTOP-8N0NNSL", "action": "INSTALL_ALL_UPDATES", "scheduled_at": "2026-10-17T02:00:00Z"}'
+
+# 3. View all patch jobs, scheduled dates, and real-time execution logs
 curl -s http://localhost:8000/endpoint-updates/jobs
 
-# Inspect a specific job's logs and progress
-curl -s http://localhost:8000/endpoint-updates/jobs/1
+# 4. Cancel a scheduled or queued job
+curl -X POST http://localhost:8000/endpoint-updates/jobs/1/cancel
 ```
 
 ---

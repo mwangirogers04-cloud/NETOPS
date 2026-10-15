@@ -65,6 +65,8 @@ function App() {
   const [deployingStatus, setDeployingStatus] = useState(null);
   const [showJobsModal, setShowJobsModal] = useState(false);
   const [selectedJobDetails, setSelectedJobDetails] = useState(null);
+  const [scheduleMode, setScheduleMode] = useState("now");
+  const [scheduledDateTime, setScheduledDateTime] = useState("");
 
   const loadPatchJobs = async () => {
     try {
@@ -82,19 +84,26 @@ function App() {
     if (!device || !Array.isArray(patchJobs)) return null;
     return patchJobs.find(
       (job) =>
-        (job.status === "PENDING" || job.status === "IN_PROGRESS") &&
+        (job.status === "PENDING" || job.status === "IN_PROGRESS" || job.status === "SCHEDULED") &&
         ((device.hostname && job.hostname && device.hostname.toLowerCase() === job.hostname.toLowerCase()) ||
          (device.mac_address && job.mac_address && device.mac_address.replace(/[:-]/g, "").toUpperCase() === job.mac_address.replace(/[:-]/g, "").toUpperCase()) ||
          (device.id && job.device_id && device.id === job.device_id))
     );
   };
 
-  const deployUpdates = async (target) => {
+  const openDeployModal = (device) => {
+    setScheduleMode("now");
+    setScheduledDateTime("");
+    setDeployModalDevice(device);
+  };
+
+  const deployUpdates = async (target, scheduledTime = null) => {
     const hostname = target.hostname || "local";
     const ip_address = target.ip_address || target.device_ip || null;
     const mac_address = target.mac_address || null;
     const machine_id = target.machine_id || null;
     const device_id = target.device_id || (target.vlan_id !== undefined ? target.id : null);
+    const scheduled_at = scheduledTime ? new Date(scheduledTime).toISOString() : null;
 
     setDeployingStatus("dispatching");
     try {
@@ -109,6 +118,7 @@ function App() {
           device_id,
           action: "INSTALL_ALL_UPDATES",
           initiated_by: "Admin Console",
+          scheduled_at,
         }),
       });
 
@@ -1199,8 +1209,8 @@ if (deviceFilter === "quarantined") {
                                   display: "inline-flex",
                                   alignItems: "center",
                                   gap: "5px",
-                                  background: "#f59e0b",
-                                  color: "#000",
+                                  background: activeJob.status === "SCHEDULED" ? "#6366f1" : "#f59e0b",
+                                  color: activeJob.status === "SCHEDULED" ? "#ffffff" : "#000",
                                   fontWeight: "700",
                                 }}
                                 onClick={() => {
@@ -1209,13 +1219,15 @@ if (deviceFilter === "quarantined") {
                                 }}
                                 title="Click to view update progress and logs"
                               >
-                                <span>⚡</span>
+                                <span>{activeJob.status === "SCHEDULED" ? "📅" : "⚡"}</span>
                                 {activeJob.status === "IN_PROGRESS"
                                   ? `UPDATING ${activeJob.progress_percent}%`
+                                  : activeJob.status === "SCHEDULED"
+                                  ? "SCHEDULED"
                                   : "QUEUED"}
                               </span>
                               <div className="device-secondary" style={{ fontSize: "11px", marginTop: "3px" }}>
-                                Job #{activeJob.id} {activeJob.is_local ? "(Local)" : "(Remote Agent)"}
+                                Job #{activeJob.id} {activeJob.status === "SCHEDULED" && activeJob.scheduled_at ? `(At ${new Date(activeJob.scheduled_at.endsWith("Z") ? activeJob.scheduled_at : activeJob.scheduled_at + "Z").toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})` : activeJob.is_local ? "(Local)" : "(Remote Agent)"}
                               </div>
                             </div>
                           );
@@ -1261,7 +1273,7 @@ if (deviceFilter === "quarantined") {
                                   gap: "4px",
                                   fontWeight: "600",
                                 }}
-                                onClick={() => setDeployModalDevice(device)}
+                                onClick={() => openDeployModal(device)}
                                 title="Centrally deploy pending updates to this machine"
                               >
                                 ⚡ Deploy Updates
@@ -3381,8 +3393,8 @@ const Dashboard = () => {
                             style={{
                               fontSize: "11px",
                               padding: "3px 8px",
-                              color: "#f59e0b",
-                              borderColor: "#f59e0b",
+                              color: activeJob.status === "SCHEDULED" ? "#a5b4fc" : "#f59e0b",
+                              borderColor: activeJob.status === "SCHEDULED" ? "#6366f1" : "#f59e0b",
                               fontWeight: "700",
                             }}
                             onClick={() => {
@@ -3390,7 +3402,11 @@ const Dashboard = () => {
                               setShowJobsModal(true);
                             }}
                           >
-                            ⚡ {activeJob.status === "IN_PROGRESS" ? `${activeJob.progress_percent}%` : "Queued"}
+                            {activeJob.status === "SCHEDULED"
+                              ? "📅 Scheduled"
+                              : activeJob.status === "IN_PROGRESS"
+                              ? `⚡ ${activeJob.progress_percent}%`
+                              : "⚡ Queued"}
                           </button>
                         ) : (
                           <button
@@ -3403,7 +3419,7 @@ const Dashboard = () => {
                               borderColor: "#059669",
                               fontWeight: "600",
                             }}
-                            onClick={() => setDeployModalDevice(endpoint)}
+                            onClick={() => openDeployModal(endpoint)}
                             title="Centrally deploy updates to this machine"
                           >
                             ⚡ Deploy Updates
@@ -4101,15 +4117,166 @@ console.log("FRESHNESS DEBUG:", lastChecked, new Date(lastChecked), now);
                   </div>
                 </div>
 
+                <div style={{ marginTop: "16px", marginBottom: "16px" }}>
+                  <label style={{ fontSize: "11px", fontWeight: "700", color: "#94a3b8", display: "block", marginBottom: "8px", textTransform: "uppercase" }}>
+                    Deployment Timing
+                  </label>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                    <div
+                      onClick={() => setScheduleMode("now")}
+                      style={{
+                        padding: "10px 12px",
+                        borderRadius: "6px",
+                        cursor: "pointer",
+                        background: scheduleMode === "now" ? "rgba(16, 185, 129, 0.12)" : "#090d16",
+                        border: scheduleMode === "now" ? "1px solid #10b981" : "1px solid #1e293b",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                      }}
+                    >
+                      <input
+                        type="radio"
+                        name="scheduleMode"
+                        checked={scheduleMode === "now"}
+                        onChange={() => setScheduleMode("now")}
+                        style={{ cursor: "pointer" }}
+                      />
+                      <div>
+                        <div style={{ fontSize: "13px", fontWeight: "600", color: scheduleMode === "now" ? "#34d399" : "#f1f5f9" }}>
+                          ⚡ Deploy Now
+                        </div>
+                        <div style={{ fontSize: "11px", color: "#94a3b8" }}>
+                          Execute updates immediately
+                        </div>
+                      </div>
+                    </div>
+
+                    <div
+                      onClick={() => {
+                        setScheduleMode("scheduled");
+                        if (!scheduledDateTime) {
+                          const d = new Date(Date.now() + 3600 * 1000);
+                          setScheduledDateTime(new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16));
+                        }
+                      }}
+                      style={{
+                        padding: "10px 12px",
+                        borderRadius: "6px",
+                        cursor: "pointer",
+                        background: scheduleMode === "scheduled" ? "rgba(99, 102, 241, 0.12)" : "#090d16",
+                        border: scheduleMode === "scheduled" ? "1px solid #6366f1" : "1px solid #1e293b",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                      }}
+                    >
+                      <input
+                        type="radio"
+                        name="scheduleMode"
+                        checked={scheduleMode === "scheduled"}
+                        onChange={() => {
+                          setScheduleMode("scheduled");
+                          if (!scheduledDateTime) {
+                            const d = new Date(Date.now() + 3600 * 1000);
+                            setScheduledDateTime(new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16));
+                          }
+                        }}
+                        style={{ cursor: "pointer" }}
+                      />
+                      <div>
+                        <div style={{ fontSize: "13px", fontWeight: "600", color: scheduleMode === "scheduled" ? "#a5b4fc" : "#f1f5f9" }}>
+                          📅 Schedule for Date & Time
+                        </div>
+                        <div style={{ fontSize: "11px", color: "#94a3b8" }}>
+                          Specify future maintenance window
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {scheduleMode === "scheduled" && (
+                    <div style={{ marginTop: "12px", background: "#0b1120", border: "1px solid #1e293b", borderRadius: "6px", padding: "12px" }}>
+                      <div style={{ fontSize: "11px", color: "#94a3b8", marginBottom: "6px", fontWeight: "600", textTransform: "uppercase" }}>
+                        Select Scheduled Execution Time
+                      </div>
+                      <input
+                        type="datetime-local"
+                        value={scheduledDateTime}
+                        min={new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)}
+                        onChange={(e) => setScheduledDateTime(e.target.value)}
+                        style={{
+                          width: "100%",
+                          padding: "8px 10px",
+                          background: "#030712",
+                          border: "1px solid #334155",
+                          borderRadius: "4px",
+                          color: "#f8fafc",
+                          fontSize: "13px",
+                          outline: "none",
+                          boxSizing: "border-box",
+                        }}
+                      />
+
+                      <div style={{ marginTop: "10px" }}>
+                        <span style={{ fontSize: "11px", color: "#64748b", marginRight: "8px" }}>Quick Presets:</span>
+                        <div style={{ display: "inline-flex", gap: "6px", flexWrap: "wrap", marginTop: "4px" }}>
+                          <button
+                            type="button"
+                            className="secondary-button small"
+                            style={{ fontSize: "11px", padding: "2px 8px" }}
+                            onClick={() => {
+                              const d = new Date();
+                              d.setHours(23, 0, 0, 0);
+                              if (d <= new Date()) d.setDate(d.getDate() + 1);
+                              setScheduledDateTime(new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16));
+                            }}
+                          >
+                            Tonight 11:00 PM
+                          </button>
+                          <button
+                            type="button"
+                            className="secondary-button small"
+                            style={{ fontSize: "11px", padding: "2px 8px" }}
+                            onClick={() => {
+                              const d = new Date();
+                              d.setDate(d.getDate() + 1);
+                              d.setHours(2, 0, 0, 0);
+                              setScheduledDateTime(new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16));
+                            }}
+                          >
+                            Tomorrow 2:00 AM
+                          </button>
+                          <button
+                            type="button"
+                            className="secondary-button small"
+                            style={{ fontSize: "11px", padding: "2px 8px" }}
+                            onClick={() => {
+                              const d = new Date();
+                              const day = d.getDay();
+                              const daysUntilSat = (6 - day + 7) % 7 || 7;
+                              d.setDate(d.getDate() + daysUntilSat);
+                              d.setHours(3, 0, 0, 0);
+                              setScheduledDateTime(new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16));
+                            }}
+                          >
+                            Weekend (Sat 3:00 AM)
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 <div
                   style={{
                     margin: "16px 0",
                     padding: "12px 14px",
-                    background: "rgba(59, 130, 246, 0.08)",
-                    border: "1px solid rgba(59, 130, 246, 0.25)",
+                    background: scheduleMode === "scheduled" ? "rgba(99, 102, 241, 0.08)" : "rgba(59, 130, 246, 0.08)",
+                    border: scheduleMode === "scheduled" ? "1px solid rgba(99, 102, 241, 0.25)" : "1px solid rgba(59, 130, 246, 0.25)",
                     borderRadius: "6px",
                     fontSize: "13px",
-                    color: "#93c5fd",
+                    color: scheduleMode === "scheduled" ? "#c7d2fe" : "#93c5fd",
                     lineHeight: "1.5",
                   }}
                 >
@@ -4117,11 +4284,11 @@ console.log("FRESHNESS DEBUG:", lastChecked, new Date(lastChecked), now);
                     deployModalDevice.ip_address === "127.0.0.1" ||
                     deployModalDevice.ip_address === "192.168.0.101") ? (
                     <div>
-                      🖥️ <strong>Local Machine Remediation:</strong> Updates will be applied immediately using the native package manager (<code>apt-get upgrade -y</code>).
+                      🖥️ <strong>Local Machine Remediation:</strong> {scheduleMode === "scheduled" ? "Updates will be queued and automatically triggered using the native package manager (apt-get upgrade -y) when the scheduled date & time arrives." : "Updates will be applied immediately using the native package manager (apt-get upgrade -y)."}
                     </div>
                   ) : (
                     <div>
-                      📡 <strong>LAN Remote Remediation (Approach 1):</strong> An update installation job will be dispatched. When this machine's agent reports its check-in, it will automatically download and install updates natively and sync completion back to NETOPS.
+                      📡 <strong>LAN Remote Remediation (Approach 1):</strong> {scheduleMode === "scheduled" ? "An update job will be queued in SCHEDULED state. Once the scheduled time arrives, it will activate for the endpoint's agent to install updates on its next check-in." : "An update installation job will be dispatched. When this machine's agent reports its check-in, it will automatically download and install updates natively and sync completion back to NETOPS."}
                     </div>
                   )}
                 </div>
@@ -4141,11 +4308,18 @@ console.log("FRESHNESS DEBUG:", lastChecked, new Date(lastChecked), now);
                   <button
                     type="button"
                     className="primary-button"
-                    style={{ background: "#10b981", borderColor: "#059669" }}
-                    disabled={deployingStatus === "dispatching"}
+                    style={{
+                      background: scheduleMode === "scheduled" ? "#6366f1" : "#10b981",
+                      borderColor: scheduleMode === "scheduled" ? "#4f46e5" : "#059669",
+                    }}
+                    disabled={
+                      deployingStatus === "dispatching" ||
+                      (scheduleMode === "scheduled" && (!scheduledDateTime || new Date(scheduledDateTime) <= new Date()))
+                    }
                     onClick={async () => {
                       const target = deployModalDevice;
-                      const job = await deployUpdates(target);
+                      const targetTime = scheduleMode === "scheduled" ? scheduledDateTime : null;
+                      const job = await deployUpdates(target, targetTime);
                       if (job) {
                         setDeployModalDevice(null);
                         setDeployingStatus(null);
@@ -4154,7 +4328,9 @@ console.log("FRESHNESS DEBUG:", lastChecked, new Date(lastChecked), now);
                       }
                     }}
                   >
-                    {deployingStatus === "dispatching" ? "⏳ Queueing Update Job..." : "⚡ Confirm & Deploy Updates"}
+                    {deployingStatus === "dispatching"
+                      ? (scheduleMode === "scheduled" ? "⏳ Scheduling Job..." : "⏳ Queueing Update Job...")
+                      : (scheduleMode === "scheduled" ? "📅 Confirm & Schedule Updates" : "⚡ Confirm & Deploy Updates")}
                   </button>
                 </div>
               </div>
@@ -4220,6 +4396,11 @@ console.log("FRESHNESS DEBUG:", lastChecked, new Date(lastChecked), now);
                           </div>
                           <div style={{ fontSize: "12px", color: "#94a3b8", marginTop: "2px" }}>
                             {job.is_local ? "🖥️ Local Host Execution" : "📡 Remote Agent Queue"} • {job.created_at ? new Date(job.created_at.endsWith("Z") ? job.created_at : job.created_at + "Z").toLocaleTimeString() : ""}
+                            {job.scheduled_at && (
+                              <span style={{ color: "#a5b4fc", marginLeft: "6px" }}>
+                                • 📅 Scheduled: {new Date(job.scheduled_at.endsWith("Z") ? job.scheduled_at : job.scheduled_at + "Z").toLocaleString()}
+                              </span>
+                            )}
                           </div>
                         </div>
 
@@ -4234,18 +4415,28 @@ console.log("FRESHNESS DEBUG:", lastChecked, new Date(lastChecked), now);
                                 ? "blocked"
                                 : "offline"
                             }`}
+                            style={
+                              job.status === "SCHEDULED"
+                                ? { background: "rgba(99, 102, 241, 0.2)", color: "#a5b4fc", border: "1px solid rgba(99, 102, 241, 0.5)" }
+                                : {}
+                            }
                           >
-                            {job.status === "IN_PROGRESS" ? `UPDATING ${job.progress_percent}%` : job.status}
+                            {job.status === "IN_PROGRESS"
+                              ? `UPDATING ${job.progress_percent}%`
+                              : job.status === "SCHEDULED"
+                              ? "📅 SCHEDULED"
+                              : job.status}
                           </span>
 
-                          {job.status === "PENDING" && (
+                          {(job.status === "PENDING" || job.status === "SCHEDULED") && (
                             <button
                               type="button"
                               className="secondary-button small"
                               style={{ fontSize: "11px", padding: "2px 8px", color: "#f87171", borderColor: "#7f1d1d" }}
                               onClick={async (e) => {
                                 e.stopPropagation();
-                                if (window.confirm(`Cancel pending update job #${job.id} for ${job.hostname}?`)) {
+                                const label = job.status === "SCHEDULED" ? "scheduled update" : "pending update";
+                                if (window.confirm(`Cancel ${label} job #${job.id} for ${job.hostname}?`)) {
                                   try {
                                     await fetch(`${API_URL}/endpoint-updates/jobs/${job.id}/cancel`, { method: "POST" });
                                     await loadPatchJobs();
@@ -4254,7 +4445,7 @@ console.log("FRESHNESS DEBUG:", lastChecked, new Date(lastChecked), now);
                                   }
                                 }
                               }}
-                              title="Cancel this pending job from queue"
+                              title={job.status === "SCHEDULED" ? "Cancel scheduled maintenance job" : "Cancel this pending job from queue"}
                             >
                               Cancel
                             </button>
@@ -4275,6 +4466,32 @@ console.log("FRESHNESS DEBUG:", lastChecked, new Date(lastChecked), now);
                         Progress: {selectedJobDetails.progress_percent}%
                       </span>
                     </div>
+
+                    {selectedJobDetails.status === "SCHEDULED" && (
+                      <div style={{ background: "rgba(99, 102, 241, 0.1)", border: "1px solid #4f46e5", borderRadius: "6px", padding: "10px 12px", marginBottom: "12px", fontSize: "12px", color: "#c7d2fe", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <div>
+                          <strong>📅 Scheduled Maintenance Window:</strong> Updates for <strong>{selectedJobDetails.hostname}</strong> are scheduled to run at <strong>{selectedJobDetails.scheduled_at ? new Date(selectedJobDetails.scheduled_at.endsWith("Z") ? selectedJobDetails.scheduled_at : selectedJobDetails.scheduled_at + "Z").toLocaleString() : "the scheduled time"}</strong>.
+                        </div>
+                        <button
+                          type="button"
+                          className="secondary-button small"
+                          style={{ fontSize: "11px", padding: "2px 8px", color: "#f87171", borderColor: "#7f1d1d", marginLeft: "10px", whiteSpace: "nowrap" }}
+                          onClick={async () => {
+                            if (window.confirm(`Cancel scheduled update job #${selectedJobDetails.id}?`)) {
+                              try {
+                                await fetch(`${API_URL}/endpoint-updates/jobs/${selectedJobDetails.id}/cancel`, { method: "POST" });
+                                await loadPatchJobs();
+                                setSelectedJobDetails((prev) => prev ? { ...prev, status: "CANCELLED" } : null);
+                              } catch (err) {
+                                alert("Failed to cancel job: " + err.message);
+                              }
+                            }
+                          }}
+                        >
+                          Cancel Schedule
+                        </button>
+                      </div>
+                    )}
 
                     {selectedJobDetails.status === "PENDING" && (
                       <div style={{ background: "rgba(59, 130, 246, 0.1)", border: "1px solid #1d4ed8", borderRadius: "6px", padding: "10px 12px", marginBottom: "12px", fontSize: "12px", color: "#93c5fd", display: "flex", justifyContent: "space-between", alignItems: "center" }}>

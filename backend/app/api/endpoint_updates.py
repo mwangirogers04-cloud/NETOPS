@@ -322,6 +322,7 @@ def trigger_patch_job(
             device_id=payload.device_id,
             action=payload.action,
             initiated_by=payload.initiated_by,
+            scheduled_at=payload.scheduled_at,
         )
         resp = PatchJobResponse.model_validate(job)
         resp.is_local = is_local

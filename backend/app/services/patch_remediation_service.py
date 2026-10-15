@@ -381,17 +381,19 @@ def create_patch_job(
     action: str = "INSTALL_ALL_UPDATES",
     initiated_by: str = "console",
     auto_start_local: bool = True,
+    scheduled_at: datetime | None = None,
 ) -> tuple[PatchJob, bool]:
     """
-    Queue an update deployment job.
+    Queue or schedule an update deployment job.
     Returns (job, is_local).
-    If target is local and auto_start_local is True, starts local background execution immediately.
+    If scheduled_at is in the future, marks job as SCHEDULED.
+    If immediate and target is local (auto_start_local is True), starts local background execution immediately.
     """
     # Check for active existing job for this target
     active_jobs = db.scalars(
         select(PatchJob)
         .where(
-            PatchJob.status.in_(["PENDING", "IN_PROGRESS"]),
+            PatchJob.status.in_(["PENDING", "IN_PROGRESS", "SCHEDULED"]),
             PatchJob.hostname == hostname,
         )
     ).all()
@@ -448,6 +450,21 @@ def create_patch_job(
         mac_address = mac_address or latest_update.mac_address
         machine_id = machine_id or latest_update.machine_id
 
+    # Evaluate whether this job is scheduled for future execution
+    is_scheduled = False
+    if scheduled_at:
+        now_utc = datetime.now(timezone.utc)
+        sched_cmp = scheduled_at if scheduled_at.tzinfo else scheduled_at.replace(tzinfo=timezone.utc)
+        if sched_cmp > now_utc:
+            is_scheduled = True
+
+    initial_status = "SCHEDULED" if is_scheduled else "PENDING"
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    if is_scheduled:
+        log_msg = f"[{now_str}] Update deployment scheduled for {scheduled_at.strftime('%Y-%m-%d %H:%M:%S')} by {initiated_by}."
+    else:
+        log_msg = f"[{now_str}] Update deployment job queued by {initiated_by}."
+
     job = PatchJob(
         hostname=hostname,
         ip_address=ip_address,
@@ -456,10 +473,11 @@ def create_patch_job(
         device_id=valid_device_id,
         operating_system=resolved_os,
         action=action,
-        status="PENDING",
+        status=initial_status,
         progress_percent=0,
         initiated_by=initiated_by,
-        log_output=f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Update deployment job queued by {initiated_by}.",
+        scheduled_at=scheduled_at,
+        log_output=log_msg,
     )
     db.add(job)
     db.flush()
@@ -468,9 +486,10 @@ def create_patch_job(
 
     create_event(
         db=db,
-        event_type="patch_job_created",
+        event_type="patch_job_scheduled" if is_scheduled else "patch_job_created",
         message=(
-            f"Update deployment job #{job.id} ({action}) queued for {hostname} "
+            f"Update deployment job #{job.id} ({action}) "
+            f"{'SCHEDULED for ' + scheduled_at.strftime('%Y-%m-%d %H:%M:%S') if is_scheduled else 'queued'} for {hostname} "
             f"({ip_address or 'LAN'}) [{'LOCAL' if local else 'REMOTE AGENT QUEUE'}]."
         ),
         device_id=valid_device_id,
@@ -478,7 +497,7 @@ def create_patch_job(
     db.commit()
     db.refresh(job)
 
-    if local and auto_start_local:
+    if not is_scheduled and local and auto_start_local:
         thread = threading.Thread(
             target=_execute_local_patch_job,
             args=(job.id,),
@@ -488,6 +507,53 @@ def create_patch_job(
         thread.start()
 
     return job, local
+
+
+def dispatch_due_scheduled_jobs(db: Session) -> list[PatchJob]:
+    """
+    Check for any jobs in 'SCHEDULED' status whose scheduled_at time has arrived.
+    Transitions them to PENDING (for remote machines) or starts execution thread (for local machine).
+    """
+    now_utc = datetime.now(timezone.utc)
+    jobs = db.scalars(
+        select(PatchJob)
+        .where(
+            PatchJob.status == "SCHEDULED",
+            PatchJob.scheduled_at.is_not(None),
+        )
+    ).all()
+
+    activated = []
+    for job in jobs:
+        sched_time = job.scheduled_at if job.scheduled_at.tzinfo else job.scheduled_at.replace(tzinfo=timezone.utc)
+        if sched_time <= now_utc:
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            local = is_local_machine(job.hostname, job.ip_address, job.mac_address)
+            job.status = "PENDING"
+            msg = f"\n[{now_str}] Scheduled maintenance time reached ({sched_time.strftime('%Y-%m-%d %H:%M:%S')}). Activating patch deployment [{'LOCAL' if local else 'REMOTE AGENT QUEUE'}]."
+            job.log_output = (job.log_output or "") + msg
+
+            create_event(
+                db=db,
+                event_type="patch_job_activated",
+                message=f"Scheduled patch job #{job.id} for {job.hostname} reached its maintenance window and is now active.",
+                device_id=job.device_id,
+            )
+            db.commit()
+            db.refresh(job)
+
+            if local:
+                thread = threading.Thread(
+                    target=_execute_local_patch_job,
+                    args=(job.id,),
+                    daemon=True,
+                    name=f"local-patch-job-{job.id}",
+                )
+                thread.start()
+
+            activated.append(job)
+
+    return activated
 
 
 def list_patch_jobs(

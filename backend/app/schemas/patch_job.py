@@ -10,6 +10,7 @@ class CreatePatchJobRequest(BaseModel):
     device_id: int | None = None
     action: str = "INSTALL_ALL_UPDATES"
     initiated_by: str = "console"
+    scheduled_at: datetime | None = None
 
 
 class UpdateJobStatusRequest(BaseModel):
@@ -35,6 +36,7 @@ class PatchJobResponse(BaseModel):
     initiated_by: str
     log_output: str | None = None
     error_message: str | None = None
+    scheduled_at: datetime | None = None
     created_at: datetime
     started_at: datetime | None = None
     completed_at: datetime | None = None
