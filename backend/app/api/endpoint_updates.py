@@ -189,27 +189,34 @@ def get_endpoint_updates(
         .all()
     )
 
-    latest_by_machine_id = {}
-    latest_by_hostname = {}
+    seen_machine_ids = set()
+    seen_macs = set()
+    seen_hostnames = set()
+    results = []
 
     for endpoint in endpoint_updates:
+        norm_mac = (
+            endpoint.mac_address.replace(":", "").replace("-", "").upper()
+            if endpoint.mac_address
+            else None
+        )
+        norm_host = endpoint.hostname.lower().strip() if endpoint.hostname else None
+
+        is_seen = (
+            (endpoint.machine_id and endpoint.machine_id in seen_machine_ids)
+            or (norm_mac and norm_mac in seen_macs)
+            or (norm_host and norm_host in seen_hostnames)
+        )
+        if is_seen:
+            continue
+
+        results.append(endpoint)
         if endpoint.machine_id:
-            if endpoint.machine_id not in latest_by_machine_id:
-                latest_by_machine_id[endpoint.machine_id] = endpoint
-        else:
-            if endpoint.hostname not in latest_by_hostname:
-                latest_by_hostname[endpoint.hostname] = endpoint
-
-    results = list(latest_by_machine_id.values())
-
-    machine_id_hostnames = {
-        endpoint.hostname
-        for endpoint in latest_by_machine_id.values()
-    }
-
-    for hostname, endpoint in latest_by_hostname.items():
-        if hostname not in machine_id_hostnames:
-            results.append(endpoint)
+            seen_machine_ids.add(endpoint.machine_id)
+        if norm_mac:
+            seen_macs.add(norm_mac)
+        if norm_host:
+            seen_hostnames.add(norm_host)
 
     # ---------------------------------------------------------
     # Match endpoint reports to discovered LAN devices
@@ -311,6 +318,7 @@ def trigger_patch_job(
             hostname=payload.hostname,
             ip_address=payload.ip_address,
             mac_address=payload.mac_address,
+            machine_id=payload.machine_id,
             device_id=payload.device_id,
             action=payload.action,
             initiated_by=payload.initiated_by,

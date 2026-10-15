@@ -93,6 +93,7 @@ function App() {
     const hostname = target.hostname || "local";
     const ip_address = target.ip_address || target.device_ip || null;
     const mac_address = target.mac_address || null;
+    const machine_id = target.machine_id || null;
     const device_id = target.device_id || (target.vlan_id !== undefined ? target.id : null);
 
     setDeployingStatus("dispatching");
@@ -104,6 +105,7 @@ function App() {
           hostname,
           ip_address,
           mac_address,
+          machine_id,
           device_id,
           action: "INSTALL_ALL_UPDATES",
           initiated_by: "Admin Console",

@@ -254,3 +254,62 @@ def test_api_trigger_with_invalid_device_id_succeeds(client, db_session):
     assert data["hostname"] == "FOREIGN-KEY-TEST"
     assert data["status"] == "PENDING"
 
+
+def test_endpoint_updates_deduplication_and_patch_completion(client, db_session):
+    # Step 1: Endpoint reports with machine_id and pending updates
+    report_res = client.post(
+        "/endpoint-updates/",
+        json={
+            "hostname": "SYNC-TEST-PC",
+            "mac_address": "EE:22:33:44:55:66",
+            "ip_address": "192.168.0.188",
+            "machine_id": "machine-uuid-12345",
+            "operating_system": "Linux",
+            "os_version": "Debian",
+            "architecture": "x86_64",
+            "update_status": "updates_available",
+            "pending_updates": 1901,
+        },
+    )
+    assert report_res.status_code == 200
+
+    # Verify initial list shows 1901 updates
+    get_res = client.get("/endpoint-updates/")
+    assert get_res.status_code == 200
+    endpoints = [e for e in get_res.json() if e["hostname"] == "SYNC-TEST-PC"]
+    assert len(endpoints) == 1
+    assert endpoints[0]["pending_updates"] == 1901
+
+    # Step 2: Trigger update job
+    job_res = client.post(
+        "/endpoint-updates/jobs",
+        json={
+            "hostname": "SYNC-TEST-PC",
+            "mac_address": "EE:22:33:44:55:66",
+            "ip_address": "192.168.0.188",
+            "machine_id": "machine-uuid-12345",
+            "action": "INSTALL_ALL_UPDATES",
+        },
+    )
+    assert job_res.status_code == 200
+    job_id = job_res.json()["id"]
+
+    # Step 3: Complete job
+    status_res = client.post(
+        f"/endpoint-updates/jobs/{job_id}/status",
+        json={
+            "status": "COMPLETED",
+            "progress_percent": 100,
+            "log_output": "All updates installed successfully.",
+        },
+    )
+    assert status_res.status_code == 200
+
+    # Step 4: Verify list endpoint now shows 0 pending updates and up_to_date
+    get_res2 = client.get("/endpoint-updates/")
+    assert get_res2.status_code == 200
+    endpoints2 = [e for e in get_res2.json() if e["hostname"] == "SYNC-TEST-PC"]
+    assert len(endpoints2) == 1
+    assert endpoints2[0]["pending_updates"] == 0
+    assert endpoints2[0]["update_status"] == "up_to_date"
+

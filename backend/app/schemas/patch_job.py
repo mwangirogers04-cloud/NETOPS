@@ -6,6 +6,7 @@ class CreatePatchJobRequest(BaseModel):
     hostname: str
     ip_address: str | None = None
     mac_address: str | None = None
+    machine_id: str | None = None
     device_id: int | None = None
     action: str = "INSTALL_ALL_UPDATES"
     initiated_by: str = "console"
