@@ -9,6 +9,7 @@ from ..schemas.device import (
     DeviceCreate,
     DeviceResponse,
     DeviceTypeUpdate,
+    DeviceVlanUpdate,
 )
 from ..services.vlan_policy import get_vlan_for_device_type
 from ..services.access_policy import (
@@ -333,10 +334,17 @@ def reject_device(
     device.approval_status = "rejected"
 
     # Rejected devices must always remain quarantined.
+    device.internet_access_authorized = False
     device.enforcement_status = "quarantined"
 
     # Rejected devices return to quarantine VLAN.
     device.vlan_id = 90
+
+    enforce_device_access(
+        device,
+        db,
+        force=True,
+    )
 
     create_event(
         db,
@@ -346,7 +354,7 @@ def reject_device(
             f"{device.hostname or 'Unknown Device'} "
             f"({device.ip_address or 'No IP'}) "
             f"MAC {device.mac_address}. "
-            f"Device remains in VLAN 90 quarantine."
+            f"Device placed in VLAN 90 quarantine and internet disconnected."
         ),
         device.id,
     )
@@ -386,6 +394,17 @@ def allow_device(
                 "Internet access can be allowed"
             ),
         )
+
+    # --------------------------------------------------------
+    # RESTORE OPERATIONAL VLAN IF CURRENTLY IN QUARANTINE
+    # --------------------------------------------------------
+    if device.vlan_id == 90 or not device.vlan_id:
+        target_vlan = get_vlan_for_device_type(device.device_type)
+        if not target_vlan or target_vlan == 90:
+            target_vlan = 20
+            if not device.device_type or device.device_type == "unknown":
+                device.device_type = "computer"
+        device.vlan_id = target_vlan
 
     # --------------------------------------------------------
     # EXPLICIT INTERNET ACCESS GRANT
@@ -597,13 +616,16 @@ def set_device_type(
     )
 
     # --------------------------------------------------------
-    # IMPORTANT:
-    #
-    # Classification must NOT automatically grant Internet.
-    #
-    # If the device was blocked, it remains blocked.
-    # If it was already allowed, it remains allowed.
+    # AUTOMATIC QUARANTINE ON VLAN 90 / UNKNOWN
     # --------------------------------------------------------
+    if new_vlan == 90 or new_type == "unknown":
+        device.internet_access_authorized = False
+        device.enforcement_status = "quarantined"
+        enforce_device_access(
+            device,
+            db,
+            force=True,
+        )
 
     db.commit()
     db.refresh(device)
@@ -710,9 +732,97 @@ def automate_device_vlan(
         db,
     )
 
+    if device.vlan_id == 90 or result.get("vlan_id") == 90:
+        device.internet_access_authorized = False
+        device.enforcement_status = "quarantined"
+        enforce_device_access(
+            device,
+            db,
+            force=True,
+        )
+
     db.commit()
     db.refresh(device)
 
     add_access_information(device)
 
     return result
+
+
+# ------------------------------------------------------------
+# UPDATE DEVICE VLAN
+# ------------------------------------------------------------
+
+@router.patch(
+    "/{device_id}/vlan",
+    response_model=DeviceResponse,
+)
+def set_device_vlan(
+    device_id: int,
+    vlan_data: DeviceVlanUpdate,
+    db: Session = Depends(get_db),
+):
+    device = db.get(Device, device_id)
+
+    if device is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Device not found",
+        )
+
+    old_vlan = device.vlan_id
+    new_vlan = vlan_data.vlan_id
+
+    allowed_vlans = {20, 30, 40, 90}
+    if new_vlan not in allowed_vlans:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid VLAN ID. Allowed VLANs: 20 (Computers), 30 (CCTV), 40 (Printers), 90 (Quarantine)",
+        )
+
+    device.vlan_id = new_vlan
+
+    # If moving to Quarantine VLAN 90, automatically disconnect internet access immediately
+    if new_vlan == 90:
+        device.internet_access_authorized = False
+        device.enforcement_status = "quarantined"
+        enforce_device_access(
+            device,
+            db,
+            force=True,
+        )
+        create_event(
+            db,
+            "vlan_quarantine",
+            (
+                f"Device {device.hostname or 'Unknown Device'} "
+                f"({device.ip_address or 'No IP'}) "
+                f"placed in Quarantine VLAN 90. Internet access automatically disconnected."
+            ),
+            device.id,
+        )
+    else:
+        create_event(
+            db,
+            "vlan_change",
+            (
+                f"Device {device.hostname or 'Unknown Device'} "
+                f"({device.ip_address or 'No IP'}) "
+                f"moved from VLAN {old_vlan or 90} to VLAN {new_vlan}."
+            ),
+            device.id,
+        )
+        if device.approval_status == "approved" and device.internet_access_authorized:
+            enforce_device_access(
+                device,
+                db,
+                force=True,
+            )
+
+    db.commit()
+    db.refresh(device)
+
+    add_access_information(device)
+
+    return device
+

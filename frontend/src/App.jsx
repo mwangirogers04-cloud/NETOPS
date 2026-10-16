@@ -569,6 +569,19 @@ const loadEvents = async () => {
     }
 
     // ----------------------------------------------------------
+    // UPDATE VLAN DIRECTLY
+    // ----------------------------------------------------------
+
+    else if (action === "vlan") {
+      url += "/vlan";
+      method = "PATCH";
+
+      body = JSON.stringify({
+        vlan_id: parseInt(value, 10),
+      });
+    }
+
+    // ----------------------------------------------------------
     // ALLOW INTERNET ACCESS
     // ----------------------------------------------------------
 
@@ -1206,27 +1219,62 @@ if (deviceFilter === "quarantined") {
                         }
                       >
                         <option value="unknown">
-                          ⚠️ Unknown
+                          🚨 Unknown (Quarantine VLAN 90)
                         </option>
 
                         <option value="computer">
-                          💻 Computer
+                          💻 Computer (VLAN 20)
                         </option>
 
                         <option value="cctv">
-                          📹 CCTV
+                          📹 CCTV (VLAN 30)
                         </option>
 
                         <option value="printer">
-                          🖨️ Printer
+                          🖨️ Printer (VLAN 40)
                         </option>
                       </select>
                     </td>
 
                     <td>
-                      <span className="vlan-badge">
-                        VLAN {device.vlan_id || 90}
-                      </span>
+                      <select
+                        value={device.vlan_id || 90}
+                        disabled={
+                          actionLoading ===
+                          `vlan-${device.id}`
+                        }
+                        onChange={(event) =>
+                          deviceAction(
+                            device.id,
+                            "vlan",
+                            event.target.value
+                          )
+                        }
+                        style={{
+                          padding: "4px 8px",
+                          borderRadius: "6px",
+                          border:
+                            device.vlan_id === 90 || !device.vlan_id
+                              ? "1px solid #ef4444"
+                              : "1px solid #3b82f6",
+                          background:
+                            device.vlan_id === 90 || !device.vlan_id
+                              ? "#450a0a"
+                              : "#1e293b",
+                          color:
+                            device.vlan_id === 90 || !device.vlan_id
+                              ? "#fca5a5"
+                              : "#93c5fd",
+                          fontWeight: "600",
+                          cursor: "pointer",
+                        }}
+                        title="Change VLAN: VLAN 90 immediately disconnects internet"
+                      >
+                        <option value="20">VLAN 20 - Workstation</option>
+                        <option value="30">VLAN 30 - CCTV</option>
+                        <option value="40">VLAN 40 - Printers</option>
+                        <option value="90">🚨 VLAN 90 - Quarantine</option>
+                      </select>
                     </td>
 
                     <td>
@@ -1775,12 +1823,44 @@ const AccessPage = () => {
 
 
                     <td>
-
-                      <span className="vlan-badge">
-                        VLAN{" "}
-                        {device.vlan_id || 90}
-                      </span>
-
+                      <select
+                        value={device.vlan_id || 90}
+                        disabled={
+                          actionLoading ===
+                          `vlan-${device.id}`
+                        }
+                        onChange={(event) =>
+                          deviceAction(
+                            device.id,
+                            "vlan",
+                            event.target.value
+                          )
+                        }
+                        style={{
+                          padding: "4px 8px",
+                          borderRadius: "6px",
+                          border:
+                            device.vlan_id === 90 || !device.vlan_id
+                              ? "1px solid #ef4444"
+                              : "1px solid #3b82f6",
+                          background:
+                            device.vlan_id === 90 || !device.vlan_id
+                              ? "#450a0a"
+                              : "#1e293b",
+                          color:
+                            device.vlan_id === 90 || !device.vlan_id
+                              ? "#fca5a5"
+                              : "#93c5fd",
+                          fontWeight: "600",
+                          cursor: "pointer",
+                        }}
+                        title="Change VLAN: VLAN 90 immediately disconnects internet"
+                      >
+                        <option value="20">VLAN 20</option>
+                        <option value="30">VLAN 30</option>
+                        <option value="40">VLAN 40</option>
+                        <option value="90">🚨 VLAN 90 (Quarantine)</option>
+                      </select>
                     </td>
 
 
@@ -2117,11 +2197,44 @@ const AccessPage = () => {
                         </td>
 
                         <td>
-                          <span className="vlan-badge">
-                            VLAN{" "}
-                            {device.vlan_id ||
-                              "-"}
-                          </span>
+                          <select
+                            value={device.vlan_id || 90}
+                            disabled={
+                              actionLoading ===
+                              `vlan-${device.id}`
+                            }
+                            onChange={(event) =>
+                              deviceAction(
+                                device.id,
+                                "vlan",
+                                event.target.value
+                              )
+                            }
+                            style={{
+                              padding: "4px 8px",
+                              borderRadius: "6px",
+                              border:
+                                device.vlan_id === 90 || !device.vlan_id
+                                  ? "1px solid #ef4444"
+                                  : "1px solid #3b82f6",
+                              background:
+                                device.vlan_id === 90 || !device.vlan_id
+                                  ? "#450a0a"
+                                  : "#1e293b",
+                              color:
+                                device.vlan_id === 90 || !device.vlan_id
+                                  ? "#fca5a5"
+                                  : "#93c5fd",
+                              fontWeight: "600",
+                              cursor: "pointer",
+                            }}
+                            title="Change VLAN. Selecting VLAN 90 immediately disconnects internet access."
+                          >
+                            <option value="20">VLAN 20 (Computers)</option>
+                            <option value="30">VLAN 30 (CCTV)</option>
+                            <option value="40">VLAN 40 (Printers)</option>
+                            <option value="90">🚨 VLAN 90 (Quarantine)</option>
+                          </select>
                         </td>
 
                         <td>
@@ -2135,24 +2248,51 @@ const AccessPage = () => {
                         </td>
 
                         <td>
-                          <button
-                            className="primary-button small"
-                            disabled={
-                              actionLoading ===
+                          <div style={{ display: "flex", gap: "6px" }}>
+                            <button
+                              className="primary-button small"
+                              disabled={
+                                actionLoading ===
+                                `automate-vlan-${device.id}`
+                              }
+                              onClick={() =>
+                                deviceAction(
+                                  device.id,
+                                  "automate-vlan"
+                                )
+                              }
+                            >
+                              {actionLoading ===
                               `automate-vlan-${device.id}`
-                            }
-                            onClick={() =>
-                              deviceAction(
-                                device.id,
-                                "automate-vlan"
-                              )
-                            }
-                          >
-                            {actionLoading ===
-                            `automate-vlan-${device.id}`
-                              ? "Running..."
-                              : "Auto VLAN"}
-                          </button>
+                                ? "Running..."
+                                : "Auto VLAN"}
+                            </button>
+                            {device.vlan_id !== 90 && (
+                              <button
+                                className="secondary-button small"
+                                style={{
+                                  backgroundColor: "#7f1d1d",
+                                  borderColor: "#ef4444",
+                                  color: "#fecaca",
+                                  fontWeight: "600",
+                                }}
+                                disabled={
+                                  actionLoading ===
+                                  `vlan-${device.id}`
+                                }
+                                onClick={() =>
+                                  deviceAction(
+                                    device.id,
+                                    "vlan",
+                                    90
+                                  )
+                                }
+                                title="Instantly isolate into Quarantine VLAN 90 & disconnect internet"
+                              >
+                                🚨 Quarantine
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     )

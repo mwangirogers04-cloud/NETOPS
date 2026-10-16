@@ -52,6 +52,11 @@ def enforce_device_access(
     if device.approval_status in {"pending", "rejected"}:
         decision = "quarantine"
 
+    elif getattr(device, "vlan_id", None) == 90:
+        # Devices in Quarantine VLAN 90 are unconditionally quarantined from Internet
+        device.internet_access_authorized = False
+        decision = "quarantine"
+
     elif not device.internet_access_authorized:
         # Approval does NOT automatically grant Internet access.
         # The administrator must explicitly authorize access.

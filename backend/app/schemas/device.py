@@ -77,3 +77,7 @@ class DeviceResponse(DeviceCreate):
 
 class DeviceTypeUpdate(BaseModel):
     device_type: str
+
+
+class DeviceVlanUpdate(BaseModel):
+    vlan_id: int
