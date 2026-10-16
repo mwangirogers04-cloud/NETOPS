@@ -7,12 +7,18 @@ from ..models.event import Event
 from .access_policy import get_access_decision
 from .access_schedule import is_access_allowed
 from .event_service import create_event
+from .sophos_enforcement import (
+    is_sophos_configured,
+    sophos_block_device,
+    sophos_allow_device,
+)
 
 
 def enforce_device_access(
     device: Device,
     db: Session,
     current_datetime: datetime | None = None,
+    force: bool = False,
 ) -> dict:
     """
     Calculate and record the current network enforcement state.
@@ -68,8 +74,10 @@ def enforce_device_access(
                 decision = "quarantine"
 
     # ---------------------------------------------------------
-    # Determine the simulated enforcement action.
+    # Determine enforcement action and apply live Sophos rules.
     # ---------------------------------------------------------
+
+    sophos_result = None
 
     if decision == "allowed":
         action = "allow"
@@ -82,6 +90,15 @@ def enforce_device_access(
             f"on VLAN {device.vlan_id}"
         )
 
+        status_changed = (old_enforcement_status != enforcement_status)
+        if (force or status_changed) and is_sophos_configured() and device.ip_address:
+            try:
+                sophos_result = sophos_allow_device(device.ip_address)
+                if sophos_result.get("status") == "allowed":
+                    message += " [Sophos Firewall: Unblocked]"
+            except Exception as exc:
+                message += f" [Sophos Warning: {exc}]"
+
     else:
         action = "quarantine"
         enforcement_status = "quarantined"
@@ -92,6 +109,17 @@ def enforce_device_access(
             f"({device.mac_address}) "
             f"on VLAN {device.vlan_id}"
         )
+
+        status_changed = (old_enforcement_status != enforcement_status)
+        if (force or status_changed) and is_sophos_configured() and device.ip_address:
+            try:
+                sophos_result = sophos_block_device(device.ip_address, device.hostname)
+                if sophos_result.get("status") == "blocked":
+                    message += " [Sophos Firewall: Blocked & Disconnected]"
+                elif sophos_result.get("status") == "protected":
+                    message += " [Sophos: Protected Host]"
+            except Exception as exc:
+                message += f" [Sophos Warning: {exc}]"
 
     # ---------------------------------------------------------
     # Store current enforcement state.
@@ -145,5 +173,6 @@ def enforce_device_access(
         "previous_enforcement_status": (
             old_enforcement_status
         ),
-        "mode": "simulation",
+        "mode": "live_sophos" if is_sophos_configured() else "simulation",
+        "sophos_result": sophos_result,
     }

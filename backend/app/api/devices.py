@@ -395,6 +395,7 @@ def allow_device(
     result = enforce_device_access(
         device,
         db,
+        force=True,
     )
 
     create_event(
@@ -458,6 +459,7 @@ def disallow_device(
     result = enforce_device_access(
         device,
         db,
+        force=True,
     )
 
     create_event(
@@ -673,6 +675,7 @@ def enforce_device(
     result = enforce_device_access(
         device,
         db,
+        force=True,
     )
 
     db.commit()

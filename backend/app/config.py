@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     # Sophos firewall integration
     sophos_base_url: str = ""
     sophos_api_token: str = ""
+    sophos_username: str = ""
+    sophos_password: str = ""
     sophos_verify_tls: bool = True
 
     model_config = SettingsConfigDict(

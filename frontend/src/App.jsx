@@ -2954,93 +2954,160 @@ return (
   // SETTINGS
   // ------------------------------------------------------------
 
-  const SettingsPage = () => (
-    <div className="page">
-      <div className="page-header">
-        <div>
-          <div className="page-title">
-            Settings
-          </div>
+  const SettingsPage = () => {
+    const [sophosStatus, setSophosStatus] = useState(null);
+    const [sophosLoading, setSophosLoading] = useState(false);
 
-          <div className="page-description">
-            NETOPS platform configuration.
+    const checkSophos = () => {
+      setSophosLoading(true);
+      fetch(`${API_URL}/sophos/live-status`)
+        .then((r) => r.json())
+        .then((data) => setSophosStatus(data))
+        .catch((err) => setSophosStatus({ connected: false, error: err.message }))
+        .finally(() => setSophosLoading(false));
+    };
+
+    useEffect(() => {
+      checkSophos();
+    }, []);
+
+    return (
+      <div className="page">
+        <div className="page-header">
+          <div>
+            <div className="page-title">
+              Settings
+            </div>
+
+            <div className="page-description">
+              NETOPS platform configuration &amp; hardware integrations.
+            </div>
           </div>
         </div>
-      </div>
 
-      <div className="settings-grid">
-        <div className="panel">
-          <div className="panel-header">
-            <div>
-              <div className="panel-title">
-                Backend API
-              </div>
+        <div className="settings-grid">
+          <div className="panel">
+            <div className="panel-header">
+              <div>
+                <div className="panel-title">
+                  Backend API
+                </div>
 
-              <div className="panel-subtitle">
-                NETOPS FastAPI service
+                <div className="panel-subtitle">
+                  NETOPS FastAPI service
+                </div>
               </div>
+            </div>
+
+            <div className="settings-row">
+              <span>API URL</span>
+              <code>{API_URL}</code>
+            </div>
+
+            <div className="settings-row">
+              <span>WebSocket</span>
+              <code>{WS_URL}</code>
             </div>
           </div>
 
-          <div className="settings-row">
-            <span>API URL</span>
-            <code>{API_URL}</code>
-          </div>
+          <div className="panel">
+            <div className="panel-header">
+              <div>
+                <div className="panel-title">
+                  Connection
+                </div>
 
-          <div className="settings-row">
-            <span>WebSocket</span>
-            <code>{WS_URL}</code>
-          </div>
-        </div>
-
-        <div className="panel">
-          <div className="panel-header">
-            <div>
-              <div className="panel-title">
-                Connection
+                <div className="panel-subtitle">
+                  Current frontend status
+                </div>
               </div>
+            </div>
 
-              <div className="panel-subtitle">
-                Current frontend status
-              </div>
+            <div className="settings-row">
+              <span>API</span>
+
+              <span className="settings-status">
+                <span className="status-dot online" />
+                Connected
+              </span>
+            </div>
+
+            <div className="settings-row">
+              <span>WebSocket</span>
+
+              <span className="settings-status">
+                <span
+                  className={
+                    wsConnected
+                      ? "status-dot online"
+                      : "status-dot offline"
+                  }
+                />
+
+                {wsConnected
+                  ? "Connected"
+                  : "Disconnected"}
+              </span>
+            </div>
+
+            <div className="settings-row">
+              <span>Refresh interval</span>
+              <span>10 seconds</span>
             </div>
           </div>
 
-          <div className="settings-row">
-            <span>API</span>
+          <div className="panel" style={{ gridColumn: "span 2" }}>
+            <div className="panel-header">
+              <div>
+                <div className="panel-title">Sophos Firewall Integration</div>
+                <div className="panel-subtitle">Physical network isolation &amp; quarantine enforcement</div>
+              </div>
+              <button
+                type="button"
+                className="secondary-button small"
+                onClick={checkSophos}
+                disabled={sophosLoading}
+              >
+                {sophosLoading ? "Checking..." : "Refresh Status"}
+              </button>
+            </div>
 
-            <span className="settings-status">
-              <span className="status-dot online" />
-              Connected
-            </span>
-          </div>
+            <div className="settings-row">
+              <span>Firewall Appliance</span>
+              <code>192.168.0.10:4444 {sophosStatus?.api_version ? `(SFOS ${sophosStatus.api_version})` : ""}</code>
+            </div>
 
-          <div className="settings-row">
-            <span>WebSocket</span>
+            <div className="settings-row">
+              <span>Enforcement Status</span>
+              <span className="settings-status">
+                <span className={`status-dot ${sophosStatus?.connected ? "online" : "offline"}`} />
+                {sophosStatus?.connected ? "Active & Enforcing (Real Firewall)" : "Connecting / Error"}
+              </span>
+            </div>
 
-            <span className="settings-status">
-              <span
-                className={
-                  wsConnected
-                    ? "status-dot online"
-                    : "status-dot offline"
-                }
-              />
+            <div className="settings-row">
+              <span>Quarantine Firewall Rule</span>
+              <span style={{ color: sophosStatus?.quarantine_rule_active ? "#22c55e" : "#ef4444", fontWeight: "600" }}>
+                {sophosStatus?.quarantine_rule_active ? "NETOPS_Quarantine_Block (Top Drop Rule Live)" : "Rule Not Found"}
+              </span>
+            </div>
 
-              {wsConnected
-                ? "Connected"
-                : "Disconnected"}
-            </span>
-          </div>
+            <div className="settings-row">
+              <span>Active Quarantined Hosts</span>
+              <span style={{ fontWeight: "600", color: "#f59e0b" }}>
+                {sophosStatus?.quarantined_hosts_count !== undefined ? `${sophosStatus.quarantined_hosts_count} device(s) isolated` : "Querying..."}
+              </span>
+            </div>
 
-          <div className="settings-row">
-            <span>Refresh interval</span>
-            <span>10 seconds</span>
+            <div className="settings-row">
+              <span>Protected Infrastructure IPs</span>
+              <code style={{ fontSize: "11px" }}>192.168.0.1, 192.168.0.10, 192.168.0.13, 192.168.0.101</code>
+            </div>
           </div>
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 // ------------------------------------------------------------
 // DASHBOARD PAGE
 // ------------------------------------------------------------

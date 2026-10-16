@@ -111,8 +111,8 @@ def test_approval_commits_after_vlan_automation_and_keeps_quarantine(
     )
 
     try:
-        with TestClient(app) as client:
-            response = client.patch("/devices/1/approve")
+        client = TestClient(app)
+        response = client.patch("/devices/1/approve")
     finally:
         app.dependency_overrides.pop(get_db, None)
 
