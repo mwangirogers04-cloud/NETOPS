@@ -106,7 +106,7 @@ def ensure_sophos_infrastructure() -> bool:
       <Position>Top</Position>
       <PolicyType>Network</PolicyType>
       <NetworkPolicy>
-        <Action>Drop</Action>
+        <Action>Reject</Action>
         <LogTraffic>Enable</LogTraffic>
         <SkipLocalDestined>Disable</SkipLocalDestined>
         <SourceZones>
@@ -119,6 +119,7 @@ def ensure_sophos_infrastructure() -> bool:
         </SourceNetworks>
         <DestinationZones>
           <Zone>WAN</Zone>
+          <Zone>LOCAL</Zone>
         </DestinationZones>
         <Schedule>All The Time</Schedule>
       </NetworkPolicy>
