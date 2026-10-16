@@ -111,6 +111,8 @@ def ensure_sophos_infrastructure() -> bool:
         <SkipLocalDestined>Disable</SkipLocalDestined>
         <SourceZones>
           <Zone>LAN</Zone>
+          <Zone>WiFi</Zone>
+          <Zone>DMZ</Zone>
         </SourceZones>
         <SourceNetworks>
           <Network>{GROUP_NAME}</Network>
