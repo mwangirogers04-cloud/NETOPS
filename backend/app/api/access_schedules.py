@@ -8,6 +8,7 @@ from ..database import get_db
 from ..models.access_schedule import AccessSchedule
 from ..models.device import Device
 from ..services.access_schedule import is_access_allowed
+from ..services.network_enforcement import enforce_device_access
 
 router = APIRouter(
     prefix="/access-schedules",
@@ -59,6 +60,14 @@ def create_access_schedule(
     db.add(new_schedule)
     db.commit()
     db.refresh(new_schedule)
+
+    # Immediately evaluate and enforce on firewall and network
+    enforce_device_access(
+        device,
+        db,
+        force=True,
+    )
+    db.commit()
 
     return new_schedule
 
@@ -123,6 +132,14 @@ def update_access_schedule(
     db.commit()
     db.refresh(schedule)
 
+    # Immediately evaluate and enforce on firewall and network
+    enforce_device_access(
+        device,
+        db,
+        force=True,
+    )
+    db.commit()
+
     return schedule
 
 
@@ -139,8 +156,19 @@ def delete_access_schedule(
             detail="Access schedule not found",
         )
 
+    device_id = schedule.device_id
+    device = db.get(Device, device_id)
+
     db.delete(schedule)
     db.commit()
+
+    if device:
+        enforce_device_access(
+            device,
+            db,
+            force=True,
+        )
+        db.commit()
 
     return {
         "message": "Access schedule deleted successfully",

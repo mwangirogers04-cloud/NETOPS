@@ -23,7 +23,8 @@ def is_access_allowed(
         current_datetime = datetime.now()
 
     if current_time is None:
-        current_time = current_datetime.time()
+        ct = current_datetime.time()
+        current_time = time(ct.hour, ct.minute, ct.second)
 
     schedules = (
         db.query(AccessSchedule)
@@ -44,6 +45,10 @@ def is_access_allowed(
 
         if days == "daily":
             day_matches = True
+        elif days == "weekdays":
+            day_matches = current_day in {"monday", "tuesday", "wednesday", "thursday", "friday"}
+        elif days == "weekends":
+            day_matches = current_day in {"saturday", "sunday"}
         else:
             configured_days = [
                 day.strip()
@@ -56,14 +61,16 @@ def is_access_allowed(
             continue
 
         start = schedule.start_time
+        start = time(start.hour, start.minute, start.second)
         end = schedule.end_time
+        end = time(end.hour, end.minute, end.second)
 
-        # Normal schedule, e.g. 08:00 -> 17:00
+        # Normal schedule, e.g. 08:00:00 -> 17:00:00
         if start <= end:
             if start <= current_time <= end:
                 return True
 
-        # Overnight schedule, e.g. 22:00 -> 06:00
+        # Overnight schedule, e.g. 22:00:00 -> 06:00:00
         else:
             if current_time >= start or current_time <= end:
                 return True

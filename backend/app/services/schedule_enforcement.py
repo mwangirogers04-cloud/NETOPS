@@ -8,14 +8,14 @@ from ..models.device import Device
 from .network_enforcement import enforce_device_access
 
 
-SCHEDULE_CHECK_INTERVAL = 10
+SCHEDULE_CHECK_INTERVAL = 3
 
 
 async def schedule_enforcement_loop():
     """
     Automatically evaluate access schedules for all devices.
 
-    The loop checks every 10 seconds and re-runs the existing
+    The loop checks every 3 seconds and re-runs the existing
     network enforcement logic. This allows scheduled access to
     change automatically when a schedule opens or expires.
     """
@@ -31,13 +31,18 @@ async def schedule_enforcement_loop():
             current_datetime = datetime.now()
 
             for device in devices:
-                enforce_device_access(
-                    device,
-                    db,
-                    current_datetime=current_datetime,
-                )
-
-            db.commit()
+                try:
+                    enforce_device_access(
+                        device,
+                        db,
+                        current_datetime=current_datetime,
+                    )
+                    db.commit()
+                except Exception as dev_err:
+                    db.rollback()
+                    print(
+                        f"[SCHEDULE] Error enforcing device #{device.id}: {dev_err}"
+                    )
 
         except Exception as error:
             db.rollback()

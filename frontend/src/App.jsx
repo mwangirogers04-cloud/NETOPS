@@ -22,8 +22,8 @@ function App() {
   const [scheduleForm, setScheduleForm] = useState({
     schedule_id: null,
     device_id: null,
-    start_time: "08:00",
-    end_time: "17:00",
+    start_time: "08:00:00",
+    end_time: "17:00:00",
     days: "daily",
     enabled: true,
   });
@@ -272,12 +272,14 @@ const loadEvents = async () => {
       }
 
       await loadAccessSchedules();
+      await loadDevices();
+      await loadEvents();
 
       setScheduleForm({
         schedule_id: null,
         device_id: null,
-        start_time: "08:00",
-        end_time: "17:00",
+        start_time: "08:00:00",
+        end_time: "17:00:00",
         days: "daily",
         enabled: true,
       });
@@ -698,6 +700,24 @@ const loadEvents = async () => {
   }
 };
 // ------------------------------------------------------------
+// TIME SCHEDULE HELPERS
+// ------------------------------------------------------------
+
+const HOURS_24 = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, "0"));
+const MINUTES_60 = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, "0"));
+const SECONDS_60 = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, "0"));
+
+const parseTimeParts = (timeStr, fallbackH = "08", fallbackM = "00", fallbackS = "00") => {
+  if (!timeStr) return { h: fallbackH, m: fallbackM, s: fallbackS };
+  const parts = String(timeStr).split(":");
+  return {
+    h: (parts[0] || fallbackH).padStart(2, "0"),
+    m: (parts[1] || fallbackM).padStart(2, "0"),
+    s: (parts[2] || fallbackS).padStart(2, "0"),
+  };
+};
+
+// ------------------------------------------------------------
 // DEVICES PAGE
 // ------------------------------------------------------------
 
@@ -1004,41 +1024,186 @@ const DevicesPage = () => {
             <div
               style={{
                 display: "flex",
-                gap: "12px",
+                gap: "16px",
                 flexWrap: "wrap",
                 alignItems: "end",
               }}
             >
+              {/* START TIME (HOURS, MINUTES, SECONDS) */}
               <div>
-                <label>Start Time</label>
-                <input
-                  type="time"
-                  value={scheduleForm.start_time}
-                  onChange={(e) =>
-                    setScheduleForm({
-                      ...scheduleForm,
-                      start_time: e.target.value,
-                    })
-                  }
-                />
+                <label style={{ display: "block", marginBottom: "4px", fontSize: "12px", fontWeight: "700", color: "#93c5fd" }}>
+                  Start Time (Hours : Minutes : Seconds)
+                </label>
+                <div style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                  <select
+                    value={parseTimeParts(scheduleForm.start_time, "08", "00", "00").h}
+                    onChange={(e) => {
+                      const cur = parseTimeParts(scheduleForm.start_time, "08", "00", "00");
+                      setScheduleForm({
+                        ...scheduleForm,
+                        start_time: `${e.target.value}:${cur.m}:${cur.s}`,
+                      });
+                    }}
+                    style={{
+                      padding: "6px 8px",
+                      borderRadius: "6px",
+                      background: "#1e293b",
+                      color: "#f8fafc",
+                      border: "1px solid #475569",
+                      fontFamily: "monospace",
+                      fontWeight: "700",
+                      fontSize: "13px",
+                    }}
+                    title="Select Start Hour (00-23)"
+                  >
+                    {HOURS_24.map((h) => (
+                      <option key={`sh-${h}`} value={h}>{h} hr</option>
+                    ))}
+                  </select>
+                  <span style={{ fontWeight: "800", color: "#94a3b8" }}>:</span>
+                  <select
+                    value={parseTimeParts(scheduleForm.start_time, "08", "00", "00").m}
+                    onChange={(e) => {
+                      const cur = parseTimeParts(scheduleForm.start_time, "08", "00", "00");
+                      setScheduleForm({
+                        ...scheduleForm,
+                        start_time: `${cur.h}:${e.target.value}:${cur.s}`,
+                      });
+                    }}
+                    style={{
+                      padding: "6px 8px",
+                      borderRadius: "6px",
+                      background: "#1e293b",
+                      color: "#f8fafc",
+                      border: "1px solid #475569",
+                      fontFamily: "monospace",
+                      fontWeight: "700",
+                      fontSize: "13px",
+                    }}
+                    title="Select Start Minute (00-59)"
+                  >
+                    {MINUTES_60.map((m) => (
+                      <option key={`sm-${m}`} value={m}>{m} min</option>
+                    ))}
+                  </select>
+                  <span style={{ fontWeight: "800", color: "#94a3b8" }}>:</span>
+                  <select
+                    value={parseTimeParts(scheduleForm.start_time, "08", "00", "00").s}
+                    onChange={(e) => {
+                      const cur = parseTimeParts(scheduleForm.start_time, "08", "00", "00");
+                      setScheduleForm({
+                        ...scheduleForm,
+                        start_time: `${cur.h}:${cur.m}:${e.target.value}`,
+                      });
+                    }}
+                    style={{
+                      padding: "6px 8px",
+                      borderRadius: "6px",
+                      background: "#1e293b",
+                      color: "#f8fafc",
+                      border: "1px solid #475569",
+                      fontFamily: "monospace",
+                      fontWeight: "700",
+                      fontSize: "13px",
+                    }}
+                    title="Select Start Second (00-59)"
+                  >
+                    {SECONDS_60.map((s) => (
+                      <option key={`ss-${s}`} value={s}>{s} sec</option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
+              {/* END TIME (HOURS, MINUTES, SECONDS) */}
               <div>
-                <label>End Time</label>
-                <input
-                  type="time"
-                  value={scheduleForm.end_time}
-                  onChange={(e) =>
-                    setScheduleForm({
-                      ...scheduleForm,
-                      end_time: e.target.value,
-                    })
-                  }
-                />
+                <label style={{ display: "block", marginBottom: "4px", fontSize: "12px", fontWeight: "700", color: "#fca5a5" }}>
+                  End Time (Hours : Minutes : Seconds)
+                </label>
+                <div style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                  <select
+                    value={parseTimeParts(scheduleForm.end_time, "17", "00", "00").h}
+                    onChange={(e) => {
+                      const cur = parseTimeParts(scheduleForm.end_time, "17", "00", "00");
+                      setScheduleForm({
+                        ...scheduleForm,
+                        end_time: `${e.target.value}:${cur.m}:${cur.s}`,
+                      });
+                    }}
+                    style={{
+                      padding: "6px 8px",
+                      borderRadius: "6px",
+                      background: "#1e293b",
+                      color: "#f8fafc",
+                      border: "1px solid #475569",
+                      fontFamily: "monospace",
+                      fontWeight: "700",
+                      fontSize: "13px",
+                    }}
+                    title="Select End Hour (00-23)"
+                  >
+                    {HOURS_24.map((h) => (
+                      <option key={`eh-${h}`} value={h}>{h} hr</option>
+                    ))}
+                  </select>
+                  <span style={{ fontWeight: "800", color: "#94a3b8" }}>:</span>
+                  <select
+                    value={parseTimeParts(scheduleForm.end_time, "17", "00", "00").m}
+                    onChange={(e) => {
+                      const cur = parseTimeParts(scheduleForm.end_time, "17", "00", "00");
+                      setScheduleForm({
+                        ...scheduleForm,
+                        end_time: `${cur.h}:${e.target.value}:${cur.s}`,
+                      });
+                    }}
+                    style={{
+                      padding: "6px 8px",
+                      borderRadius: "6px",
+                      background: "#1e293b",
+                      color: "#f8fafc",
+                      border: "1px solid #475569",
+                      fontFamily: "monospace",
+                      fontWeight: "700",
+                      fontSize: "13px",
+                    }}
+                    title="Select End Minute (00-59)"
+                  >
+                    {MINUTES_60.map((m) => (
+                      <option key={`em-${m}`} value={m}>{m} min</option>
+                    ))}
+                  </select>
+                  <span style={{ fontWeight: "800", color: "#94a3b8" }}>:</span>
+                  <select
+                    value={parseTimeParts(scheduleForm.end_time, "17", "00", "00").s}
+                    onChange={(e) => {
+                      const cur = parseTimeParts(scheduleForm.end_time, "17", "00", "00");
+                      setScheduleForm({
+                        ...scheduleForm,
+                        end_time: `${cur.h}:${cur.m}:${e.target.value}`,
+                      });
+                    }}
+                    style={{
+                      padding: "6px 8px",
+                      borderRadius: "6px",
+                      background: "#1e293b",
+                      color: "#f8fafc",
+                      border: "1px solid #475569",
+                      fontFamily: "monospace",
+                      fontWeight: "700",
+                      fontSize: "13px",
+                    }}
+                    title="Select End Second (00-59)"
+                  >
+                    {SECONDS_60.map((s) => (
+                      <option key={`es-${s}`} value={s}>{s} sec</option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
+              {/* DAYS */}
               <div>
-                <label>Days</label>
+                <label style={{ display: "block", marginBottom: "4px", fontSize: "12px", fontWeight: "700" }}>Days</label>
                 <select
                   value={scheduleForm.days}
                   onChange={(e) =>
@@ -1047,23 +1212,38 @@ const DevicesPage = () => {
                       days: e.target.value,
                     })
                   }
+                  style={{
+                    padding: "6px 10px",
+                    borderRadius: "6px",
+                    background: "#1e293b",
+                    color: "#f8fafc",
+                    border: "1px solid #475569",
+                    fontWeight: "600",
+                    fontSize: "13px",
+                  }}
                 >
-                  <option value="daily">Daily</option>
-                  <option value="monday">Monday</option>
-                  <option value="tuesday">Tuesday</option>
-                  <option value="wednesday">Wednesday</option>
-                  <option value="thursday">Thursday</option>
-                  <option value="friday">Friday</option>
-                  <option value="saturday">Saturday</option>
-                  <option value="sunday">Sunday</option>
+                  <option value="daily">Daily (Every Day)</option>
+                  <option value="weekdays">Weekdays (Mon - Fri)</option>
+                  <option value="weekends">Weekends (Sat - Sun)</option>
+                  <option value="monday">Monday Only</option>
+                  <option value="tuesday">Tuesday Only</option>
+                  <option value="wednesday">Wednesday Only</option>
+                  <option value="thursday">Thursday Only</option>
+                  <option value="friday">Friday Only</option>
+                  <option value="saturday">Saturday Only</option>
+                  <option value="sunday">Sunday Only</option>
                 </select>
               </div>
 
+              {/* ENABLED */}
               <label
                 style={{
                   display: "flex",
                   gap: "6px",
                   alignItems: "center",
+                  cursor: "pointer",
+                  fontSize: "13px",
+                  fontWeight: "600",
                 }}
               >
                 <input
@@ -1079,34 +1259,107 @@ const DevicesPage = () => {
                 Enabled
               </label>
 
-              <button
-                type="button"
-                className="primary-button small"
-                onClick={createAccessSchedule}
-                disabled={
-                  scheduleLoading === scheduleForm.device_id
-                }
-              >
-                {scheduleLoading === scheduleForm.device_id
-                  ? "Saving..."
-                  : "Save Schedule"}
-              </button>
+              {/* QUICK PRESETS */}
+              <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                <button
+                  type="button"
+                  className="secondary-button small"
+                  style={{ fontSize: "11px", padding: "4px 8px" }}
+                  onClick={() => {
+                    const now = new Date();
+                    const sH = String(now.getHours()).padStart(2, "0");
+                    const sM = String(now.getMinutes()).padStart(2, "0");
+                    const sS = String(now.getSeconds()).padStart(2, "0");
+                    const end = new Date(now.getTime() + 30 * 1000);
+                    const eH = String(end.getHours()).padStart(2, "0");
+                    const eM = String(end.getMinutes()).padStart(2, "0");
+                    const eS = String(end.getSeconds()).padStart(2, "0");
+                    setScheduleForm({
+                      ...scheduleForm,
+                      start_time: `${sH}:${sM}:${sS}`,
+                      end_time: `${eH}:${eM}:${eS}`,
+                      enabled: true,
+                    });
+                  }}
+                  title="Quick test: Allow internet for the next 30 seconds"
+                >
+                  ⚡ +30s Test
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button small"
+                  style={{ fontSize: "11px", padding: "4px 8px" }}
+                  onClick={() => {
+                    const now = new Date();
+                    const sH = String(now.getHours()).padStart(2, "0");
+                    const sM = String(now.getMinutes()).padStart(2, "0");
+                    const sS = String(now.getSeconds()).padStart(2, "0");
+                    const end = new Date(now.getTime() + 60 * 1000);
+                    const eH = String(end.getHours()).padStart(2, "0");
+                    const eM = String(end.getMinutes()).padStart(2, "0");
+                    const eS = String(end.getSeconds()).padStart(2, "0");
+                    setScheduleForm({
+                      ...scheduleForm,
+                      start_time: `${sH}:${sM}:${sS}`,
+                      end_time: `${eH}:${eM}:${eS}`,
+                      enabled: true,
+                    });
+                  }}
+                  title="Quick test: Allow internet for the next 1 minute"
+                >
+                  ⚡ +1m Test
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button small"
+                  style={{ fontSize: "11px", padding: "4px 8px" }}
+                  onClick={() => {
+                    setScheduleForm({
+                      ...scheduleForm,
+                      start_time: "08:00:00",
+                      end_time: "17:00:00",
+                      days: "weekdays",
+                      enabled: true,
+                    });
+                  }}
+                  title="Standard work hours 08:00 - 17:00 (Weekdays)"
+                >
+                  💼 Work Hours
+                </button>
+              </div>
 
-              <button
-                type="button"
-                className="secondary-button small"
-                onClick={() =>
-                  setScheduleForm({
-                    device_id: null,
-                    start_time: "08:00",
-                    end_time: "17:00",
-                    days: "daily",
-                    enabled: true,
-                  })
-                }
-              >
-                Cancel
-              </button>
+              {/* ACTION BUTTONS */}
+              <div style={{ display: "flex", gap: "6px", marginLeft: "auto" }}>
+                <button
+                  type="button"
+                  className="primary-button small"
+                  onClick={createAccessSchedule}
+                  disabled={
+                    scheduleLoading === scheduleForm.device_id
+                  }
+                  style={{ fontWeight: "700" }}
+                >
+                  {scheduleLoading === scheduleForm.device_id
+                    ? "Saving..."
+                    : "💾 Save Schedule"}
+                </button>
+
+                <button
+                  type="button"
+                  className="secondary-button small"
+                  onClick={() =>
+                    setScheduleForm({
+                      device_id: null,
+                      start_time: "08:00:00",
+                      end_time: "17:00:00",
+                      days: "daily",
+                      enabled: true,
+                    })
+                  }
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -1451,10 +1704,8 @@ if (deviceFilter === "quarantined") {
                                   marginBottom: "4px",
                                 }}
                               >
-                                <span className="status-badge allowed">
-                                  {schedule.start_time.slice(0, 5)}
-                                  {" - "}
-                                  {schedule.end_time.slice(0, 5)}
+                                <span className="status-badge allowed" style={{ fontFamily: "monospace", fontSize: "11px" }}>
+                                  {schedule.start_time} - {schedule.end_time}
                                 </span>
                                 <div className="device-secondary">
                                   {schedule.days}
@@ -1506,11 +1757,11 @@ onClick={() => {
     schedule_id: existingSchedule?.id || null,
     device_id: device.id,
     start_time:
-      existingSchedule?.start_time?.slice(0, 5) ||
-      "08:00",
+      existingSchedule?.start_time ||
+      "08:00:00",
     end_time:
-      existingSchedule?.end_time?.slice(0, 5) ||
-      "17:00",
+      existingSchedule?.end_time ||
+      "17:00:00",
     days:
       existingSchedule?.days ||
       "daily",
