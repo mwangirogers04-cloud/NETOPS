@@ -62,6 +62,47 @@ def get_local_mac():
     return None
 
 
+def detect_local_subnets() -> dict:
+    """
+    Detect local IPv4 subnets across network interfaces.
+    Returns default network and detected interfaces.
+    """
+    detected = []
+    try:
+        cmd = ["ip", "-4", "-o", "addr", "show", "scope", "global"]
+        res = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        for line in res.stdout.splitlines():
+            parts = line.split()
+            if len(parts) >= 4:
+                iface = parts[1]
+                cidr = parts[3]
+                is_virtual = iface.startswith(("docker", "br-", "veth", "virbr"))
+                try:
+                    net = ipaddress.ip_interface(cidr).network
+                    detected.append({
+                        "interface": iface,
+                        "ip": cidr.split("/")[0],
+                        "cidr": cidr,
+                        "network": str(net),
+                        "is_virtual": is_virtual,
+                    })
+                except Exception:
+                    continue
+    except Exception as exc:
+        print(f"[DISCOVERY] Error detecting local subnets: {exc}")
+
+    physical = [d for d in detected if not d["is_virtual"]]
+    default_sub = (
+        physical[0]["network"]
+        if physical
+        else (detected[0]["network"] if detected else "192.168.0.0/24")
+    )
+    return {
+        "default_network": default_sub,
+        "interfaces": detected,
+    }
+
+
 def get_neighbor_devices():
     """
     Read devices known by the Linux ARP/neighbour table.

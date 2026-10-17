@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..services.discovery import (
+    detect_local_subnets,
     discover_devices,
     save_discovered_devices,
 )
@@ -13,6 +14,15 @@ router = APIRouter(
     prefix="/discovery",
     tags=["Discovery"],
 )
+
+
+@router.get("/local-subnets")
+def get_local_subnets():
+    """
+    Detect local network subnets on host interfaces to provide
+    zero-configuration LAN scanning.
+    """
+    return detect_local_subnets()
 
 
 class DiscoveryRequest(BaseModel):
@@ -73,6 +83,12 @@ def run_discovery_scan(
                         device.approval_status
                     ),
                     "status": device.status,
+                    "internet_access_authorized": getattr(
+                        device, "internet_access_authorized", False
+                    ),
+                    "enforcement_status": getattr(
+                        device, "enforcement_status", "unknown"
+                    ),
                 }
                 for device in saved_devices
             ],

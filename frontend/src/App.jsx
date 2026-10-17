@@ -34,6 +34,68 @@ function App() {
   const [eventOffset, setEventOffset] = useState(0);
   const [lanScanLoading, setLanScanLoading] = useState(false);
   const [lanScanResult, setLanScanResult] = useState(null);
+  const [lanDevicesScanning, setLanDevicesScanning] = useState(false);
+  const [lanDevicesResult, setLanDevicesResult] = useState(null);
+  const [detectedSubnet, setDetectedSubnet] = useState("192.168.0.0/24");
+  const [detectedInterfaces, setDetectedInterfaces] = useState([]);
+  const [lanSearchQuery, setLanSearchQuery] = useState("");
+  const [lanFilterStatus, setLanFilterStatus] = useState("all");
+
+  const openScheduleModal = (device) => {
+    if (!device) return;
+    const existingSchedule = accessSchedules[device.id]?.[0];
+    setScheduleForm({
+      schedule_id: existingSchedule?.id || null,
+      device_id: device.id,
+      start_time: existingSchedule?.start_time || "08:00:00",
+      end_time: existingSchedule?.end_time || "17:00:00",
+      days: existingSchedule?.days || "daily",
+      enabled: existingSchedule?.is_active ?? true,
+    });
+  };
+
+  const loadDetectedSubnets = async () => {
+    try {
+      const response = await fetch(`${API_URL}/discovery/local-subnets`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.default_network) {
+          setDetectedSubnet(data.default_network);
+        }
+        if (Array.isArray(data.interfaces)) {
+          setDetectedInterfaces(data.interfaces);
+        }
+      }
+    } catch (err) {
+      console.warn("Could not fetch detected subnets:", err);
+    }
+  };
+
+  const scanAllLanDevices = async (overrideNetwork = null) => {
+    const targetNetwork = (overrideNetwork || detectedSubnet || "192.168.0.0/24").trim();
+    setLanDevicesScanning(true);
+    try {
+      const response = await fetch(`${API_URL}/discovery/scan`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ network: targetNetwork }),
+      });
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.detail || `Scan failed: ${response.status}`);
+      }
+      const data = await response.json();
+      setLanDevicesResult(data);
+      await loadDevices();
+      await loadEvents();
+      await loadAccessSchedules();
+    } catch (err) {
+      console.error("Discovery scan error:", err);
+      alert("LAN Discovery scan failed: " + err.message);
+    } finally {
+      setLanDevicesScanning(false);
+    }
+  };
 
   const scanLanUpdates = async () => {
     setLanScanLoading(true);
@@ -403,6 +465,7 @@ const loadEvents = async () => {
     loadEvents();
     loadAccessSchedules();
     loadPatchJobs();
+    loadDetectedSubnets();
   }, []);
 
   useEffect(() => {
@@ -1872,6 +1935,609 @@ onClick={() => {
                     </td>
                   </tr>
                 ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ------------------------------------------------------------
+// LAN SCANNER & DYNAMIC DISCOVERY PAGE
+// ------------------------------------------------------------
+
+const LanScannerPage = () => {
+  const onlineDevices = devices.filter((d) => d.status === "online");
+  const ipChangedEvents = events.filter((e) => e.event_type === "ip_address_changed");
+  const ipChangedDeviceIds = new Set(ipChangedEvents.map((e) => e.device_id));
+
+  // Filter devices
+  const filteredDevices = devices.filter((device) => {
+    // Status filter
+    if (lanFilterStatus === "all" && device.status !== "online") return false;
+    if (lanFilterStatus === "ip-changed" && !ipChangedDeviceIds.has(device.id)) return false;
+    if (lanFilterStatus === "allowed" && (device.enforcement_status !== "allowed" || device.status !== "online")) return false;
+    if (lanFilterStatus === "quarantined" && (device.enforcement_status === "allowed" || device.status !== "online")) return false;
+    if (lanFilterStatus === "pending" && device.approval_status !== "pending") return false;
+
+    // Search query
+    if (lanSearchQuery.trim()) {
+      const q = lanSearchQuery.toLowerCase();
+      const ip = (device.ip_address || "").toLowerCase();
+      const mac = (device.mac_address || "").toLowerCase();
+      const host = (device.hostname || "").toLowerCase();
+      const vendor = (device.vendor || "").toLowerCase();
+      return ip.includes(q) || mac.includes(q) || host.includes(q) || vendor.includes(q);
+    }
+
+    return true;
+  });
+
+  const getDeviceIcon = (type) => {
+    switch (type) {
+      case "computer": return "💻";
+      case "cctv": return "📹";
+      case "printer": return "🖨️";
+      case "router": return "🌐";
+      case "firewall": return "🛡️";
+      default: return "🖥️";
+    }
+  };
+
+  const allowedCount = onlineDevices.filter((d) => d.enforcement_status === "allowed").length;
+  const quarantinedCount = onlineDevices.filter((d) => d.enforcement_status !== "allowed").length;
+
+  return (
+    <div className="page">
+      {/* HEADER */}
+      <div className="page-header">
+        <div>
+          <div className="page-title" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <span>📡</span> LAN Device Scanner & Dynamic Discovery
+          </div>
+          <div className="page-description">
+            Scan your physical local network, discover all connected machines, automatically reconcile dynamic DHCP IP changes, and enforce firewall rules on the fly.
+          </div>
+        </div>
+
+        <button
+          className="secondary-button"
+          onClick={() => {
+            loadDevices();
+            loadEvents();
+            loadDetectedSubnets();
+          }}
+          disabled={lanDevicesScanning}
+        >
+          🔄 Refresh
+        </button>
+      </div>
+
+      {/* CONTROL & SCAN PANEL */}
+      <div className="panel" style={{ background: "linear-gradient(180deg, #1e293b 0%, #0f172a 100%)", borderColor: "#334155", marginBottom: "16px" }}>
+        <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", gap: "16px" }}>
+          <div>
+            <div style={{ fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.08em", color: "#94a3b8", fontWeight: "700" }}>
+              TARGET LAN INTERFACE & SUBNET
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "8px", flexWrap: "wrap" }}>
+              {detectedInterfaces.map((iface) => (
+                <button
+                  key={iface.interface}
+                  type="button"
+                  onClick={() => setDetectedSubnet(iface.network)}
+                  style={{
+                    padding: "6px 12px",
+                    borderRadius: "6px",
+                    fontSize: "12px",
+                    fontWeight: "600",
+                    background: detectedSubnet === iface.network ? "rgba(59, 130, 246, 0.25)" : "rgba(15, 23, 42, 0.6)",
+                    border: detectedSubnet === iface.network ? "1px solid #3b82f6" : "1px solid #334155",
+                    color: detectedSubnet === iface.network ? "#60a5fa" : "#94a3b8",
+                    cursor: "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                  }}
+                >
+                  <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: iface.is_virtual ? "#64748b" : "#10b981" }} />
+                  {iface.interface} ({iface.ip}) - {iface.network}
+                </button>
+              ))}
+
+              <div style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                <input
+                  type="text"
+                  value={detectedSubnet}
+                  onChange={(e) => setDetectedSubnet(e.target.value)}
+                  placeholder="e.g. 192.168.0.0/24"
+                  style={{
+                    background: "#0b1120",
+                    border: "1px solid #334155",
+                    color: "#f8fafc",
+                    padding: "6px 12px",
+                    borderRadius: "6px",
+                    fontSize: "13px",
+                    fontFamily: "monospace",
+                    width: "140px",
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <button
+              className="primary-button"
+              type="button"
+              onClick={() => scanAllLanDevices()}
+              disabled={lanDevicesScanning}
+              style={{
+                fontSize: "14px",
+                fontWeight: "700",
+                padding: "12px 24px",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "10px",
+                background: lanDevicesScanning ? "#2563eb" : "#3b82f6",
+                boxShadow: "0 4px 14px rgba(59, 130, 246, 0.35)",
+                cursor: lanDevicesScanning ? "not-allowed" : "pointer",
+              }}
+            >
+              {lanDevicesScanning ? (
+                <>
+                  <span style={{ display: "inline-block", animation: "spin 1s linear infinite" }}>🔄</span>
+                  Scanning LAN ({detectedSubnet})...
+                </>
+              ) : (
+                <>
+                  <span style={{ fontSize: "16px" }}>📡</span>
+                  Scan All LAN Devices
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* SCAN RESULT BANNER */}
+        {lanDevicesResult && (
+          <div
+            style={{
+              marginTop: "16px",
+              padding: "10px 14px",
+              borderRadius: "6px",
+              background: "rgba(16, 185, 129, 0.12)",
+              border: "1px solid #10b981",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
+            <div style={{ fontSize: "13px", color: "#10b981" }}>
+              ✓ <strong>LAN Scan Completed:</strong> Discovered <strong>{lanDevicesResult.devices_discovered}</strong> active device(s) on network <code>{lanDevicesResult.network}</code>. Reconciled and synced with NETOPS database.
+            </div>
+            <button
+              className="secondary-button small"
+              onClick={() => setLanDevicesResult(null)}
+              style={{ padding: "2px 8px", fontSize: "11px" }}
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* METRICS KPI CARDS */}
+      <div className="report-grid">
+        <ReportCard
+          title="Online on LAN"
+          value={onlineDevices.length}
+          description="Active physical and virtual devices discovered on this subnet."
+        />
+        <ReportCard
+          title="Dynamic IP Changes"
+          value={ipChangedDeviceIds.size}
+          description="Devices that acquired new dynamic DHCP IP addresses."
+        />
+        <ReportCard
+          title="Allowed Internet"
+          value={allowedCount}
+          description="Devices authorized and actively passing traffic through Sophos."
+        />
+        <ReportCard
+          title="Quarantined on Sophos"
+          value={quarantinedCount}
+          description="Devices dropped by Sophos firewall top quarantine rule."
+        />
+      </div>
+
+      {/* FILTER & SEARCH BAR */}
+      <div className="panel" style={{ padding: "14px 18px", margin: "16px 0 12px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+            <button
+              type="button"
+              className={lanFilterStatus === "all" ? "primary-button small" : "secondary-button small"}
+              onClick={() => setLanFilterStatus("all")}
+            >
+              All Online ({onlineDevices.length})
+            </button>
+            <button
+              type="button"
+              className={lanFilterStatus === "ip-changed" ? "primary-button small" : "secondary-button small"}
+              onClick={() => setLanFilterStatus("ip-changed")}
+              style={lanFilterStatus !== "ip-changed" && ipChangedDeviceIds.size > 0 ? { borderColor: "#f59e0b", color: "#fbbf24" } : {}}
+            >
+              🔄 IP Changed ({ipChangedDeviceIds.size})
+            </button>
+            <button
+              type="button"
+              className={lanFilterStatus === "allowed" ? "primary-button small" : "secondary-button small"}
+              onClick={() => setLanFilterStatus("allowed")}
+            >
+              🟢 Allowed ({allowedCount})
+            </button>
+            <button
+              type="button"
+              className={lanFilterStatus === "quarantined" ? "primary-button small" : "secondary-button small"}
+              onClick={() => setLanFilterStatus("quarantined")}
+            >
+              🔴 Quarantined ({quarantinedCount})
+            </button>
+            <button
+              type="button"
+              className={lanFilterStatus === "registered" ? "primary-button small" : "secondary-button small"}
+              onClick={() => setLanFilterStatus("registered")}
+            >
+              All Registered ({devices.length})
+            </button>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", flex: "1", maxWidth: "320px" }}>
+            <input
+              type="text"
+              placeholder="Search by IP, MAC, hostname, vendor..."
+              value={lanSearchQuery}
+              onChange={(e) => setLanSearchQuery(e.target.value)}
+              style={{
+                width: "100%",
+                padding: "7px 12px",
+                background: "#0f172a",
+                border: "1px solid #334155",
+                borderRadius: "6px",
+                color: "#f8fafc",
+                fontSize: "13px",
+              }}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* DISCOVERED DEVICES TABLE */}
+      <div className="panel">
+        <div className="panel-header">
+          <div>
+            <div className="panel-title">
+              Connected LAN Devices ({filteredDevices.length})
+            </div>
+            <div className="panel-subtitle">
+              Live machines connected to {detectedSubnet}. Click any action button to manage access, reassign VLANs, or schedule access in real time.
+            </div>
+          </div>
+        </div>
+
+        <div className="table-container">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>DEVICE / HOSTNAME</th>
+                <th>CURRENT IP ADDRESS</th>
+                <th>MAC ADDRESS</th>
+                <th>VLAN SEGMENT</th>
+                <th>FIREWALL ACCESS</th>
+                <th style={{ textAlign: "right" }}>ACTIONS ("START FROM HERE")</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredDevices.length === 0 ? (
+                <tr>
+                  <td colSpan={6} style={{ textAlign: "center", padding: "32px", color: "#94a3b8" }}>
+                    No devices match the selected filter. Click <strong>"Scan All LAN Devices"</strong> above to discover live machines on the subnet.
+                  </td>
+                </tr>
+              ) : (
+                filteredDevices.map((device) => {
+                  const hasIpChange = ipChangedDeviceIds.has(device.id);
+                  const isAllowed = device.enforcement_status === "allowed";
+                  const schedule = accessSchedules[device.id]?.[0];
+
+                  return (
+                    <tr
+                      key={device.id}
+                      style={
+                        highlightedDeviceId === device.id || hasIpChange
+                          ? { background: "rgba(59, 130, 246, 0.08)" }
+                          : {}
+                      }
+                    >
+                      {/* DEVICE / HOSTNAME */}
+                      <td>
+                        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                          <span style={{ fontSize: "20px" }}>
+                            {getDeviceIcon(device.device_type)}
+                          </span>
+                          <div>
+                            <div style={{ fontWeight: "700", color: "#f8fafc" }}>
+                              {device.hostname || `Device #${device.id}`}
+                            </div>
+                            <div style={{ display: "flex", gap: "6px", marginTop: "3px" }}>
+                              {device.vendor && (
+                                <span
+                                  style={{
+                                    fontSize: "10px",
+                                    padding: "1px 6px",
+                                    borderRadius: "4px",
+                                    background: "#334155",
+                                    color: "#cbd5e1",
+                                    fontWeight: "600",
+                                  }}
+                                >
+                                  {device.vendor}
+                                </span>
+                              )}
+                              <span
+                                style={{
+                                  fontSize: "10px",
+                                  padding: "1px 6px",
+                                  borderRadius: "4px",
+                                  background:
+                                    device.approval_status === "approved"
+                                      ? "rgba(16, 185, 129, 0.2)"
+                                      : "rgba(245, 158, 11, 0.2)",
+                                  color:
+                                    device.approval_status === "approved"
+                                      ? "#34d399"
+                                      : "#fbbf24",
+                                  fontWeight: "600",
+                                }}
+                              >
+                                {device.approval_status?.toUpperCase()}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+
+                      {/* CURRENT IP ADDRESS */}
+                      <td>
+                        <div>
+                          <span
+                            style={{
+                              fontSize: "14px",
+                              fontWeight: "700",
+                              fontFamily: "monospace",
+                              color: "#60a5fa",
+                            }}
+                          >
+                            {device.ip_address || "No IP Assigned"}
+                          </span>
+                          {hasIpChange && (
+                            <div
+                              style={{
+                                fontSize: "11px",
+                                color: "#f59e0b",
+                                fontWeight: "700",
+                                marginTop: "2px",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "4px",
+                              }}
+                            >
+                              <span>🔄</span> IP Reassigned (Auto-Synced)
+                            </div>
+                          )}
+                        </div>
+                      </td>
+
+                      {/* MAC ADDRESS */}
+                      <td>
+                        <span
+                          style={{
+                            fontFamily: "monospace",
+                            fontSize: "12px",
+                            color: "#94a3b8",
+                          }}
+                        >
+                          {device.mac_address}
+                        </span>
+                      </td>
+
+                      {/* VLAN SEGMENT */}
+                      <td>
+                        <select
+                          value={device.vlan_id || 90}
+                          onChange={(e) =>
+                            deviceAction(device.id, "vlan", e.target.value)
+                          }
+                          disabled={actionLoading === `vlan-${device.id}`}
+                          style={{
+                            background: "#0f172a",
+                            color: device.vlan_id === 90 ? "#f87171" : "#38bdf8",
+                            border:
+                              device.vlan_id === 90
+                                ? "1px solid rgba(239, 68, 68, 0.4)"
+                                : "1px solid #334155",
+                            borderRadius: "5px",
+                            padding: "4px 8px",
+                            fontSize: "12px",
+                            fontWeight: "600",
+                            cursor: "pointer",
+                          }}
+                        >
+                          <option value={20}>VLAN 20 (Workstations)</option>
+                          <option value={30}>VLAN 30 (CCTV)</option>
+                          <option value={40}>VLAN 40 (Printers)</option>
+                          <option value={90}>VLAN 90 (Quarantine)</option>
+                        </select>
+                      </td>
+
+                      {/* FIREWALL ACCESS */}
+                      <td>
+                        <div>
+                          {isAllowed ? (
+                            <span
+                              style={{
+                                color: "#10b981",
+                                fontWeight: "700",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "6px",
+                                fontSize: "12px",
+                              }}
+                            >
+                              <span className="status-dot online" /> Allowed
+                            </span>
+                          ) : (
+                            <span
+                              style={{
+                                color: "#ef4444",
+                                fontWeight: "700",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "6px",
+                                fontSize: "12px",
+                              }}
+                            >
+                              <span className="status-dot offline" /> Quarantined
+                            </span>
+                          )}
+
+                          <div
+                            style={{
+                              fontSize: "11px",
+                              color: "#64748b",
+                              marginTop: "2px",
+                            }}
+                          >
+                            {isAllowed
+                              ? "Sophos: Active Traffic"
+                              : "Sophos: Dropped by Rule"}
+                          </div>
+                          {schedule && schedule.is_active && (
+                            <div
+                              style={{
+                                fontSize: "11px",
+                                color: "#a855f7",
+                                marginTop: "1px",
+                                fontWeight: "600",
+                              }}
+                            >
+                              ⏱️ {schedule.start_time} - {schedule.end_time}
+                            </div>
+                          )}
+                        </div>
+                      </td>
+
+                      {/* ACTIONS */}
+                      <td style={{ textAlign: "right" }}>
+                        <div
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "6px",
+                            flexWrap: "wrap",
+                            justifyContent: "flex-end",
+                          }}
+                        >
+                          {/* TOGGLE INTERNET */}
+                          {isAllowed ? (
+                            <button
+                              className="danger-button small"
+                              type="button"
+                              onClick={() =>
+                                deviceAction(device.id, "disallow")
+                              }
+                              disabled={
+                                actionLoading === `disallow-${device.id}`
+                              }
+                              title="Instantly block Internet access on Sophos Firewall"
+                            >
+                              {actionLoading === `disallow-${device.id}`
+                                ? "Blocking..."
+                                : "🚫 Disconnect"}
+                            </button>
+                          ) : (
+                            <button
+                              className="primary-button small"
+                              type="button"
+                              onClick={() =>
+                                deviceAction(device.id, "allow")
+                              }
+                              disabled={
+                                actionLoading === `allow-${device.id}`
+                              }
+                              style={{
+                                background: "#10b981",
+                                borderColor: "#10b981",
+                              }}
+                              title="Allow Internet access on Sophos Firewall"
+                            >
+                              {actionLoading === `allow-${device.id}`
+                                ? "Allowing..."
+                                : "✓ Allow Internet"}
+                            </button>
+                          )}
+
+                          {/* SET ACCESS SCHEDULE */}
+                          <button
+                            className="secondary-button small"
+                            type="button"
+                            onClick={() => openScheduleModal(device)}
+                            title="Set access schedule with Hours, Minutes, Seconds dropdowns"
+                          >
+                            ⏱️ Schedule
+                          </button>
+
+                          {/* MOVE TO QUARANTINE VLAN */}
+                          {device.vlan_id !== 90 && (
+                            <button
+                              className="secondary-button small"
+                              type="button"
+                              onClick={() =>
+                                deviceAction(device.id, "vlan", 90)
+                              }
+                              style={{
+                                color: "#f87171",
+                                borderColor: "rgba(239, 68, 68, 0.4)",
+                              }}
+                              title="Move device to Quarantine VLAN 90"
+                            >
+                              🛡️ Quarantine
+                            </button>
+                          )}
+
+                          {/* APPROVE IF PENDING */}
+                          {device.approval_status === "pending" && (
+                            <button
+                              className="primary-button small"
+                              type="button"
+                              onClick={() =>
+                                deviceAction(device.id, "approve")
+                              }
+                              disabled={
+                                actionLoading === `approve-${device.id}`
+                              }
+                            >
+                              Approve
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -4547,8 +5213,10 @@ console.log("FRESHNESS DEBUG:", lastChecked, new Date(lastChecked), now);
   const renderPage = () => {
   console.log("NETOPS activePage:", activePage);
     switch (activePage) {
+      case "lan-scanner":
+        return <LanScannerPage />;
       case "devices":
-  return <DevicesPage />;
+        return <DevicesPage />;
       case "events":
         return <EventsPage />;
 
@@ -5374,6 +6042,11 @@ console.log("FRESHNESS DEBUG:", lastChecked, new Date(lastChecked), now);
   return (
     <>
       <style>{`
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+
         * {
           box-sizing: border-box;
         }
@@ -6703,6 +7376,17 @@ console.log("FRESHNESS DEBUG:", lastChecked, new Date(lastChecked), now);
             />
 
             <NavItem
+              icon="📡"
+              label="LAN Scanner"
+              active={
+                activePage === "lan-scanner"
+              }
+              onClick={() =>
+                setActivePage("lan-scanner")
+              }
+            />
+
+            <NavItem
               icon="▣"
               label="Devices"
               active={
@@ -6953,9 +7637,11 @@ function getPageTitle(page) {
   const titles = {
     dashboard:
       "Network Operations Dashboard",
+    "lan-scanner": "LAN Device Scanner & Discovery",
     devices: "Device Management",
     events: "Network Events",
     access: "Access Control",
+    "endpoint-updates": "Endpoint Updates",
     vlans: "VLAN Automation",
     reports: "Network Reports",
     settings: "System Settings",
