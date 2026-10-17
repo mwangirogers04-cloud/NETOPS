@@ -3,13 +3,19 @@ import socket
 import subprocess
 import xml.etree.ElementTree as ET
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..models.device import Device
 from ..models.event import Event
 from .event_service import create_event
 from .vlan_policy import get_vlan_for_device_type
+from .sophos_enforcement import (
+    is_sophos_configured,
+    sophos_allow_device,
+    sophos_block_device,
+)
+from .network_enforcement import enforce_device_access
 
 from .device_classifier import classify_device
 
@@ -69,8 +75,6 @@ def get_neighbor_devices():
             "ip",
             "neigh",
             "show",
-            "dev",
-            DISCOVERY_INTERFACE,
         ],
         capture_output=True,
         text=True,
@@ -318,9 +322,12 @@ def save_discovered_devices(
             continue
         existing_device = db.scalar(
             select(Device).where(
-                Device.mac_address == mac_address
+                func.upper(Device.mac_address) == mac_address
             )
         )
+
+        if existing_device and existing_device.mac_address != mac_address:
+            existing_device.mac_address = mac_address
 
         hostname = discovered.get("hostname")
         vendor = discovered.get("vendor")
@@ -331,7 +338,17 @@ def save_discovered_devices(
 
         if existing_device:
             if not hostname:
-                hostname = existing_device.hostname
+                old_ip = existing_device.ip_address
+                new_ip = discovered.get("ip_address")
+                if (
+                    existing_device.hostname
+                    and old_ip
+                    and new_ip
+                    and existing_device.hostname == f"HOST-{old_ip.replace('.', '-')}"
+                ):
+                    hostname = f"HOST-{new_ip.replace('.', '-')}"
+                else:
+                    hostname = existing_device.hostname
 
             if not vendor:
                 vendor = existing_device.vendor
@@ -351,10 +368,41 @@ def save_discovered_devices(
         # -----------------------------------------------------
 
         if existing_device:
+            old_ip = existing_device.ip_address
+            new_ip = discovered.get("ip_address")
+            ip_changed = bool(new_ip and old_ip and old_ip != new_ip)
 
-            existing_device.ip_address = discovered.get(
-                "ip_address"
-            )
+            if new_ip:
+                other_devices = db.scalars(
+                    select(Device).where(
+                        Device.ip_address == new_ip,
+                        func.upper(Device.mac_address) != mac_address,
+                    )
+                ).all()
+                for other in other_devices:
+                    other.ip_address = None
+
+            if ip_changed:
+                if is_sophos_configured() and old_ip:
+                    try:
+                        sophos_allow_device(old_ip)
+                    except Exception as exc:
+                        print(
+                            f"[DISCOVERY] Error releasing old IP {old_ip} on Sophos: {exc}"
+                        )
+
+                existing_device.ip_address = new_ip
+                create_event(
+                    db,
+                    "ip_address_changed",
+                    (
+                        f"Device IP address changed from {old_ip} to {new_ip} "
+                        f"({existing_device.mac_address})"
+                    ),
+                    existing_device.id,
+                )
+            elif new_ip and not old_ip:
+                existing_device.ip_address = new_ip
 
             if hostname:
                 existing_device.hostname = hostname
@@ -470,11 +518,31 @@ def save_discovered_devices(
 
             existing_device.status = "online"
             saved_devices.append(existing_device)
+
+            if ip_changed:
+                try:
+                    enforce_device_access(existing_device, db, force=True)
+                except Exception as exc:
+                    print(
+                        f"[DISCOVERY] Error re-enforcing device access for "
+                        f"{existing_device.ip_address}: {exc}"
+                    )
+
         # -----------------------------------------------------
         # New device
         # -----------------------------------------------------
 
         else:
+            new_ip = discovered.get("ip_address")
+            if new_ip:
+                other_devices = db.scalars(
+                    select(Device).where(
+                        Device.ip_address == new_ip,
+                        func.upper(Device.mac_address) != mac_address,
+                    )
+                ).all()
+                for other in other_devices:
+                    other.ip_address = None
 
             device_type = (
                 None

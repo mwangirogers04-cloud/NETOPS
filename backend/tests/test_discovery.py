@@ -1,8 +1,32 @@
 from unittest.mock import patch
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
+from backend.app.database import Base
 from backend.app.services.discovery import discover_devices
+
+TEST_DB_URL = "sqlite:///:memory:"
+engine = create_engine(
+    TEST_DB_URL,
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool,
+)
+TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+
+@pytest.fixture
+def db_session():
+    Base.metadata.create_all(bind=engine)
+    db = TestingSessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
+
 
 
 @pytest.mark.parametrize(
@@ -59,3 +83,72 @@ def test_discovery_nmap_timeout():
             discover_devices("192.168.1.0/24")
 
     mock_run.assert_called_once()
+
+
+def test_save_discovered_devices_ip_migration(db_session):
+    from backend.app.models.device import Device
+    from backend.app.models.event import Event
+    from backend.app.services.discovery import save_discovered_devices
+
+    # Device already exists with old IP
+    existing = Device(
+        mac_address="F0:1F:AF:4C:6A:E9",
+        ip_address="192.168.0.11",
+        hostname="DELL-PC",
+        vendor="Dell",
+        device_type="computer",
+        approval_status="approved",
+        status="online",
+        internet_access_authorized=True,
+    )
+    db_session.add(existing)
+
+    # Another stale device with 192.168.0.12
+    stale = Device(
+        mac_address="AA:BB:CC:11:22:33",
+        ip_address="192.168.0.12",
+        hostname="OLD-DEVICE",
+        status="offline",
+    )
+    db_session.add(stale)
+    db_session.commit()
+
+    discovered = [
+        {
+            "mac_address": "F0:1F:AF:4C:6A:E9",
+            "ip_address": "192.168.0.12",
+            "hostname": "DELL-PC",
+            "vendor": "Dell",
+            "device_type": "computer",
+        }
+    ]
+
+    with (
+        patch("backend.app.services.discovery.is_sophos_configured", return_value=True),
+        patch("backend.app.services.discovery.sophos_allow_device") as mock_sophos_allow,
+        patch("backend.app.services.discovery.enforce_device_access") as mock_enforce,
+    ):
+        saved = save_discovered_devices(discovered, db_session)
+
+        # Existing device IP should be updated to 192.168.0.12
+        assert len(saved) == 1
+        assert saved[0].ip_address == "192.168.0.12"
+        assert saved[0].id == existing.id
+
+        # Stale device's conflicting IP should be cleared
+        db_session.refresh(stale)
+        assert stale.ip_address is None
+
+        # Old IP 192.168.0.11 should be unblocked on Sophos
+        mock_sophos_allow.assert_called_once_with("192.168.0.11")
+
+        # enforce_device_access should be called with force=True
+        mock_enforce.assert_called_once_with(existing, db_session, force=True)
+
+        # ip_address_changed event should be logged
+        evt = db_session.query(Event).filter(
+            Event.device_id == existing.id,
+            Event.event_type == "ip_address_changed",
+        ).first()
+        assert evt is not None
+        assert "192.168.0.11 to 192.168.0.12" in evt.message
