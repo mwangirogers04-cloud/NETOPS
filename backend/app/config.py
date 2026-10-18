@@ -28,6 +28,19 @@ class Settings(BaseSettings):
     sophos_password: str = ""
     sophos_verify_tls: bool = True
 
+    # Authentication & JWT
+    jwt_secret_key: str = "netops-enterprise-auth-jwt-secret-key-2026-min-32-chars!"
+    jwt_algorithm: str = "HS256"
+    jwt_access_token_expire_minutes: int = 1440
+    frontend_base_url: str = "http://127.0.0.1:5173"
+
+    # Notification / Email
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = "noreply@netops.local"
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

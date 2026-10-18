@@ -11,6 +11,7 @@ from .models.event import Event
 from .models.access_schedule import AccessSchedule
 from .models.endpoint_update import EndpointUpdate
 from .models.patch_job import PatchJob
+from .models.user import PasswordResetOTP, User
 
 from .api.devices import router as devices_router
 from .api.events import router as events_router
@@ -21,6 +22,10 @@ from .api.endpoint_updates import router as endpoint_updates_router
 from .api.cisco import router as cisco_router
 from .api.sophos import router as sophos_router
 from .api.simulation import router as simulation_router
+from .api.auth import router as auth_router
+from .api.users import router as users_router
+
+from .services.auth_service import seed_default_users
 
 from .services.websocket_manager import manager
 from .services.schedule_enforcement import schedule_enforcement_loop
@@ -76,6 +81,8 @@ app.include_router(endpoint_updates_router)
 app.include_router(cisco_router)
 app.include_router(sophos_router)
 app.include_router(simulation_router)
+app.include_router(auth_router)
+app.include_router(users_router)
 
 
 # ---------------------------------------------------------
@@ -176,6 +183,15 @@ async def scheduled_patch_loop():
 
 @app.on_event("startup")
 async def startup_event_broadcaster():
+    # Seed default developer (super admin) and admin accounts
+    db = SessionLocal()
+    try:
+        seed_default_users(db)
+    except Exception as exc:
+        print(f"[AUTH] Error seeding default users: {exc}")
+    finally:
+        db.close()
+
     asyncio.create_task(
         event_broadcaster()
     )

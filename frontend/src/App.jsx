@@ -1,12 +1,90 @@
 import React, { useEffect, useState } from "react";
+import LoginPage from "./components/LoginPage";
+import UsersPage from "./components/UsersPage";
 
 const API_URL =
-  import.meta.env.VITE_API_URL || "/api";
+  window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+    ? (import.meta.env.VITE_API_URL || "http://127.0.0.1:8000")
+    : `${window.location.protocol}//${window.location.hostname}:8000`;
+
 const WS_URL =
-  import.meta.env.VITE_WS_URL ||
-  `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/ws/events`;
+  window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+    ? (import.meta.env.VITE_WS_URL || "ws://127.0.0.1:8000/ws/events")
+    : `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.hostname}:8000/ws/events`;
 
 function App() {
+  const [currentUser, setCurrentUser] = useState(() => {
+    try {
+      const token = localStorage.getItem("netops_token");
+      const user = localStorage.getItem("netops_user");
+      if (token && user) {
+        return JSON.parse(user);
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  });
+
+  const [activationToken] = useState(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      return params.get("activation_token");
+    } catch {
+      return null;
+    }
+  });
+
+  const isAdmin = currentUser?.role === "admin" || currentUser?.role === "super_admin";
+  const isSuperAdmin = currentUser?.role === "super_admin";
+
+  const getAuthHeaders = (extra = {}) => {
+    const token = localStorage.getItem("netops_token");
+    const headers = { ...extra };
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+    return headers;
+  };
+
+  const handleLoginSuccess = (user, token) => {
+    localStorage.setItem("netops_token", token);
+    localStorage.setItem("netops_user", JSON.stringify(user));
+    setCurrentUser(user);
+    setActivePage("dashboard");
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem("netops_token");
+    localStorage.removeItem("netops_user");
+    setCurrentUser(null);
+    setActivePage("dashboard");
+  };
+
+  useEffect(() => {
+    const token = localStorage.getItem("netops_token");
+    if (!token) {
+      setCurrentUser(null);
+      return;
+    }
+    fetch(`${API_URL}/auth/me`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error("Invalid session");
+        return res.json();
+      })
+      .then((userData) => {
+        setCurrentUser(userData);
+        localStorage.setItem("netops_user", JSON.stringify(userData));
+      })
+      .catch(() => {
+        localStorage.removeItem("netops_token");
+        localStorage.removeItem("netops_user");
+        setCurrentUser(null);
+      });
+  }, []);
+
   const [activePage, setActivePage] = useState("dashboard");
   const [devices, setDevices] = useState([]);
   const [events, setEvents] = useState([]);
@@ -42,6 +120,10 @@ function App() {
   const [lanFilterStatus, setLanFilterStatus] = useState("all");
 
   const openScheduleModal = (device) => {
+    if (!isAdmin) {
+      alert("Permission Denied: Standard users cannot configure access schedules. Only Administrators and Super Administrators can manage schedules.");
+      return;
+    }
     if (!device) return;
     const existingSchedule = accessSchedules[device.id]?.[0];
     setScheduleForm({
@@ -72,6 +154,10 @@ function App() {
   };
 
   const scanAllLanDevices = async (overrideNetwork = null) => {
+    if (!isAdmin) {
+      alert("Permission Denied: Standard users cannot trigger active network scanning. Only Administrators can run LAN discovery.");
+      return;
+    }
     const targetNetwork = (overrideNetwork || detectedSubnet || "192.168.0.0/24").trim();
     setLanDevicesScanning(true);
     try {
@@ -98,6 +184,10 @@ function App() {
   };
 
   const scanLanUpdates = async () => {
+    if (!isAdmin) {
+      alert("Permission Denied: Standard users cannot initiate endpoint update scans.");
+      return;
+    }
     setLanScanLoading(true);
     setLanScanResult(null);
     try {
@@ -154,6 +244,10 @@ function App() {
   };
 
   const openDeployModal = (device) => {
+    if (!isAdmin) {
+      alert("Permission Denied: Standard users cannot deploy central updates. Only Administrators can manage patch remediation.");
+      return;
+    }
     setScheduleMode("now");
     setScheduledDateTime("");
     setDeployModalDevice(device);
@@ -461,14 +555,16 @@ const loadEvents = async () => {
   // ------------------------------------------------------------
 
   useEffect(() => {
+    if (!currentUser) return;
     loadDevices();
     loadEvents();
     loadAccessSchedules();
     loadPatchJobs();
     loadDetectedSubnets();
-  }, []);
+  }, [currentUser]);
 
   useEffect(() => {
+    if (!currentUser) return;
     const hasActiveJob = patchJobs.some((j) => j.status === "PENDING" || j.status === "IN_PROGRESS");
     if (!hasActiveJob) return;
 
@@ -478,17 +574,19 @@ const loadEvents = async () => {
     }, 4000);
 
     return () => clearInterval(timer);
-  }, [patchJobs]);
+  }, [currentUser, patchJobs]);
 
   useEffect(() => {
+    if (!currentUser) return;
     loadEvents();
-  }, [eventTypeFilter, eventLimit, eventOffset]);
+  }, [currentUser, eventTypeFilter, eventLimit, eventOffset]);
 
   // ------------------------------------------------------------
   // WEBSOCKET
   // ------------------------------------------------------------
 
   useEffect(() => {
+    if (!currentUser) return;
     let socket;
     let reconnectTimer;
 
@@ -589,6 +687,10 @@ const loadEvents = async () => {
   action,
   value = null
 ) => {
+  if (!isAdmin) {
+    alert("Permission Denied: Standard users have read-only access. Only Administrators and Super Administrators can approve devices, alter VLANs, or change Internet access.");
+    return;
+  }
   const actionKey = `${action}-${deviceId}`;
 
   try {
@@ -840,6 +942,13 @@ const DevicesPage = () => {
           </button>
         </div>
       </div>
+
+      {!isAdmin && (
+        <div style={{ background: "rgba(59, 130, 246, 0.12)", border: "1px solid rgba(59, 130, 246, 0.4)", borderRadius: "8px", padding: "10px 16px", marginBottom: "16px", display: "flex", alignItems: "center", gap: "10px", fontSize: "13px", color: "#93c5fd" }}>
+          <span>👁️</span>
+          <div><strong>Standard User (Read-Only Monitoring):</strong> You have view-only access to network devices and telemetry. Administrative actions (Approve, Disconnect, VLAN reassignments, Patch Deployment) require Administrator privileges.</div>
+        </div>
+      )}
 
       {lanScanResult && (
         <div className="panel" style={{ background: "rgba(16, 185, 129, 0.12)", border: "1px solid #10b981", margin: "12px 0 16px", padding: "12px 16px" }}>
@@ -2015,6 +2124,13 @@ const LanScannerPage = () => {
         </button>
       </div>
 
+      {!isAdmin && (
+        <div style={{ background: "rgba(59, 130, 246, 0.12)", border: "1px solid rgba(59, 130, 246, 0.4)", borderRadius: "8px", padding: "10px 16px", marginBottom: "16px", display: "flex", alignItems: "center", gap: "10px", fontSize: "13px", color: "#93c5fd" }}>
+          <span>👁️</span>
+          <div><strong>Standard User (Read-Only Scanner View):</strong> You have read-only visibility into discovered LAN devices. Triggering network sweeps and updating device approvals require Administrator privileges.</div>
+        </div>
+      )}
+
       {/* CONTROL & SCAN PANEL */}
       <div className="panel" style={{ background: "linear-gradient(180deg, #1e293b 0%, #0f172a 100%)", borderColor: "#334155", marginBottom: "16px" }}>
         <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", gap: "16px" }}>
@@ -2595,6 +2711,13 @@ const AccessPage = () => {
         </button>
 
       </div>
+
+      {!isAdmin && (
+        <div style={{ background: "rgba(59, 130, 246, 0.12)", border: "1px solid rgba(59, 130, 246, 0.4)", borderRadius: "8px", padding: "10px 16px", marginBottom: "16px", display: "flex", alignItems: "center", gap: "10px", fontSize: "13px", color: "#93c5fd" }}>
+          <span>👁️</span>
+          <div><strong>Standard User (Read-Only Access Monitoring):</strong> You have read-only visibility into device access rules and enforcement. Access control changes and schedules require Administrator privileges.</div>
+        </div>
+      )}
 
 
       {/* SUMMARY */}
@@ -5232,6 +5355,9 @@ console.log("FRESHNESS DEBUG:", lastChecked, new Date(lastChecked), now);
       case "reports":
         return <ReportsPage />;
 
+      case "users":
+        return <UsersPage API_URL={API_URL} currentUser={currentUser} getAuthHeaders={getAuthHeaders} />;
+
       case "settings":
         return <SettingsPage />;
 
@@ -6038,6 +6164,16 @@ console.log("FRESHNESS DEBUG:", lastChecked, new Date(lastChecked), now);
   // ------------------------------------------------------------
   // MAIN UI
   // ------------------------------------------------------------
+
+  if (!currentUser) {
+    return (
+      <LoginPage
+        API_URL={API_URL}
+        onLoginSuccess={handleLoginSuccess}
+        initialActivationToken={activationToken}
+      />
+    );
+  }
 
   return (
     <>
@@ -7458,6 +7594,25 @@ console.log("FRESHNESS DEBUG:", lastChecked, new Date(lastChecked), now);
               }
             />
 
+            {isAdmin && (
+              <>
+                <div className="nav-section-title">
+                  MANAGEMENT
+                </div>
+
+                <NavItem
+                  icon="👥"
+                  label="Users"
+                  active={
+                    activePage === "users"
+                  }
+                  onClick={() =>
+                    setActivePage("users")
+                  }
+                />
+              </>
+            )}
+
             <div className="nav-section-title">
               SYSTEM
             </div>
@@ -7488,13 +7643,38 @@ console.log("FRESHNESS DEBUG:", lastChecked, new Date(lastChecked), now);
               {getPageTitle(activePage)}
             </div>
 
-            <div className="topbar-right">
+            <div className="topbar-right" style={{ display: "flex", alignItems: "center", gap: "16px" }}>
               <div className="live-indicator">
                 <span className="live-dot" />
                 Live monitoring
               </div>
+
+              {currentUser && (
+                <div style={{ display: "flex", alignItems: "center", gap: "10px", background: "#111c33", border: "1px solid #1e293b", padding: "4px 12px 4px 6px", borderRadius: "24px" }}>
+                  <div style={{ width: "26px", height: "26px", borderRadius: "50%", background: isSuperAdmin ? "linear-gradient(135deg, #d97706, #b45309)" : isAdmin ? "linear-gradient(135deg, #2563eb, #1d4ed8)" : "linear-gradient(135deg, #475569, #334155)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "11px", fontWeight: "800", textTransform: "uppercase" }}>
+                    {(currentUser.username || "U").slice(0, 2).toUpperCase()}
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column" }}>
+                    <div style={{ fontSize: "12px", fontWeight: "700", color: "#f8fafc", lineHeight: 1.2 }}>
+                      {currentUser.username}
+                    </div>
+                    <div style={{ fontSize: "10px", fontWeight: "600", color: isSuperAdmin ? "#fbbf24" : isAdmin ? "#60a5fa" : "#94a3b8" }}>
+                      {isSuperAdmin ? "👑 Developer (Super Admin)" : isAdmin ? "🛡️ Administrator" : "👤 Standard User"}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    style={{ background: "transparent", border: "none", color: "#94a3b8", fontSize: "12px", cursor: "pointer", padding: "4px 6px", borderRadius: "4px", marginLeft: "6px" }}
+                    onMouseEnter={(e) => { e.currentTarget.style.color = "#f87171"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.color = "#94a3b8"; }}
+                    title="Sign Out of NETOPS"
+                  >
+                    🚪 Sign Out
+                  </button>
+                </div>
+              )}
             </div>
-            <div style={{position:"fixed",bottom:10,right:10,zIndex:99999,background:"#000",color:"#0f0",padding:"8px",fontSize:"12px"}}>PAGE: {activePage}</div>
           </header>
 
           <PageErrorBoundary>
@@ -7644,6 +7824,7 @@ function getPageTitle(page) {
     "endpoint-updates": "Endpoint Updates",
     vlans: "VLAN Automation",
     reports: "Network Reports",
+    users: "User Management & RBAC Access",
     settings: "System Settings",
   };
 
