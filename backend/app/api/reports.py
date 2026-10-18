@@ -15,18 +15,35 @@ from reportlab.platypus import (
     TableStyle,
 )
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models.device import Device
 from ..models.event import Event
+from ..models.user import User, UserSession
 
 
 router = APIRouter(
     prefix="/reports",
     tags=["Reports"],
 )
+
+
+def format_seconds(seconds: int | float | None) -> str:
+    """Format duration in seconds into human-readable 'Xh Ym Zs'."""
+    if not seconds or seconds <= 0:
+        return "0s"
+    sec = int(seconds)
+    hours, remainder = divmod(sec, 3600)
+    minutes, s = divmod(remainder, 60)
+    parts = []
+    if hours > 0:
+        parts.append(f"{hours}h")
+    if minutes > 0 or hours > 0:
+        parts.append(f"{minutes}m")
+    parts.append(f"{s}s")
+    return " ".join(parts)
 
 
 def parse_report_datetime(value: str) -> datetime:
@@ -245,6 +262,108 @@ def generate_report(
     report_type = report_type.lower().strip()
 
     # -----------------------------------------------------
+    # USER ACTIVITY & ACCESS REPORT
+    # -----------------------------------------------------
+
+    if report_type == "user_activity":
+        # 1. Users created during the specified period
+        users_created = db.scalars(
+            select(User)
+            .where(
+                User.created_at >= start,
+                User.created_at < end,
+            )
+            .order_by(User.created_at.desc())
+        ).all()
+
+        all_users = db.scalars(
+            select(User).order_by(User.id.asc())
+        ).all()
+
+        # 2. Access sessions in or active during the period
+        sessions = db.scalars(
+            select(UserSession)
+            .where(
+                UserSession.login_at < end,
+                or_(
+                    UserSession.login_at >= start,
+                    UserSession.last_activity_at >= start,
+                    and_(UserSession.is_active.is_(True), UserSession.login_at <= end),
+                ),
+            )
+            .order_by(UserSession.login_at.desc())
+        ).all()
+
+        total_duration_sec = sum(s.duration_seconds or 0 for s in sessions)
+        avg_duration_sec = (
+            int(round(total_duration_sec / len(sessions))) if sessions else 0
+        )
+
+        return {
+            "report_type": "user_activity",
+            "period": period,
+            "start": start.isoformat(),
+            "end": end.isoformat(),
+            "generated_at": datetime.utcnow().isoformat(),
+            "summary": {
+                "total_users": len(all_users),
+                "users_created_in_period": len(users_created),
+                "total_sessions": len(sessions),
+                "active_sessions": sum(1 for s in sessions if s.is_active),
+                "total_duration_seconds": total_duration_sec,
+                "total_duration_formatted": format_seconds(total_duration_sec),
+                "average_duration_seconds": avg_duration_sec,
+                "average_duration_formatted": format_seconds(avg_duration_sec),
+            },
+            "users_created": [
+                {
+                    "id": user.id,
+                    "username": user.username,
+                    "email": user.email,
+                    "phone_number": user.phone_number,
+                    "role": user.role,
+                    "is_active": user.is_active,
+                    "is_verified": user.is_verified,
+                    "created_at": (
+                        user.created_at.isoformat() if user.created_at else None
+                    ),
+                }
+                for user in users_created
+            ],
+            "sessions": [
+                {
+                    "id": session.id,
+                    "user_id": session.user_id,
+                    "username": session.username,
+                    "role": session.role,
+                    "ip_address": session.ip_address,
+                    "user_agent": session.user_agent,
+                    "login_at": (
+                        session.login_at.isoformat()
+                        if session.login_at
+                        else None
+                    ),
+                    "last_activity_at": (
+                        session.last_activity_at.isoformat()
+                        if session.last_activity_at
+                        else None
+                    ),
+                    "logout_at": (
+                        session.logout_at.isoformat()
+                        if session.logout_at
+                        else None
+                    ),
+                    "duration_seconds": session.duration_seconds or 0,
+                    "duration_formatted": format_seconds(
+                        session.duration_seconds or 0
+                    ),
+                    "is_active": session.is_active,
+                }
+                for session in sessions
+            ],
+        }
+
+    # -----------------------------------------------------
     # DEVICE INVENTORY
     # -----------------------------------------------------
 
@@ -456,7 +575,7 @@ def generate_report(
             status_code=400,
             detail=(
                 "Invalid report_type. "
-                "Use device_inventory, "
+                "Use device_inventory, user_activity, "
                 "device_discovery, network_events, "
                 "access_enforcement, approvals, "
                 "quarantine, device_classification, "
@@ -636,6 +755,162 @@ def export_report_excel(
                     column=column,
                     value=value,
                 )
+
+    # -------------------------------------------------
+    # USER ACTIVITY REPORT
+    # -------------------------------------------------
+
+    elif report_type.lower().strip() == "user_activity":
+
+        summary = report["summary"]
+
+        worksheet["A8"] = "SUMMARY"
+        worksheet["A9"] = "Total Registered Users"
+        worksheet["B9"] = summary["total_users"]
+
+        worksheet["A10"] = "Users Created in Period"
+        worksheet["B10"] = summary["users_created_in_period"]
+
+        worksheet["A11"] = "Total Logins / Access Sessions"
+        worksheet["B11"] = summary["total_sessions"]
+
+        worksheet["A12"] = "Active Sessions"
+        worksheet["B12"] = summary["active_sessions"]
+
+        worksheet["A13"] = "Total Logged Duration"
+        worksheet["B13"] = summary["total_duration_formatted"]
+
+        worksheet["A14"] = "Average Session Duration"
+        worksheet["B14"] = summary["average_duration_formatted"]
+
+        # -------------------------------------------------
+        # TABLE 1: USERS CREATED IN PERIOD
+        # -------------------------------------------------
+
+        user_title_row = 16
+        worksheet.cell(
+            row=user_title_row,
+            column=1,
+            value="USERS CREATED IN PERIOD",
+        )
+
+        user_headers = [
+            "ID",
+            "Username",
+            "Email",
+            "Phone Number",
+            "Role",
+            "Created At",
+            "Verification Status",
+            "Account Status",
+        ]
+
+        user_start_row = user_title_row + 1
+
+        for column, header in enumerate(user_headers, start=1):
+            worksheet.cell(
+                row=user_start_row,
+                column=column,
+                value=header,
+            )
+
+        current_row = user_start_row + 1
+
+        for user in report["users_created"]:
+            values = [
+                user["id"],
+                user["username"],
+                user["email"],
+                user["phone_number"] or "N/A",
+                user["role"],
+                user["created_at"] or "",
+                "Verified" if user["is_verified"] else "Pending",
+                "Active" if user["is_active"] else "Inactive",
+            ]
+            for column, value in enumerate(values, start=1):
+                worksheet.cell(
+                    row=current_row,
+                    column=column,
+                    value=value,
+                )
+            current_row += 1
+
+        if not report["users_created"]:
+            worksheet.cell(
+                row=current_row,
+                column=1,
+                value="No users were created during this period.",
+            )
+            current_row += 1
+
+        # -------------------------------------------------
+        # TABLE 2: USER ACCESS & DURATION HISTORY
+        # -------------------------------------------------
+
+        current_row += 2
+        worksheet.cell(
+            row=current_row,
+            column=1,
+            value="USER ACCESS & SESSION DURATION HISTORY",
+        )
+        current_row += 1
+
+        session_headers = [
+            "Session ID",
+            "Username",
+            "Role",
+            "Login Time",
+            "Last Activity",
+            "Logout Time",
+            "Duration (Formatted)",
+            "Duration (Seconds)",
+            "IP Address",
+            "Session Status",
+        ]
+
+        session_start_row = current_row
+
+        for column, header in enumerate(session_headers, start=1):
+            worksheet.cell(
+                row=session_start_row,
+                column=column,
+                value=header,
+            )
+
+        current_row = session_start_row + 1
+
+        for session in report["sessions"]:
+            values = [
+                session["id"],
+                session["username"],
+                session["role"],
+                session["login_at"] or "",
+                session["last_activity_at"] or "",
+                (
+                    session["logout_at"]
+                    if session["logout_at"]
+                    else ("Active Now" if session["is_active"] else "N/A")
+                ),
+                session["duration_formatted"],
+                session["duration_seconds"],
+                session["ip_address"] or "N/A",
+                "Active" if session["is_active"] else "Ended",
+            ]
+            for column, value in enumerate(values, start=1):
+                worksheet.cell(
+                    row=current_row,
+                    column=column,
+                    value=value,
+                )
+            current_row += 1
+
+        if not report["sessions"]:
+            worksheet.cell(
+                row=current_row,
+                column=1,
+                value="No access sessions recorded during this period.",
+            )
+            current_row += 1
 
     # -------------------------------------------------
     # EVENT REPORT
@@ -1028,6 +1303,260 @@ def export_report_pdf(
         )
 
         story.append(device_table)
+
+    # -------------------------------------------------
+    # USER ACTIVITY REPORT PDF
+    # -------------------------------------------------
+
+    elif report_type.lower().strip() == "user_activity":
+
+        summary = report["summary"]
+
+        story.append(
+            Paragraph(
+                "User Activity & Access Summary",
+                styles["Heading2"],
+            )
+        )
+
+        summary_data = [
+            ["Metric", "Value"],
+            ["Total Registered Users", str(summary["total_users"])],
+            ["Users Created in Period", str(summary["users_created_in_period"])],
+            ["Total Access Sessions", str(summary["total_sessions"])],
+            ["Active Sessions", str(summary["active_sessions"])],
+            ["Total Access Duration", str(summary["total_duration_formatted"])],
+            ["Average Session Duration", str(summary["average_duration_formatted"])],
+        ]
+
+        summary_table = Table(
+            summary_data,
+            colWidths=[250, 150],
+        )
+
+        summary_table.setStyle(
+            TableStyle(
+                [
+                    (
+                        "BACKGROUND",
+                        (0, 0),
+                        (-1, 0),
+                        colors.lightgrey,
+                    ),
+                    (
+                        "GRID",
+                        (0, 0),
+                        (-1, -1),
+                        0.5,
+                        colors.grey,
+                    ),
+                    (
+                        "VALIGN",
+                        (0, 0),
+                        (-1, -1),
+                        "TOP",
+                    ),
+                ]
+            )
+        )
+
+        story.append(summary_table)
+
+        story.append(
+            Spacer(1, 15)
+        )
+
+        # -------------------------------------------------
+        # SECTION 1: USERS CREATED IN PERIOD
+        # -------------------------------------------------
+
+        story.append(
+            Paragraph(
+                "Users Created in Period",
+                styles["Heading2"],
+            )
+        )
+
+        if report["users_created"]:
+            user_table_data = [
+                [
+                    "ID",
+                    "Username",
+                    "Email",
+                    "Role",
+                    "Created At",
+                    "Verified",
+                    "Status",
+                ]
+            ]
+
+            for user in report["users_created"]:
+                user_table_data.append(
+                    [
+                        str(user["id"]),
+                        str(user["username"] or ""),
+                        str(user["email"] or ""),
+                        str(user["role"] or ""),
+                        str(user["created_at"] or "")[:19].replace("T", " "),
+                        "Yes" if user["is_verified"] else "No",
+                        "Active" if user["is_active"] else "Inactive",
+                    ]
+                )
+
+            user_table = Table(
+                user_table_data,
+                repeatRows=1,
+                colWidths=[
+                    30,
+                    80,
+                    135,
+                    60,
+                    110,
+                    60,
+                    60,
+                ],
+            )
+
+            user_table.setStyle(
+                TableStyle(
+                    [
+                        (
+                            "BACKGROUND",
+                            (0, 0),
+                            (-1, 0),
+                            colors.lightgrey,
+                        ),
+                        (
+                            "GRID",
+                            (0, 0),
+                            (-1, -1),
+                            0.5,
+                            colors.grey,
+                        ),
+                        (
+                            "FONTSIZE",
+                            (0, 0),
+                            (-1, -1),
+                            7,
+                        ),
+                        (
+                            "VALIGN",
+                            (0, 0),
+                            (-1, -1),
+                            "TOP",
+                        ),
+                    ]
+                )
+            )
+
+            story.append(user_table)
+        else:
+            story.append(
+                Paragraph(
+                    "No users were created during this period.",
+                    styles["Italic"],
+                )
+            )
+
+        story.append(
+            Spacer(1, 15)
+        )
+
+        # -------------------------------------------------
+        # SECTION 2: ACCESS & SESSION DURATION HISTORY
+        # -------------------------------------------------
+
+        story.append(
+            Paragraph(
+                "User Access & Session Duration History",
+                styles["Heading2"],
+            )
+        )
+
+        if report["sessions"]:
+            session_table_data = [
+                [
+                    "User",
+                    "Role",
+                    "Login Time",
+                    "Logout Time",
+                    "Duration",
+                    "IP Address",
+                    "Status",
+                ]
+            ]
+
+            for session in report["sessions"]:
+                session_table_data.append(
+                    [
+                        str(session["username"] or ""),
+                        str(session["role"] or ""),
+                        str(session["login_at"] or "")[:19].replace("T", " "),
+                        str(
+                            session["logout_at"]
+                            if session["logout_at"]
+                            else ("Active" if session["is_active"] else "N/A")
+                        )[:19].replace("T", " "),
+                        str(session["duration_formatted"]),
+                        str(session["ip_address"] or "N/A"),
+                        "Active" if session["is_active"] else "Ended",
+                    ]
+                )
+
+            session_table = Table(
+                session_table_data,
+                repeatRows=1,
+                colWidths=[
+                    75,
+                    60,
+                    105,
+                    105,
+                    65,
+                    75,
+                    50,
+                ],
+            )
+
+            session_table.setStyle(
+                TableStyle(
+                    [
+                        (
+                            "BACKGROUND",
+                            (0, 0),
+                            (-1, 0),
+                            colors.lightgrey,
+                        ),
+                        (
+                            "GRID",
+                            (0, 0),
+                            (-1, -1),
+                            0.5,
+                            colors.grey,
+                        ),
+                        (
+                            "FONTSIZE",
+                            (0, 0),
+                            (-1, -1),
+                            7,
+                        ),
+                        (
+                            "VALIGN",
+                            (0, 0),
+                            (-1, -1),
+                            "TOP",
+                        ),
+                    ]
+                )
+            )
+
+            story.append(session_table)
+        else:
+            story.append(
+                Paragraph(
+                    "No access sessions recorded during this period.",
+                    styles["Italic"],
+                )
+            )
 
     # -------------------------------------------------
     # EVENT REPORT PDF

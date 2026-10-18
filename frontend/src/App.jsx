@@ -55,11 +55,32 @@ function App() {
   };
 
   const handleLogout = () => {
+    const token = localStorage.getItem("netops_token");
+    if (token) {
+      fetch(`${API_URL}/auth/logout`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      }).catch(() => {});
+    }
     localStorage.removeItem("netops_token");
     localStorage.removeItem("netops_user");
     setCurrentUser(null);
     setActivePage("dashboard");
   };
+
+  // Keep active user session duration updated in real time via heartbeat
+  useEffect(() => {
+    if (!currentUser) return;
+    const interval = setInterval(() => {
+      const token = localStorage.getItem("netops_token");
+      if (!token) return;
+      fetch(`${API_URL}/auth/heartbeat`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      }).catch(() => {});
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [currentUser]);
 
   useEffect(() => {
     const token = localStorage.getItem("netops_token");
@@ -3849,6 +3870,9 @@ return (
               value={reportType}
               onChange={(event) => setReportType(event.target.value)}
             >
+              <option value="user_activity">
+                User Access & Audit Report
+              </option>
               <option value="network_activity">
                 Network Activity
               </option>
@@ -4084,45 +4108,458 @@ return (
                 Download PDF
               </button>
             </div>
-            <div className="classification-list">
-              <div className="settings-row">
-                <span>Start</span>
-                <code>{reportData.start}</code>
-              </div>
-
-              <div className="settings-row">
-                <span>End</span>
-                <code>{reportData.end}</code>
-              </div>
-
-              <div className="settings-row">
-                <span>Total Events</span>
-                <strong>{reportData.summary?.total_events ?? 0}</strong>
-              </div>
-            </div>
-
-            {reportData.event_types &&
-              Object.keys(reportData.event_types).length > 0 && (
-                <div style={{ marginTop: "20px" }}>
-                  <div className="panel-title">
-                    Event Breakdown
+            {reportData.report_type === "user_activity" ? (
+              <div style={{ marginTop: "20px" }}>
+                {/* 6 Executive Summary Cards */}
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                    gap: "14px",
+                    marginBottom: "24px",
+                  }}
+                >
+                  <div
+                    style={{
+                      background: "#0d1526",
+                      border: "1px solid #1e293b",
+                      borderRadius: "10px",
+                      padding: "16px",
+                    }}
+                  >
+                    <div style={{ fontSize: "12px", color: "#94a3b8", textTransform: "uppercase", fontWeight: 600 }}>
+                      Total Registered Users
+                    </div>
+                    <div style={{ fontSize: "24px", fontWeight: 800, color: "#60a5fa", marginTop: "6px" }}>
+                      {reportData.summary?.total_users ?? 0}
+                    </div>
                   </div>
 
-                  <div className="classification-list">
-                  {Object.entries(reportData.summary?.event_types || {}).map( 
-                      ([eventType, count]) => (
-                        <div
-                          className="settings-row"
-                          key={eventType}
-                        >
-                          <span>{eventType}</span>
-                          <strong>{count}</strong>
-                        </div>
-                      )
-                    )}
+                  <div
+                    style={{
+                      background: "#0d1526",
+                      border: "1px solid #1e293b",
+                      borderRadius: "10px",
+                      padding: "16px",
+                    }}
+                  >
+                    <div style={{ fontSize: "12px", color: "#94a3b8", textTransform: "uppercase", fontWeight: 600 }}>
+                      Users Created in Period
+                    </div>
+                    <div style={{ fontSize: "24px", fontWeight: 800, color: "#34d399", marginTop: "6px" }}>
+                      {reportData.summary?.users_created_in_period ?? 0}
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      background: "#0d1526",
+                      border: "1px solid #1e293b",
+                      borderRadius: "10px",
+                      padding: "16px",
+                    }}
+                  >
+                    <div style={{ fontSize: "12px", color: "#94a3b8", textTransform: "uppercase", fontWeight: 600 }}>
+                      Total User Logins
+                    </div>
+                    <div style={{ fontSize: "24px", fontWeight: 800, color: "#a78bfa", marginTop: "6px" }}>
+                      {reportData.summary?.total_sessions ?? 0}
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      background: "#0d1526",
+                      border: "1px solid #1e293b",
+                      borderRadius: "10px",
+                      padding: "16px",
+                    }}
+                  >
+                    <div style={{ fontSize: "12px", color: "#94a3b8", textTransform: "uppercase", fontWeight: 600 }}>
+                      Active Sessions Now
+                    </div>
+                    <div style={{ fontSize: "24px", fontWeight: 800, color: "#fbbf24", marginTop: "6px" }}>
+                      {reportData.summary?.active_sessions ?? 0}
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      background: "#0d1526",
+                      border: "1px solid #1e293b",
+                      borderRadius: "10px",
+                      padding: "16px",
+                    }}
+                  >
+                    <div style={{ fontSize: "12px", color: "#94a3b8", textTransform: "uppercase", fontWeight: 600 }}>
+                      Total Access Duration
+                    </div>
+                    <div style={{ fontSize: "20px", fontWeight: 800, color: "#38bdf8", marginTop: "6px" }}>
+                      {reportData.summary?.total_duration_formatted || "0s"}
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      background: "#0d1526",
+                      border: "1px solid #1e293b",
+                      borderRadius: "10px",
+                      padding: "16px",
+                    }}
+                  >
+                    <div style={{ fontSize: "12px", color: "#94a3b8", textTransform: "uppercase", fontWeight: 600 }}>
+                      Average Session Duration
+                    </div>
+                    <div style={{ fontSize: "20px", fontWeight: 800, color: "#cbd5e1", marginTop: "6px" }}>
+                      {reportData.summary?.average_duration_formatted || "0s"}
+                    </div>
                   </div>
                 </div>
-              )}
+
+                {/* Section 1: Users Created in Period */}
+                <div style={{ marginBottom: "28px" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px" }}>
+                    <div>
+                      <div className="panel-title" style={{ fontSize: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
+                        <span>👤</span> Users Created in Period
+                      </div>
+                      <div className="panel-subtitle">
+                        Accounts provisioned between {reportData.start.replace("T", " ").slice(0, 19)} and {reportData.end.replace("T", " ").slice(0, 19)}
+                      </div>
+                    </div>
+                    <span style={{ fontSize: "12px", color: "#94a3b8" }}>
+                      {reportData.users_created?.length || 0} user{reportData.users_created?.length === 1 ? "" : "s"}
+                    </span>
+                  </div>
+
+                  {reportData.users_created && reportData.users_created.length > 0 ? (
+                    <div className="table-container">
+                      <table className="data-table">
+                        <thead>
+                          <tr>
+                            <th>USER</th>
+                            <th>EMAIL</th>
+                            <th>PHONE</th>
+                            <th>ROLE</th>
+                            <th>CREATED AT</th>
+                            <th>VERIFIED</th>
+                            <th>STATUS</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {reportData.users_created.map((u) => (
+                            <tr key={u.id}>
+                              <td>
+                                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                                  <div
+                                    style={{
+                                      width: "28px",
+                                      height: "28px",
+                                      borderRadius: "50%",
+                                      background: u.role === "super_admin" ? "#f59e0b" : u.role === "admin" ? "#2563eb" : "#475569",
+                                      color: "#fff",
+                                      fontSize: "12px",
+                                      fontWeight: 700,
+                                      display: "flex",
+                                      alignItems: "center",
+                                      justifyContent: "center",
+                                    }}
+                                  >
+                                    {(u.username || "U").charAt(0).toUpperCase()}
+                                  </div>
+                                  <strong>{u.username}</strong>
+                                </div>
+                              </td>
+                              <td>{u.email}</td>
+                              <td>{u.phone_number || <span style={{ color: "#64748b" }}>N/A</span>}</td>
+                              <td>
+                                <span
+                                  style={{
+                                    display: "inline-block",
+                                    padding: "3px 8px",
+                                    borderRadius: "6px",
+                                    fontSize: "11px",
+                                    fontWeight: 700,
+                                    textTransform: "uppercase",
+                                    background:
+                                      u.role === "super_admin"
+                                        ? "rgba(245, 158, 11, 0.15)"
+                                        : u.role === "admin"
+                                        ? "rgba(37, 99, 235, 0.15)"
+                                        : "rgba(148, 163, 184, 0.15)",
+                                    color:
+                                      u.role === "super_admin"
+                                        ? "#fbbf24"
+                                        : u.role === "admin"
+                                        ? "#60a5fa"
+                                        : "#cbd5e1",
+                                    border: `1px solid ${
+                                      u.role === "super_admin"
+                                        ? "rgba(245, 158, 11, 0.4)"
+                                        : u.role === "admin"
+                                        ? "rgba(37, 99, 235, 0.4)"
+                                        : "rgba(148, 163, 184, 0.3)"
+                                    }`,
+                                  }}
+                                >
+                                  {u.role === "super_admin" ? "SUPER ADMIN" : u.role.toUpperCase()}
+                                </span>
+                              </td>
+                              <td>{u.created_at ? u.created_at.replace("T", " ").slice(0, 19) : "—"}</td>
+                              <td>
+                                <span
+                                  style={{
+                                    color: u.is_verified ? "#34d399" : "#f59e0b",
+                                    fontWeight: 600,
+                                    fontSize: "12px",
+                                  }}
+                                >
+                                  {u.is_verified ? "✓ Verified" : "⏳ Pending"}
+                                </span>
+                              </td>
+                              <td>
+                                <span
+                                  style={{
+                                    color: u.is_active ? "#34d399" : "#f87171",
+                                    fontWeight: 600,
+                                    fontSize: "12px",
+                                  }}
+                                >
+                                  {u.is_active ? "Active" : "Inactive"}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div
+                      style={{
+                        padding: "20px",
+                        textAlign: "center",
+                        background: "#0d1526",
+                        border: "1px dashed #1e293b",
+                        borderRadius: "10px",
+                        color: "#64748b",
+                        fontSize: "13px",
+                      }}
+                    >
+                      No new users were created during this selected period.
+                    </div>
+                  )}
+                </div>
+
+                {/* Section 2: When Each User Accessed the System & For How Long */}
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px" }}>
+                    <div>
+                      <div className="panel-title" style={{ fontSize: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
+                        <span>⏱️</span> User Access & Session Duration History
+                      </div>
+                      <div className="panel-subtitle">
+                        When each user accessed the system, IP address, and for how long each session lasted
+                      </div>
+                    </div>
+                    <span style={{ fontSize: "12px", color: "#94a3b8" }}>
+                      {reportData.sessions?.length || 0} session{reportData.sessions?.length === 1 ? "" : "s"}
+                    </span>
+                  </div>
+
+                  {reportData.sessions && reportData.sessions.length > 0 ? (
+                    <div className="table-container">
+                      <table className="data-table">
+                        <thead>
+                          <tr>
+                            <th>USER</th>
+                            <th>ROLE</th>
+                            <th>LOGIN TIME</th>
+                            <th>LAST ACTIVITY</th>
+                            <th>LOGOUT TIME</th>
+                            <th>DURATION</th>
+                            <th>IP ADDRESS</th>
+                            <th>STATUS</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {reportData.sessions.map((s) => (
+                            <tr key={s.id}>
+                              <td>
+                                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                                  <div
+                                    style={{
+                                      width: "28px",
+                                      height: "28px",
+                                      borderRadius: "50%",
+                                      background: s.role === "super_admin" ? "#f59e0b" : s.role === "admin" ? "#2563eb" : "#475569",
+                                      color: "#fff",
+                                      fontSize: "12px",
+                                      fontWeight: 700,
+                                      display: "flex",
+                                      alignItems: "center",
+                                      justifyContent: "center",
+                                    }}
+                                  >
+                                    {(s.username || "U").charAt(0).toUpperCase()}
+                                  </div>
+                                  <strong>{s.username}</strong>
+                                </div>
+                              </td>
+                              <td>
+                                <span
+                                  style={{
+                                    display: "inline-block",
+                                    padding: "3px 8px",
+                                    borderRadius: "6px",
+                                    fontSize: "11px",
+                                    fontWeight: 700,
+                                    textTransform: "uppercase",
+                                    background:
+                                      s.role === "super_admin"
+                                        ? "rgba(245, 158, 11, 0.15)"
+                                        : s.role === "admin"
+                                        ? "rgba(37, 99, 235, 0.15)"
+                                        : "rgba(148, 163, 184, 0.15)",
+                                    color:
+                                      s.role === "super_admin"
+                                        ? "#fbbf24"
+                                        : s.role === "admin"
+                                        ? "#60a5fa"
+                                        : "#cbd5e1",
+                                    border: `1px solid ${
+                                      s.role === "super_admin"
+                                        ? "rgba(245, 158, 11, 0.4)"
+                                        : s.role === "admin"
+                                        ? "rgba(37, 99, 235, 0.4)"
+                                        : "rgba(148, 163, 184, 0.3)"
+                                    }`,
+                                  }}
+                                >
+                                  {s.role === "super_admin" ? "SUPER ADMIN" : s.role.toUpperCase()}
+                                </span>
+                              </td>
+                              <td>{s.login_at ? s.login_at.replace("T", " ").slice(0, 19) : "—"}</td>
+                              <td>{s.last_activity_at ? s.last_activity_at.replace("T", " ").slice(0, 19) : "—"}</td>
+                              <td>
+                                {s.logout_at ? (
+                                  s.logout_at.replace("T", " ").slice(0, 19)
+                                ) : s.is_active ? (
+                                  <span style={{ color: "#34d399", fontWeight: 600 }}>Active Now</span>
+                                ) : (
+                                  <span style={{ color: "#64748b" }}>Ended</span>
+                                )}
+                              </td>
+                              <td>
+                                <strong style={{ color: "#38bdf8", fontFamily: "monospace", fontSize: "13px" }}>
+                                  {s.duration_formatted}
+                                </strong>
+                              </td>
+                              <td>
+                                <code style={{ fontSize: "12px", color: "#cbd5e1" }}>{s.ip_address || "127.0.0.1"}</code>
+                              </td>
+                              <td>
+                                {s.is_active ? (
+                                  <span
+                                    style={{
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: "5px",
+                                      padding: "3px 8px",
+                                      borderRadius: "6px",
+                                      fontSize: "11px",
+                                      fontWeight: 700,
+                                      background: "rgba(16, 185, 129, 0.15)",
+                                      color: "#34d399",
+                                      border: "1px solid rgba(16, 185, 129, 0.3)",
+                                    }}
+                                  >
+                                    <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#34d399" }}></span>
+                                    ONLINE
+                                  </span>
+                                ) : (
+                                  <span
+                                    style={{
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: "5px",
+                                      padding: "3px 8px",
+                                      borderRadius: "6px",
+                                      fontSize: "11px",
+                                      fontWeight: 600,
+                                      background: "rgba(148, 163, 184, 0.1)",
+                                      color: "#94a3b8",
+                                      border: "1px solid rgba(148, 163, 184, 0.2)",
+                                    }}
+                                  >
+                                    CLOSED
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div
+                      style={{
+                        padding: "20px",
+                        textAlign: "center",
+                        background: "#0d1526",
+                        border: "1px dashed #1e293b",
+                        borderRadius: "10px",
+                        color: "#64748b",
+                        fontSize: "13px",
+                      }}
+                    >
+                      No user access sessions were recorded during this selected period.
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="classification-list">
+                  <div className="settings-row">
+                    <span>Start</span>
+                    <code>{reportData.start}</code>
+                  </div>
+
+                  <div className="settings-row">
+                    <span>End</span>
+                    <code>{reportData.end}</code>
+                  </div>
+
+                  <div className="settings-row">
+                    <span>Total Events</span>
+                    <strong>{reportData.summary?.total_events ?? 0}</strong>
+                  </div>
+                </div>
+
+                {reportData.event_types &&
+                  Object.keys(reportData.event_types).length > 0 && (
+                    <div style={{ marginTop: "20px" }}>
+                      <div className="panel-title">
+                        Event Breakdown
+                      </div>
+
+                      <div className="classification-list">
+                      {Object.entries(reportData.summary?.event_types || {}).map( 
+                          ([eventType, count]) => (
+                            <div
+                              className="settings-row"
+                              key={eventType}
+                            >
+                              <span>{eventType}</span>
+                              <strong>{count}</strong>
+                            </div>
+                          )
+                        )}
+                      </div>
+                    </div>
+                  )}
+              </>
+            )}
           </div>
         )}
       </div>

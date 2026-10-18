@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from datetime import datetime, timezone
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, EmailStr, field_validator
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models.user import User
+from ..models.user import User, UserSession
 from ..services.auth_service import (
     create_access_token,
     create_and_send_password_reset_otp,
@@ -85,8 +86,8 @@ class ResetPasswordRequest(BaseModel):
 # -------------------------------------------------------------
 
 @router.post("/login")
-def login(req: LoginRequest, db: Session = Depends(get_db)):
-    """Authenticate user with username or email and return JWT bearer token."""
+def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
+    """Authenticate user with username or email, record session, and return JWT bearer token."""
     ident = req.username.strip().lower()
 
     user = db.scalar(
@@ -110,18 +111,43 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
             detail="Account is currently deactivated. Contact your administrator.",
         )
 
+    # Record User Access Session
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    client_ip = (
+        request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+        or (request.client.host if request.client else "127.0.0.1")
+    )
+    user_agent = request.headers.get("user-agent", "Unknown")[:250]
+
+    session = UserSession(
+        user_id=user.id,
+        username=user.username,
+        role=user.role,
+        ip_address=client_ip,
+        user_agent=user_agent,
+        login_at=now,
+        last_activity_at=now,
+        duration_seconds=0,
+        is_active=True,
+    )
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+
     access_token = create_access_token(
         data={
             "sub": user.username,
             "role": user.role,
             "user_id": user.id,
             "email": user.email,
+            "session_id": session.id,
         }
     )
 
     return {
         "access_token": access_token,
         "token_type": "bearer",
+        "session_id": session.id,
         "user": {
             "id": user.id,
             "username": user.username,
@@ -134,12 +160,26 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
 
 
 # -------------------------------------------------------------
-# CURRENT USER INFO
+# CURRENT USER INFO & SESSION HEARTBEAT
 # -------------------------------------------------------------
 
 @router.get("/me")
-def get_my_profile(current_user: User = Depends(get_current_user)):
-    """Return currently authenticated user profile."""
+def get_my_profile(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return currently authenticated user profile and refresh active session duration."""
+    active_session = db.scalar(
+        select(UserSession)
+        .where(UserSession.user_id == current_user.id, UserSession.is_active == True)
+        .order_by(UserSession.login_at.desc())
+    )
+    if active_session:
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        active_session.last_activity_at = now
+        active_session.duration_seconds = max(1, int((now - active_session.login_at).total_seconds()))
+        db.commit()
+
     return {
         "id": current_user.id,
         "username": current_user.username,
@@ -148,6 +188,50 @@ def get_my_profile(current_user: User = Depends(get_current_user)):
         "role": current_user.role,
         "is_verified": current_user.is_verified,
     }
+
+
+@router.post("/heartbeat")
+def session_heartbeat(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Heartbeat invoked while user is active on the dashboard to track session duration."""
+    active_session = db.scalar(
+        select(UserSession)
+        .where(UserSession.user_id == current_user.id, UserSession.is_active == True)
+        .order_by(UserSession.login_at.desc())
+    )
+    if active_session:
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        active_session.last_activity_at = now
+        active_session.duration_seconds = max(1, int((now - active_session.login_at).total_seconds()))
+        db.commit()
+        return {
+            "status": "ok",
+            "session_id": active_session.id,
+            "duration_seconds": active_session.duration_seconds,
+        }
+    return {"status": "no_active_session"}
+
+
+@router.post("/logout")
+def logout_user(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Log out user and finalize access session duration."""
+    active_sessions = db.scalars(
+        select(UserSession)
+        .where(UserSession.user_id == current_user.id, UserSession.is_active == True)
+    ).all()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    for s in active_sessions:
+        s.logout_at = now
+        s.last_activity_at = now
+        s.duration_seconds = max(1, int((now - s.login_at).total_seconds()))
+        s.is_active = False
+    db.commit()
+    return {"status": "logged_out", "message": "Session successfully closed."}
 
 
 # -------------------------------------------------------------

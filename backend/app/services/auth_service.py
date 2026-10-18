@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..database import get_db
-from ..models.user import PasswordResetOTP, User
+from ..models.user import PasswordResetOTP, User, UserSession
 
 logger = logging.getLogger("netops.auth")
 security_bearer = HTTPBearer(auto_error=False)
@@ -382,3 +382,41 @@ def seed_default_users(db: Session):
         logger.info("Created default Admin: admin / Admin@1234")
 
     db.commit()
+
+    # Seed initial access session history if none exist
+    has_sessions = db.scalar(select(UserSession).limit(1))
+    if not has_sessions:
+        dev_obj = db.scalar(select(User).where(User.username == "developer"))
+        admin_obj = db.scalar(select(User).where(User.username == "admin"))
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        if dev_obj:
+            db.add(
+                UserSession(
+                    user_id=dev_obj.id,
+                    username=dev_obj.username,
+                    role=dev_obj.role,
+                    ip_address="192.168.0.13",
+                    user_agent="Mozilla/5.0 (X11; Linux x86_64) NETOPS/Console",
+                    login_at=now - timedelta(hours=2, minutes=30),
+                    last_activity_at=now - timedelta(minutes=45),
+                    logout_at=now - timedelta(minutes=45),
+                    duration_seconds=6300,  # 1h 45m
+                    is_active=False,
+                )
+            )
+        if admin_obj:
+            db.add(
+                UserSession(
+                    user_id=admin_obj.id,
+                    username=admin_obj.username,
+                    role=admin_obj.role,
+                    ip_address="192.168.0.101",
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) NETOPS/Console",
+                    login_at=now - timedelta(hours=1, minutes=10),
+                    last_activity_at=now - timedelta(minutes=20),
+                    logout_at=now - timedelta(minutes=20),
+                    duration_seconds=3000,  # 50m
+                    is_active=False,
+                )
+            )
+        db.commit()

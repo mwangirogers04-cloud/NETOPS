@@ -5,10 +5,16 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from backend.app.api import reports
-from backend.app.api.reports import get_period_range, parse_report_datetime, parse_report_date
+from backend.app.api.reports import (
+    format_seconds,
+    get_period_range,
+    parse_report_datetime,
+    parse_report_date,
+)
 from backend.app.main import app
 from backend.app.models.device import Device
 from backend.app.models.event import Event
+from backend.app.models.user import User, UserSession
 
 
 client = TestClient(app)
@@ -232,3 +238,173 @@ def test_api_export_pdf_with_xml_special_characters():
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/pdf"
     assert response.content.startswith(b"%PDF")
+
+
+def test_format_seconds():
+    assert format_seconds(None) == "0s"
+    assert format_seconds(0) == "0s"
+    assert format_seconds(-10) == "0s"
+    assert format_seconds(45) == "45s"
+    assert format_seconds(125) == "2m 5s"
+    assert format_seconds(3665) == "1h 1m 5s"
+
+
+def test_api_generate_report_user_activity():
+    sample_user = User(
+        id=1,
+        username="netadmin",
+        email="netadmin@example.com",
+        phone_number="+254700000000",
+        role="admin",
+        is_active=True,
+        is_verified=True,
+        created_at=datetime(2026, 10, 1, 10, 0, 0),
+    )
+    sample_session = UserSession(
+        id=10,
+        user_id=1,
+        username="netadmin",
+        role="admin",
+        ip_address="192.168.1.15",
+        user_agent="Mozilla/5.0",
+        login_at=datetime(2026, 10, 1, 10, 5, 0),
+        last_activity_at=datetime(2026, 10, 1, 11, 10, 0),
+        logout_at=datetime(2026, 10, 1, 11, 10, 0),
+        duration_seconds=3900,
+        is_active=False,
+    )
+
+    db = MagicMock()
+    mock_res1 = MagicMock()
+    mock_res1.all.return_value = [sample_user]
+    mock_res2 = MagicMock()
+    mock_res2.all.return_value = [sample_user]
+    mock_res3 = MagicMock()
+    mock_res3.all.return_value = [sample_session]
+    db.scalars.side_effect = [mock_res1, mock_res2, mock_res3]
+
+    def override_get_db():
+        yield db
+
+    app.dependency_overrides[reports.get_db] = override_get_db
+    try:
+        response = client.get(
+            "/reports/generate?report_type=user_activity&period=daily&date=2026-10-01"
+        )
+    finally:
+        app.dependency_overrides.pop(reports.get_db, None)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["report_type"] == "user_activity"
+    assert data["summary"]["total_users"] == 1
+    assert data["summary"]["users_created_in_period"] == 1
+    assert data["summary"]["total_sessions"] == 1
+    assert data["summary"]["total_duration_seconds"] == 3900
+    assert data["summary"]["total_duration_formatted"] == "1h 5m 0s"
+    assert len(data["users_created"]) == 1
+    assert data["users_created"][0]["username"] == "netadmin"
+    assert len(data["sessions"]) == 1
+    assert data["sessions"][0]["username"] == "netadmin"
+    assert data["sessions"][0]["duration_formatted"] == "1h 5m 0s"
+
+
+def test_api_export_excel_user_activity():
+    sample_user = User(
+        id=1,
+        username="developer",
+        email="dev@netops.local",
+        phone_number="+254711111111",
+        role="super_admin",
+        is_active=True,
+        is_verified=True,
+        created_at=datetime(2026, 10, 1, 8, 0, 0),
+    )
+    sample_session = UserSession(
+        id=1,
+        user_id=1,
+        username="developer",
+        role="super_admin",
+        ip_address="192.168.1.10",
+        user_agent="Mozilla/5.0",
+        login_at=datetime(2026, 10, 1, 8, 30, 0),
+        last_activity_at=datetime(2026, 10, 1, 9, 30, 0),
+        logout_at=datetime(2026, 10, 1, 9, 30, 0),
+        duration_seconds=3600,
+        is_active=False,
+    )
+
+    db = MagicMock()
+    mock_res1 = MagicMock()
+    mock_res1.all.return_value = [sample_user]
+    mock_res2 = MagicMock()
+    mock_res2.all.return_value = [sample_user]
+    mock_res3 = MagicMock()
+    mock_res3.all.return_value = [sample_session]
+    db.scalars.side_effect = [mock_res1, mock_res2, mock_res3]
+
+    def override_get_db():
+        yield db
+
+    app.dependency_overrides[reports.get_db] = override_get_db
+    try:
+        response = client.get(
+            "/reports/export/excel?report_type=user_activity&period=daily&date=2026-10-01"
+        )
+    finally:
+        app.dependency_overrides.pop(reports.get_db, None)
+
+    assert response.status_code == 200
+    assert "spreadsheetml.sheet" in response.headers["content-type"]
+    assert len(response.content) > 0
+
+
+def test_api_export_pdf_user_activity():
+    sample_user = User(
+        id=1,
+        username="developer",
+        email="dev@netops.local",
+        phone_number="+254711111111",
+        role="super_admin",
+        is_active=True,
+        is_verified=True,
+        created_at=datetime(2026, 10, 1, 8, 0, 0),
+    )
+    sample_session = UserSession(
+        id=1,
+        user_id=1,
+        username="developer",
+        role="super_admin",
+        ip_address="192.168.1.10",
+        user_agent="Mozilla/5.0",
+        login_at=datetime(2026, 10, 1, 8, 30, 0),
+        last_activity_at=datetime(2026, 10, 1, 9, 30, 0),
+        logout_at=datetime(2026, 10, 1, 9, 30, 0),
+        duration_seconds=3600,
+        is_active=False,
+    )
+
+    db = MagicMock()
+    mock_res1 = MagicMock()
+    mock_res1.all.return_value = [sample_user]
+    mock_res2 = MagicMock()
+    mock_res2.all.return_value = [sample_user]
+    mock_res3 = MagicMock()
+    mock_res3.all.return_value = [sample_session]
+    db.scalars.side_effect = [mock_res1, mock_res2, mock_res3]
+
+    def override_get_db():
+        yield db
+
+    app.dependency_overrides[reports.get_db] = override_get_db
+    try:
+        response = client.get(
+            "/reports/export/pdf?report_type=user_activity&period=daily&date=2026-10-01"
+        )
+    finally:
+        app.dependency_overrides.pop(reports.get_db, None)
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/pdf"
+    assert response.content.startswith(b"%PDF")
+

@@ -11,7 +11,7 @@ from .models.event import Event
 from .models.access_schedule import AccessSchedule
 from .models.endpoint_update import EndpointUpdate
 from .models.patch_job import PatchJob
-from .models.user import PasswordResetOTP, User
+from .models.user import PasswordResetOTP, User, UserSession
 
 from .api.devices import router as devices_router
 from .api.events import router as events_router
