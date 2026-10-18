@@ -59,6 +59,55 @@ class UserCreateRequest(BaseModel):
         return clean
 
 
+class UserUpdateRequest(BaseModel):
+    username: str | None = None
+    email: EmailStr | None = None
+    phone_number: str | None = None
+    role: str | None = None
+    password: str | None = None
+    is_active: bool | None = None
+    is_verified: bool | None = None
+
+    @field_validator("username")
+    @classmethod
+    def validate_username(cls, v: str | None) -> str | None:
+        if v is not None:
+            clean = v.strip()
+            if len(clean) < 3:
+                raise ValueError("Username must be at least 3 characters")
+            return clean
+        return v
+
+    @field_validator("phone_number")
+    @classmethod
+    def validate_phone(cls, v: str | None) -> str | None:
+        if v is not None:
+            clean = v.strip()
+            if len(clean) < 7:
+                raise ValueError("Please provide a valid phone number")
+            return clean
+        return v
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, v: str | None) -> str | None:
+        if v is not None and v.strip() != "":
+            if len(v) < 6:
+                raise ValueError("Password must be at least 6 characters")
+            return v
+        return None
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, v: str | None) -> str | None:
+        if v is not None:
+            clean = v.strip().lower()
+            if clean not in ("admin", "user", "super_admin"):
+                raise ValueError("Role must be 'admin', 'user', or 'super_admin'")
+            return clean
+        return v
+
+
 class UserResponse(BaseModel):
     id: int
     username: str
@@ -196,6 +245,135 @@ def create_user(
             "phone_number": new_user.phone_number,
             "role": new_user.role,
             "is_verified": new_user.is_verified,
+        },
+    }
+
+
+# -------------------------------------------------------------
+# UPDATE USER (SUPER ADMIN OR ADMIN)
+# -------------------------------------------------------------
+
+@router.patch("/{user_id}", response_model=dict)
+def update_user(
+    user_id: int,
+    req: UserUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """
+    Update an existing user account.
+    Super Admins can edit any account. Admins can edit standard users or their own account.
+    """
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found.",
+        )
+
+    # Permission check: Only Super Admin can edit Super Admin accounts
+    if user.role == "super_admin" and current_user.role != "super_admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only Super Administrators can edit Super Administrator accounts.",
+        )
+
+    # Role change permission check
+    if req.role is not None and req.role != user.role:
+        if current_user.role != "super_admin":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only Super Administrators can change user roles.",
+            )
+        # Prevent demoting the only super_admin
+        if user.role == "super_admin" and req.role != "super_admin":
+            super_count = db.scalar(
+                select(func.count(User.id)).where(User.role == "super_admin")
+            )
+            if (super_count or 0) <= 1:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Cannot demote the only remaining Super Administrator.",
+                )
+        user.role = req.role
+
+    # Check username collision if changed
+    if req.username is not None and req.username.strip().lower() != user.username.lower():
+        clean_user = req.username.strip()
+        existing = db.scalar(
+            select(User).where(
+                func.lower(User.username) == clean_user.lower(),
+                User.id != user_id,
+            )
+        )
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Username '{clean_user}' is already taken.",
+            )
+        user.username = clean_user
+
+    # Check email collision if changed
+    if req.email is not None and str(req.email).strip().lower() != user.email.lower():
+        clean_email = str(req.email).strip().lower()
+        existing = db.scalar(
+            select(User).where(
+                func.lower(User.email) == clean_email,
+                User.id != user_id,
+            )
+        )
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Email '{clean_email}' is already registered to another account.",
+            )
+        user.email = clean_email
+
+    # Phone number
+    if req.phone_number is not None:
+        user.phone_number = req.phone_number.strip()
+
+    # Password
+    if req.password is not None and req.password.strip():
+        user.hashed_password = hash_password(req.password)
+
+    # Active status
+    if req.is_active is not None:
+        # Prevent deactivating the only super_admin
+        if user.role == "super_admin" and not req.is_active:
+            super_active_count = db.scalar(
+                select(func.count(User.id)).where(
+                    User.role == "super_admin",
+                    User.is_active == True,
+                )
+            )
+            if (super_active_count or 0) <= 1:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Cannot deactivate the only active Super Administrator.",
+                )
+        user.is_active = req.is_active
+
+    # Verified status
+    if req.is_verified is not None:
+        user.is_verified = req.is_verified
+        if req.is_verified:
+            user.activation_token = None
+
+    db.commit()
+    db.refresh(user)
+
+    return {
+        "status": "updated",
+        "message": f"User '{user.username}' updated successfully.",
+        "user": {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "phone_number": user.phone_number,
+            "role": user.role,
+            "is_active": user.is_active,
+            "is_verified": user.is_verified,
         },
     }
 

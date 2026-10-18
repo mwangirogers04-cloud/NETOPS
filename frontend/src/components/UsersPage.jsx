@@ -9,6 +9,21 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
   const [copiedId, setCopiedId] = useState(null);
   const [actionLoadingId, setActionLoadingId] = useState(null);
 
+  // Edit user state
+  const [editingUser, setEditingUser] = useState(null);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editFormState, setEditFormState] = useState({
+    username: "",
+    email: "",
+    phone_number: "",
+    role: "user",
+    password: "",
+    is_active: true,
+    is_verified: true,
+  });
+  const [editLoading, setEditLoading] = useState(false);
+  const [editError, setEditError] = useState("");
+
   // Create user form state
   const isSuperAdmin = currentUser?.role === "super_admin";
   const [formState, setFormState] = useState({
@@ -130,6 +145,83 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
       alert("Failed to delete user: " + err.message);
     } finally {
       setActionLoadingId(null);
+    }
+  };
+
+  const handleOpenEdit = (user) => {
+    if (user.role === "super_admin" && !isSuperAdmin) {
+      alert("Permission Denied: Only Super Administrators can edit Super Administrator accounts.");
+      return;
+    }
+    setEditingUser(user);
+    setEditFormState({
+      username: user.username || "",
+      email: user.email || "",
+      phone_number: user.phone_number || "",
+      role: user.role || "user",
+      password: "",
+      is_active: user.is_active ?? true,
+      is_verified: user.is_verified ?? false,
+    });
+    setEditError("");
+    setShowEditModal(true);
+  };
+
+  const handleUpdateUser = async (e) => {
+    e.preventDefault();
+    if (!editingUser) return;
+    if (!editFormState.username.trim() || !editFormState.email.trim() || !editFormState.phone_number.trim()) {
+      setEditError("Username, Email, and Phone Number cannot be blank.");
+      return;
+    }
+    if (editFormState.password && editFormState.password.length < 6) {
+      setEditError("Password must be at least 6 characters (or leave empty to keep existing password).");
+      return;
+    }
+
+    setEditLoading(true);
+    setEditError("");
+
+    const payload = {
+      username: editFormState.username.trim(),
+      email: editFormState.email.trim(),
+      phone_number: editFormState.phone_number.trim(),
+      role: editFormState.role,
+      is_active: editFormState.is_active,
+      is_verified: editFormState.is_verified,
+    };
+    if (editFormState.password && editFormState.password.trim()) {
+      payload.password = editFormState.password.trim();
+    }
+
+    try {
+      const res = await fetch(`${API_URL}/users/${editingUser.id}`, {
+        method: "PATCH",
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || "Failed to update user.");
+      }
+      setShowEditModal(false);
+      setEditingUser(null);
+      setActionNotice(`✅ User '${data.user?.username || editFormState.username}' updated successfully!`);
+      await loadUsers();
+
+      if (editingUser.id === currentUser?.id) {
+        try {
+          const currentStored = JSON.parse(localStorage.getItem("netops_user") || "{}");
+          const updatedStored = { ...currentStored, ...data.user };
+          localStorage.setItem("netops_user", JSON.stringify(updatedStored));
+        } catch (_) {}
+      }
+
+      setTimeout(() => setActionNotice(""), 6000);
+    } catch (err) {
+      setEditError(err.message || "Failed to update user.");
+    } finally {
+      setEditLoading(false);
     }
   };
 
@@ -445,6 +537,18 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
 
                       <td style={{ textAlign: "right" }}>
                         <div style={{ display: "flex", justifyContent: "flex-end", gap: "6px", flexWrap: "wrap" }}>
+                          {/* EDIT USER */}
+                          <button
+                            type="button"
+                            className="secondary-button small"
+                            onClick={() => handleOpenEdit(u)}
+                            disabled={u.role === "super_admin" && !isSuperAdmin}
+                            title={u.role === "super_admin" && !isSuperAdmin ? "Only Super Admin can edit this account" : "Edit user profile, role, status & credentials"}
+                            style={{ borderColor: "#3b82f6", color: "#60a5fa" }}
+                          >
+                            ✏️ Edit
+                          </button>
+
                           {/* COPY ACTIVATION LINK */}
                           {u.activation_link && (
                             <button
@@ -670,6 +774,174 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                 </div>
               </form>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* EDIT USER MODAL */}
+      {showEditModal && editingUser && (
+        <div className="modal-overlay" onClick={() => setShowEditModal(false)}>
+          <div className="user-modal-box" onClick={(e) => e.stopPropagation()}>
+            <form onSubmit={handleUpdateUser}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+                <div>
+                  <div style={{ fontSize: "18px", fontWeight: "800", color: "#f8fafc" }}>
+                    Edit User: {editingUser.username}
+                  </div>
+                  <div style={{ fontSize: "12px", color: "#94a3b8", marginTop: "2px" }}>
+                    Update profile information, roles, and status for account #{editingUser.id}.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  style={{ background: "none", border: "none", color: "#94a3b8", fontSize: "20px", cursor: "pointer" }}
+                  onClick={() => setShowEditModal(false)}
+                >
+                  ✕
+                </button>
+              </div>
+
+              {editError && (
+                <div style={{ background: "rgba(239, 68, 68, 0.15)", border: "1px solid rgba(239, 68, 68, 0.4)", color: "#fca5a5", padding: "10px 12px", borderRadius: "8px", fontSize: "12px", marginBottom: "14px" }}>
+                  {editError}
+                </div>
+              )}
+
+              <div className="form-group" style={{ marginBottom: "14px" }}>
+                <label className="form-label" style={{ fontSize: "11px", fontWeight: "700", color: "#cbd5e1", display: "block", marginBottom: "4px" }}>
+                  Username *
+                </label>
+                <input
+                  type="text"
+                  className="login-input"
+                  value={editFormState.username}
+                  onChange={(e) => setEditFormState({ ...editFormState, username: e.target.value })}
+                  disabled={editLoading}
+                  required
+                />
+              </div>
+
+              <div className="form-group" style={{ marginBottom: "14px" }}>
+                <label className="form-label" style={{ fontSize: "11px", fontWeight: "700", color: "#cbd5e1", display: "block", marginBottom: "4px" }}>
+                  Email Address *
+                </label>
+                <input
+                  type="email"
+                  className="login-input"
+                  value={editFormState.email}
+                  onChange={(e) => setEditFormState({ ...editFormState, email: e.target.value })}
+                  disabled={editLoading}
+                  required
+                />
+              </div>
+
+              <div className="form-group" style={{ marginBottom: "14px" }}>
+                <label className="form-label" style={{ fontSize: "11px", fontWeight: "700", color: "#cbd5e1", display: "block", marginBottom: "4px" }}>
+                  Phone Number *
+                </label>
+                <input
+                  type="tel"
+                  className="login-input"
+                  value={editFormState.phone_number}
+                  onChange={(e) => setEditFormState({ ...editFormState, phone_number: e.target.value })}
+                  disabled={editLoading}
+                  required
+                />
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "14px" }}>
+                <div className="form-group">
+                  <label className="form-label" style={{ fontSize: "11px", fontWeight: "700", color: "#cbd5e1", display: "block", marginBottom: "4px" }}>
+                    Role & Permissions
+                  </label>
+                  {isSuperAdmin ? (
+                    <select
+                      className="login-input"
+                      value={editFormState.role}
+                      onChange={(e) => setEditFormState({ ...editFormState, role: e.target.value })}
+                      disabled={editLoading}
+                    >
+                      <option value="user">Standard User</option>
+                      <option value="admin">Administrator</option>
+                      <option value="super_admin">Super Administrator</option>
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      className="login-input"
+                      value={editFormState.role === "admin" ? "Administrator" : "Standard User"}
+                      disabled
+                      style={{ opacity: 0.7 }}
+                    />
+                  )}
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label" style={{ fontSize: "11px", fontWeight: "700", color: "#cbd5e1", display: "block", marginBottom: "4px" }}>
+                    Account Status
+                  </label>
+                  <select
+                    className="login-input"
+                    value={editFormState.is_active ? "active" : "inactive"}
+                    onChange={(e) => setEditFormState({ ...editFormState, is_active: e.target.value === "active" })}
+                    disabled={editLoading}
+                  >
+                    <option value="active">Active (Enabled)</option>
+                    <option value="inactive">Deactivated (Blocked)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="form-group" style={{ marginBottom: "14px" }}>
+                <label className="form-label" style={{ fontSize: "11px", fontWeight: "700", color: "#cbd5e1", display: "block", marginBottom: "4px" }}>
+                  Activation Verification
+                </label>
+                <select
+                  className="login-input"
+                  value={editFormState.is_verified ? "verified" : "pending"}
+                  onChange={(e) => setEditFormState({ ...editFormState, is_verified: e.target.value === "verified" })}
+                  disabled={editLoading}
+                >
+                  <option value="verified">Verified (Access Confirmed)</option>
+                  <option value="pending">Pending Email Activation</option>
+                </select>
+              </div>
+
+              <div className="form-group" style={{ marginBottom: "20px" }}>
+                <label className="form-label" style={{ fontSize: "11px", fontWeight: "700", color: "#cbd5e1", display: "block", marginBottom: "4px" }}>
+                  Change Password (Optional)
+                </label>
+                <input
+                  type="password"
+                  className="login-input"
+                  placeholder="Leave blank to keep existing password"
+                  value={editFormState.password}
+                  onChange={(e) => setEditFormState({ ...editFormState, password: e.target.value })}
+                  disabled={editLoading}
+                />
+                <div style={{ fontSize: "11px", color: "#64748b", marginTop: "3px" }}>
+                  Only enter a value if you wish to reset this user's password.
+                </div>
+              </div>
+
+              <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => setShowEditModal(false)}
+                  disabled={editLoading}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="primary-button"
+                  disabled={editLoading}
+                >
+                  {editLoading ? "Saving Changes..." : "Save Changes"}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

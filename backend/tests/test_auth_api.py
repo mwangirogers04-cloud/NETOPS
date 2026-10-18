@@ -212,3 +212,128 @@ def test_expired_otp_rejected():
     )
     assert reset_res.status_code == 400
     assert "expired" in reset_res.json()["detail"].lower()
+
+
+def test_admin_update_user_details():
+    # Login as admin
+    login_adm = client.post("/auth/login", json={"username": "admin", "password": "Admin@1234"})
+    token = login_adm.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # Create user
+    create_res = client.post(
+        "/users/",
+        headers=headers,
+        json={
+            "username": "alice_test",
+            "email": "alice@example.com",
+            "phone_number": "+254711223344",
+            "password": "Password@123",
+            "role": "user",
+        },
+    )
+    user_id = create_res.json()["user"]["id"]
+
+    # Update user details
+    patch_res = client.patch(
+        f"/users/{user_id}",
+        headers=headers,
+        json={
+            "username": "alice_updated",
+            "email": "alice_new@example.com",
+            "phone_number": "+254799887766",
+            "password": "NewAlicePassword@456",
+        },
+    )
+    assert patch_res.status_code == 200
+    data = patch_res.json()
+    assert data["status"] == "updated"
+    assert data["user"]["username"] == "alice_updated"
+    assert data["user"]["email"] == "alice_new@example.com"
+    assert data["user"]["phone_number"] == "+254799887766"
+
+    # Verify login with new password works
+    login_alice = client.post(
+        "/auth/login",
+        json={"username": "alice_updated", "password": "NewAlicePassword@456"},
+    )
+    assert login_alice.status_code == 200
+
+
+def test_update_user_duplicate_username_rejected():
+    login_adm = client.post("/auth/login", json={"username": "admin", "password": "Admin@1234"})
+    token = login_adm.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # Create user
+    create_res = client.post(
+        "/users/",
+        headers=headers,
+        json={
+            "username": "bob_test",
+            "email": "bob@example.com",
+            "phone_number": "+254755667788",
+            "password": "Password@123",
+            "role": "user",
+        },
+    )
+    user_id = create_res.json()["user"]["id"]
+
+    # Attempt to change username to existing 'admin'
+    patch_res = client.patch(
+        f"/users/{user_id}",
+        headers=headers,
+        json={"username": "admin"},
+    )
+    assert patch_res.status_code == 400
+    assert "already taken" in patch_res.json()["detail"].lower()
+
+
+def test_admin_cannot_edit_super_admin():
+    login_adm = client.post("/auth/login", json={"username": "admin", "password": "Admin@1234"})
+    token = login_adm.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    db = TestingSessionLocal()
+    dev = db.query(User).filter(User.username == "developer").first()
+    dev_id = dev.id
+    db.close()
+
+    # Admin attempts to edit super_admin account
+    patch_res = client.patch(
+        f"/users/{dev_id}",
+        headers=headers,
+        json={"username": "developer_hacked"},
+    )
+    assert patch_res.status_code == 403
+    assert "only super administrators" in patch_res.json()["detail"].lower()
+
+
+def test_super_admin_can_update_roles():
+    login_dev = client.post("/auth/login", json={"username": "developer", "password": "Admin@1234"})
+    token = login_dev.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # Create standard user
+    create_res = client.post(
+        "/users/",
+        headers=headers,
+        json={
+            "username": "charlie_test",
+            "email": "charlie@example.com",
+            "phone_number": "+254722334455",
+            "password": "Password@123",
+            "role": "user",
+        },
+    )
+    user_id = create_res.json()["user"]["id"]
+
+    # Promote to admin
+    patch_res = client.patch(
+        f"/users/{user_id}",
+        headers=headers,
+        json={"role": "admin"},
+    )
+    assert patch_res.status_code == 200
+    assert patch_res.json()["user"]["role"] == "admin"
+
