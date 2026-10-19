@@ -1,5 +1,7 @@
 from datetime import datetime
+from io import BytesIO
 from unittest.mock import MagicMock
+import openpyxl
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
@@ -210,6 +212,21 @@ def test_api_export_excel_custom_period():
     assert "spreadsheetml.sheet" in response.headers["content-type"]
     assert len(response.content) > 0
 
+    wb = openpyxl.load_workbook(BytesIO(response.content))
+    ws = wb.active
+    assert ws.title == "Network Activity"
+    # Row 1 must have the column headings at the top
+    headers = [ws.cell(1, c).value for c in range(1, 6)]
+    assert headers == ["Event ID", "Event Type", "Message", "Device ID", "Timestamp"]
+    # Row 2 must have the content inside each column
+    row2 = [ws.cell(2, c).value for c in range(1, 6)]
+    assert row2[0] == 102
+    assert row2[1] == "access_enforcement"
+    assert "Internet access allowed" in str(row2[2])
+    assert str(row2[3]) == "1"
+    assert ws.freeze_panes == "A2"
+    assert ws.auto_filter.ref is not None
+
 
 def test_api_export_pdf_with_xml_special_characters():
     # Verify that unescaped characters in message like '<', '>', '&' don't crash ReportLab
@@ -358,6 +375,66 @@ def test_api_export_excel_user_activity():
     assert "spreadsheetml.sheet" in response.headers["content-type"]
     assert len(response.content) > 0
 
+    wb = openpyxl.load_workbook(BytesIO(response.content))
+    assert wb.sheetnames == ["User Sessions", "Users Created", "Report Summary"]
+
+    # 1. User Sessions sheet
+    ws_sess = wb["User Sessions"]
+    assert wb.active == ws_sess  # Must be active first sheet
+    sess_headers = [ws_sess.cell(1, c).value for c in range(1, 11)]
+    assert sess_headers == [
+        "Session ID",
+        "Username",
+        "Role",
+        "Login Time",
+        "Last Activity",
+        "Logout Time",
+        "Duration",
+        "Duration (Seconds)",
+        "IP Address",
+        "Session Status",
+    ]
+    sess_row2 = [ws_sess.cell(2, c).value for c in range(1, 11)]
+    assert sess_row2[0] == 1
+    assert sess_row2[1] == "developer"
+    assert sess_row2[2] == "SUPER_ADMIN"
+    assert sess_row2[6] == "1h 0m 0s"
+    assert sess_row2[7] == 3600
+    assert sess_row2[8] == "192.168.1.10"
+    assert sess_row2[9] == "Ended"
+    assert ws_sess.freeze_panes == "A2"
+    assert ws_sess.auto_filter.ref is not None
+
+    # 2. Users Created sheet
+    ws_users = wb["Users Created"]
+    user_headers = [ws_users.cell(1, c).value for c in range(1, 9)]
+    assert user_headers == [
+        "User ID",
+        "Username",
+        "Email",
+        "Phone Number",
+        "Role",
+        "Created At",
+        "Verification Status",
+        "Account Status",
+    ]
+    user_row2 = [ws_users.cell(2, c).value for c in range(1, 9)]
+    assert user_row2[0] == 1
+    assert user_row2[1] == "developer"
+    assert user_row2[2] == "dev@netops.local"
+    assert user_row2[4] == "SUPER_ADMIN"
+    assert user_row2[6] == "Verified"
+    assert user_row2[7] == "Active"
+    assert ws_users.freeze_panes == "A2"
+    assert ws_users.auto_filter.ref is not None
+
+    # 3. Report Summary sheet
+    ws_sum = wb["Report Summary"]
+    sum_headers = [ws_sum.cell(1, c).value for c in range(1, 3)]
+    assert sum_headers == ["Parameter / Metric", "Value"]
+    assert ws_sum.cell(2, 1).value == "Report Type"
+    assert ws_sum.cell(2, 2).value == "User Access & Audit Report"
+
 
 def test_api_export_pdf_user_activity():
     sample_user = User(
@@ -407,4 +484,75 @@ def test_api_export_pdf_user_activity():
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/pdf"
     assert response.content.startswith(b"%PDF")
+
+
+def test_api_export_excel_device_inventory():
+    sample_device = Device(
+        id=5,
+        ip_address="192.168.1.55",
+        mac_address="AA:BB:CC:DD:EE:FF",
+        hostname="WORKSTATION-01",
+        vendor="Dell Inc.",
+        device_type="computer",
+        vlan_id=20,
+        status="online",
+        approval_status="approved",
+        enforcement_status="allowed",
+        classification_status="classified",
+        switch_name="SW-CORE-01",
+        switch_port="Gi1/0/12",
+    )
+
+    db = MagicMock()
+    mock_res = MagicMock()
+    mock_res.all.return_value = [sample_device]
+    db.scalars.return_value = mock_res
+
+    def override_get_db():
+        yield db
+
+    app.dependency_overrides[reports.get_db] = override_get_db
+    try:
+        response = client.get(
+            "/reports/export/excel?report_type=device_inventory&period=daily&date=2026-10-01"
+        )
+    finally:
+        app.dependency_overrides.pop(reports.get_db, None)
+
+    assert response.status_code == 200
+    assert "spreadsheetml.sheet" in response.headers["content-type"]
+
+    wb = openpyxl.load_workbook(BytesIO(response.content))
+    assert wb.sheetnames == ["Device Inventory", "Report Summary"]
+    ws_dev = wb["Device Inventory"]
+    assert wb.active == ws_dev
+
+    # Row 1 headers must appear at the top
+    headers = [ws_dev.cell(1, c).value for c in range(1, 14)]
+    assert headers == [
+        "Device ID",
+        "IP Address",
+        "MAC Address",
+        "Hostname",
+        "Vendor",
+        "Device Type",
+        "VLAN ID",
+        "Status",
+        "Approval Status",
+        "Enforcement Status",
+        "Classification Status",
+        "Switch Name",
+        "Switch Port",
+    ]
+
+    # Row 2 must have the content inside each column
+    row2 = [ws_dev.cell(2, c).value for c in range(1, 14)]
+    assert row2[0] == 5
+    assert row2[1] == "192.168.1.55"
+    assert row2[2] == "AA:BB:CC:DD:EE:FF"
+    assert row2[3] == "WORKSTATION-01"
+    assert row2[5] == "computer"
+    assert row2[6] == 20
+    assert ws_dev.freeze_panes == "A2"
+    assert ws_dev.auto_filter.ref is not None
 

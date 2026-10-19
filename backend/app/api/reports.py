@@ -4,6 +4,8 @@ from xml.sax.saxutils import escape as xml_escape
 
 from fastapi.responses import Response, StreamingResponse
 from openpyxl import Workbook
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import get_column_letter
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet
@@ -44,6 +46,90 @@ def format_seconds(seconds: int | float | None) -> str:
         parts.append(f"{minutes}m")
     parts.append(f"{s}s")
     return " ".join(parts)
+
+
+# -------------------------------------------------------------
+# SMART EXCEL STYLING CONSTANTS & HELPERS
+# -------------------------------------------------------------
+
+EXCEL_HEADER_FONT = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+EXCEL_HEADER_FILL = PatternFill(start_color="1F4E79", end_color="1F4E79", fill_type="solid")
+EXCEL_HEADER_ALIGN = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+EXCEL_DATA_FONT = Font(name="Calibri", size=11, color="1E293B")
+EXCEL_ALIGN_LEFT = Alignment(horizontal="left", vertical="center")
+EXCEL_ALIGN_CENTER = Alignment(horizontal="center", vertical="center")
+
+EXCEL_ZEBRA_FILL = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
+
+_BORDER_SIDE = Side(border_style="thin", color="E2E8F0")
+EXCEL_CELL_BORDER = Border(
+    left=_BORDER_SIDE,
+    right=_BORDER_SIDE,
+    top=_BORDER_SIDE,
+    bottom=_BORDER_SIDE,
+)
+
+
+def populate_smart_excel_sheet(
+    ws,
+    headers: list[str],
+    rows: list[list],
+    center_columns: set[int] | None = None,
+):
+    """
+    Populates an Excel worksheet ensuring the column headings appear at the top
+    (Row 1), followed immediately by the content rows, with professional styling:
+    - Bold white headings with dark corporate navy background
+    - Locked/frozen header row so headers stay visible during scrolling
+    - Native Excel auto-filter dropdowns on all columns
+    - Alternating row zebra striping and thin grid borders
+    - Auto-adjusted column widths with padding
+    """
+    if center_columns is None:
+        center_columns = set()
+
+    # 1. Row 1: Column Headings at the very top
+    ws.row_dimensions[1].height = 28
+    for col_idx, header in enumerate(headers, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=header)
+        cell.font = EXCEL_HEADER_FONT
+        cell.fill = EXCEL_HEADER_FILL
+        cell.alignment = EXCEL_HEADER_ALIGN
+        cell.border = EXCEL_CELL_BORDER
+
+    # 2. Rows 2+: Content inside each column
+    for row_idx, row_values in enumerate(rows, start=2):
+        ws.row_dimensions[row_idx].height = 20
+        is_even = (row_idx % 2 == 0)
+        for col_idx, value in enumerate(row_values, start=1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=value)
+            cell.font = EXCEL_DATA_FONT
+            cell.border = EXCEL_CELL_BORDER
+            if is_even:
+                cell.fill = EXCEL_ZEBRA_FILL
+            if col_idx in center_columns:
+                cell.alignment = EXCEL_ALIGN_CENTER
+            else:
+                cell.alignment = EXCEL_ALIGN_LEFT
+
+    # 3. Freeze panes at row 2 so column headings stay fixed at top
+    ws.freeze_panes = "A2"
+
+    # 4. Auto-filter on column headings
+    max_col_letter = get_column_letter(len(headers))
+    total_rows = max(len(rows) + 1, 1)
+    ws.auto_filter.ref = f"A1:{max_col_letter}{total_rows}"
+
+    # 5. Smart column width auto-calculation
+    for col in ws.columns:
+        col_letter = get_column_letter(col[0].column)
+        max_len = 0
+        for cell in col:
+            val = cell.value
+            if val is not None:
+                max_len = max(max_len, len(str(val)))
+        ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
 
 
 def parse_report_datetime(value: str) -> datetime:
@@ -648,61 +734,149 @@ def export_report_excel(
 
 
     workbook = Workbook()
-    worksheet = workbook.active
-    worksheet.title = "NETOPS Report"
+    clean_type = report_type.lower().strip()
 
     # -------------------------------------------------
-    # REPORT INFORMATION
+    # USER ACTIVITY & ACCESS REPORT
     # -------------------------------------------------
+    if clean_type == "user_activity":
+        # Sheet 1: User Access & Session History (Active tab)
+        ws_sessions = workbook.active
+        ws_sessions.title = "User Sessions"
 
-    worksheet["A1"] = "NETOPS REPORT"
-    worksheet["A2"] = "Report Type"
-    worksheet["B2"] = report["report_type"]
+        session_headers = [
+            "Session ID",
+            "Username",
+            "Role",
+            "Login Time",
+            "Last Activity",
+            "Logout Time",
+            "Duration",
+            "Duration (Seconds)",
+            "IP Address",
+            "Session Status",
+        ]
 
-    worksheet["A3"] = "Period"
-    worksheet["B3"] = report["period"]
+        session_rows = []
+        for s in report.get("sessions", []):
+            session_rows.append([
+                s.get("id"),
+                s.get("username"),
+                (s.get("role") or "").upper(),
+                s.get("login_at") or "",
+                s.get("last_activity_at") or "",
+                (
+                    s.get("logout_at")
+                    if s.get("logout_at")
+                    else ("Active Now" if s.get("is_active") else "N/A")
+                ),
+                s.get("duration_formatted", "0s"),
+                s.get("duration_seconds", 0),
+                s.get("ip_address") or "N/A",
+                "Active" if s.get("is_active") else "Ended",
+            ])
 
-    worksheet["A4"] = "Start"
-    worksheet["B4"] = report["start"]
+        if not session_rows:
+            session_rows.append([
+                "-",
+                "No access sessions recorded",
+                "-",
+                "-",
+                "-",
+                "-",
+                "-",
+                "-",
+                "-",
+                "-",
+            ])
 
-    worksheet["A5"] = "End"
-    worksheet["B5"] = report["end"]
+        populate_smart_excel_sheet(
+            ws_sessions,
+            headers=session_headers,
+            rows=session_rows,
+            center_columns={1, 3, 8, 10},
+        )
 
-    worksheet["A6"] = "Generated At"
-    worksheet["B6"] = report["generated_at"]
+        # Sheet 2: Users Created in Period
+        ws_users = workbook.create_sheet(title="Users Created")
+        user_headers = [
+            "User ID",
+            "Username",
+            "Email",
+            "Phone Number",
+            "Role",
+            "Created At",
+            "Verification Status",
+            "Account Status",
+        ]
+
+        user_rows = []
+        for u in report.get("users_created", []):
+            user_rows.append([
+                u.get("id"),
+                u.get("username"),
+                u.get("email"),
+                u.get("phone_number") or "N/A",
+                (u.get("role") or "").upper(),
+                u.get("created_at") or "",
+                "Verified" if u.get("is_verified") else "Pending",
+                "Active" if u.get("is_active") else "Inactive",
+            ])
+
+        if not user_rows:
+            user_rows.append([
+                "-",
+                "No users created in this period",
+                "-",
+                "-",
+                "-",
+                "-",
+                "-",
+                "-",
+            ])
+
+        populate_smart_excel_sheet(
+            ws_users,
+            headers=user_headers,
+            rows=user_rows,
+            center_columns={1, 5, 7, 8},
+        )
+
+        # Sheet 3: Report Summary & Metrics
+        ws_summary = workbook.create_sheet(title="Report Summary")
+        summary = report.get("summary", {})
+        summary_headers = ["Parameter / Metric", "Value"]
+        summary_rows = [
+            ["Report Type", "User Access & Audit Report"],
+            ["Period", report.get("period", "").capitalize()],
+            ["Period Start", report.get("start", "")],
+            ["Period End", report.get("end", "")],
+            ["Report Generated At", report.get("generated_at", "")],
+            ["Total Registered Users", summary.get("total_users", 0)],
+            ["Users Created in Period", summary.get("users_created_in_period", 0)],
+            ["Total Access Logins", summary.get("total_sessions", 0)],
+            ["Active Sessions Now", summary.get("active_sessions", 0)],
+            ["Total Access Duration", summary.get("total_duration_formatted", "0s")],
+            ["Average Session Duration", summary.get("average_duration_formatted", "0s")],
+        ]
+
+        populate_smart_excel_sheet(
+            ws_summary,
+            headers=summary_headers,
+            rows=summary_rows,
+        )
+
+        workbook.active = ws_sessions
 
     # -------------------------------------------------
     # DEVICE INVENTORY REPORT
     # -------------------------------------------------
+    elif clean_type == "device_inventory":
+        ws_devices = workbook.active
+        ws_devices.title = "Device Inventory"
 
-    if report_type.lower().strip() == "device_inventory":
-
-        summary = report["summary"]
-
-        worksheet["A8"] = "SUMMARY"
-        worksheet["A9"] = "Total Devices"
-        worksheet["B9"] = summary["total_devices"]
-
-        worksheet["A10"] = "Online Devices"
-        worksheet["B10"] = summary["online_devices"]
-
-        worksheet["A11"] = "Pending Approvals"
-        worksheet["B11"] = summary["pending_approvals"]
-
-        worksheet["A12"] = "Approved Devices"
-        worksheet["B12"] = summary["approved_devices"]
-
-        worksheet["A13"] = "Rejected Devices"
-        worksheet["B13"] = summary["rejected_devices"]
-
-        worksheet["A14"] = "Quarantined Devices"
-        worksheet["B14"] = summary["quarantined_devices"]
-
-        worksheet["A15"] = "Allowed Devices"
-        worksheet["B15"] = summary["allowed_devices"]
-
-        headers = [
-            "ID",
+        device_headers = [
+            "Device ID",
             "IP Address",
             "MAC Address",
             "Hostname",
@@ -717,290 +891,122 @@ def export_report_excel(
             "Switch Port",
         ]
 
-        start_row = 18
+        device_rows = []
+        for d in report.get("devices", []):
+            device_rows.append([
+                d.get("id"),
+                d.get("ip_address") or "",
+                d.get("mac_address") or "",
+                d.get("hostname") or "",
+                d.get("vendor") or "",
+                d.get("device_type") or "",
+                d.get("vlan_id") or "",
+                d.get("status") or "",
+                d.get("approval_status") or "",
+                d.get("enforcement_status") or "",
+                d.get("classification_status") or "",
+                d.get("switch_name") or "",
+                d.get("switch_port") or "",
+            ])
 
-        for column, header in enumerate(headers, start=1):
-            worksheet.cell(
-                row=start_row,
-                column=column,
-                value=header,
-            )
-
-        for row_index, device in enumerate(
-            report["devices"],
-            start=start_row + 1,
-        ):
-            values = [
-                device["id"],
-                device["ip_address"],
-                device["mac_address"],
-                device["hostname"],
-                device["vendor"],
-                device["device_type"],
-                device["vlan_id"],
-                device["status"],
-                device["approval_status"],
-                device["enforcement_status"],
-                device["classification_status"],
-                device["switch_name"],
-                device["switch_port"],
-            ]
-
-            for column, value in enumerate(
-                values,
-                start=1,
-            ):
-                worksheet.cell(
-                    row=row_index,
-                    column=column,
-                    value=value,
-                )
-
-    # -------------------------------------------------
-    # USER ACTIVITY REPORT
-    # -------------------------------------------------
-
-    elif report_type.lower().strip() == "user_activity":
-
-        summary = report["summary"]
-
-        worksheet["A8"] = "SUMMARY"
-        worksheet["A9"] = "Total Registered Users"
-        worksheet["B9"] = summary["total_users"]
-
-        worksheet["A10"] = "Users Created in Period"
-        worksheet["B10"] = summary["users_created_in_period"]
-
-        worksheet["A11"] = "Total Logins / Access Sessions"
-        worksheet["B11"] = summary["total_sessions"]
-
-        worksheet["A12"] = "Active Sessions"
-        worksheet["B12"] = summary["active_sessions"]
-
-        worksheet["A13"] = "Total Logged Duration"
-        worksheet["B13"] = summary["total_duration_formatted"]
-
-        worksheet["A14"] = "Average Session Duration"
-        worksheet["B14"] = summary["average_duration_formatted"]
-
-        # -------------------------------------------------
-        # TABLE 1: USERS CREATED IN PERIOD
-        # -------------------------------------------------
-
-        user_title_row = 16
-        worksheet.cell(
-            row=user_title_row,
-            column=1,
-            value="USERS CREATED IN PERIOD",
+        populate_smart_excel_sheet(
+            ws_devices,
+            headers=device_headers,
+            rows=device_rows,
+            center_columns={1, 7, 8, 9, 10},
         )
 
-        user_headers = [
-            "ID",
-            "Username",
-            "Email",
-            "Phone Number",
-            "Role",
-            "Created At",
-            "Verification Status",
-            "Account Status",
+        # Sheet 2: Summary
+        ws_summary = workbook.create_sheet(title="Report Summary")
+        summary = report.get("summary", {})
+        summary_headers = ["Parameter / Metric", "Value"]
+        summary_rows = [
+            ["Report Type", "Device Inventory"],
+            ["Period", report.get("period", "").capitalize()],
+            ["Period Start", report.get("start", "")],
+            ["Period End", report.get("end", "")],
+            ["Report Generated At", report.get("generated_at", "")],
+            ["Total Devices", summary.get("total_devices", 0)],
+            ["Online Devices", summary.get("online_devices", 0)],
+            ["Pending Approvals", summary.get("pending_approvals", 0)],
+            ["Approved Devices", summary.get("approved_devices", 0)],
+            ["Rejected Devices", summary.get("rejected_devices", 0)],
+            ["Quarantined Devices", summary.get("quarantined_devices", 0)],
+            ["Allowed Devices", summary.get("allowed_devices", 0)],
         ]
 
-        user_start_row = user_title_row + 1
-
-        for column, header in enumerate(user_headers, start=1):
-            worksheet.cell(
-                row=user_start_row,
-                column=column,
-                value=header,
-            )
-
-        current_row = user_start_row + 1
-
-        for user in report["users_created"]:
-            values = [
-                user["id"],
-                user["username"],
-                user["email"],
-                user["phone_number"] or "N/A",
-                user["role"],
-                user["created_at"] or "",
-                "Verified" if user["is_verified"] else "Pending",
-                "Active" if user["is_active"] else "Inactive",
-            ]
-            for column, value in enumerate(values, start=1):
-                worksheet.cell(
-                    row=current_row,
-                    column=column,
-                    value=value,
-                )
-            current_row += 1
-
-        if not report["users_created"]:
-            worksheet.cell(
-                row=current_row,
-                column=1,
-                value="No users were created during this period.",
-            )
-            current_row += 1
-
-        # -------------------------------------------------
-        # TABLE 2: USER ACCESS & DURATION HISTORY
-        # -------------------------------------------------
-
-        current_row += 2
-        worksheet.cell(
-            row=current_row,
-            column=1,
-            value="USER ACCESS & SESSION DURATION HISTORY",
+        populate_smart_excel_sheet(
+            ws_summary,
+            headers=summary_headers,
+            rows=summary_rows,
         )
-        current_row += 1
 
-        session_headers = [
-            "Session ID",
-            "Username",
-            "Role",
-            "Login Time",
-            "Last Activity",
-            "Logout Time",
-            "Duration (Formatted)",
-            "Duration (Seconds)",
-            "IP Address",
-            "Session Status",
-        ]
-
-        session_start_row = current_row
-
-        for column, header in enumerate(session_headers, start=1):
-            worksheet.cell(
-                row=session_start_row,
-                column=column,
-                value=header,
-            )
-
-        current_row = session_start_row + 1
-
-        for session in report["sessions"]:
-            values = [
-                session["id"],
-                session["username"],
-                session["role"],
-                session["login_at"] or "",
-                session["last_activity_at"] or "",
-                (
-                    session["logout_at"]
-                    if session["logout_at"]
-                    else ("Active Now" if session["is_active"] else "N/A")
-                ),
-                session["duration_formatted"],
-                session["duration_seconds"],
-                session["ip_address"] or "N/A",
-                "Active" if session["is_active"] else "Ended",
-            ]
-            for column, value in enumerate(values, start=1):
-                worksheet.cell(
-                    row=current_row,
-                    column=column,
-                    value=value,
-                )
-            current_row += 1
-
-        if not report["sessions"]:
-            worksheet.cell(
-                row=current_row,
-                column=1,
-                value="No access sessions recorded during this period.",
-            )
-            current_row += 1
+        workbook.active = ws_devices
 
     # -------------------------------------------------
-    # EVENT REPORT
+    # HISTORICAL EVENT REPORTS
     # -------------------------------------------------
-
     else:
+        sheet_title = clean_type.replace("_", " ").title()[:30]
+        ws_events = workbook.active
+        ws_events.title = sheet_title
 
-        summary = report["summary"]
-
-        worksheet["A8"] = "SUMMARY"
-        worksheet["A9"] = "Total Events"
-        worksheet["B9"] = summary["total_events"]
-
-        worksheet["A11"] = "EVENT TYPE"
-        worksheet["B11"] = "COUNT"
-
-        summary_row = 12
-
-        for event_type, count in summary["event_types"].items():
-            worksheet.cell(
-                row=summary_row,
-                column=1,
-                value=event_type,
-            )
-
-            worksheet.cell(
-                row=summary_row,
-                column=2,
-                value=count,
-            )
-
-            summary_row += 1
-
-        event_start_row = summary_row + 2
-
-        headers = [
-            "ID",
+        event_headers = [
+            "Event ID",
             "Event Type",
             "Message",
             "Device ID",
-            "Created At",
+            "Timestamp",
         ]
 
-        for column, header in enumerate(headers, start=1):
-            worksheet.cell(
-                row=event_start_row,
-                column=column,
-                value=header,
-            )
+        event_rows = []
+        for e in report.get("events", []):
+            event_rows.append([
+                e.get("id"),
+                e.get("event_type"),
+                e.get("message") or "",
+                e.get("device_id") or "N/A",
+                e.get("created_at"),
+            ])
 
-        for row_index, event in enumerate(
-            report["events"],
-            start=event_start_row + 1,
-        ):
-            values = [
-                event["id"],
-                event["event_type"],
-                event["message"],
-                event["device_id"],
-                event["created_at"],
-            ]
+        if not event_rows:
+            event_rows.append([
+                "-",
+                "No events recorded during this period",
+                "-",
+                "-",
+                "-",
+            ])
 
-            for column, value in enumerate(
-                values,
-                start=1,
-            ):
-                worksheet.cell(
-                    row=row_index,
-                    column=column,
-                    value=value,
-                )
+        populate_smart_excel_sheet(
+            ws_events,
+            headers=event_headers,
+            rows=event_rows,
+            center_columns={1, 2, 4},
+        )
 
-    # -------------------------------------------------
-    # FORMAT COLUMNS
-    # -------------------------------------------------
+        # Sheet 2: Summary & Breakdown
+        ws_summary = workbook.create_sheet(title="Report Summary")
+        summary = report.get("summary", {})
+        summary_headers = ["Parameter / Metric", "Value"]
+        summary_rows = [
+            ["Report Type", report.get("report_type", "").replace("_", " ").title()],
+            ["Period", report.get("period", "").capitalize()],
+            ["Period Start", report.get("start", "")],
+            ["Period End", report.get("end", "")],
+            ["Report Generated At", report.get("generated_at", "")],
+            ["Total Events", summary.get("total_events", 0)],
+        ]
+        for event_type, count in summary.get("event_types", {}).items():
+            summary_rows.append([f"Count: {event_type}", count])
 
-    for column in worksheet.columns:
-        max_length = 0
-        column_letter = column[0].column_letter
+        populate_smart_excel_sheet(
+            ws_summary,
+            headers=summary_headers,
+            rows=summary_rows,
+        )
 
-        for cell in column:
-            if cell.value is not None:
-                max_length = max(
-                    max_length,
-                    len(str(cell.value)),
-                )
-
-        worksheet.column_dimensions[
-            column_letter
-        ].width = min(max_length + 2, 50)
+        workbook.active = ws_events
 
     # -------------------------------------------------
     # CREATE FILE
