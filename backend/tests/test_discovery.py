@@ -152,3 +152,36 @@ def test_save_discovered_devices_ip_migration(db_session):
         ).first()
         assert evt is not None
         assert "192.168.0.11 to 192.168.0.12" in evt.message
+
+
+def test_save_discovered_devices_marks_disconnected_device_offline(db_session):
+    from backend.app.models.device import Device
+    from backend.app.models.event import Event
+    from backend.app.services.discovery import save_discovered_devices
+
+    # Device exists and is currently marked online
+    device_online = Device(
+        mac_address="7C:5A:1C:A4:0B:10",
+        ip_address="192.168.0.50",
+        hostname="WORKSTATION-DISCONNECTED",
+        vendor="Intel",
+        device_type="computer",
+        approval_status="approved",
+        status="online",
+    )
+    db_session.add(device_online)
+    db_session.commit()
+
+    # Scan discovers NOTHING (e.g. workstation unplugged)
+    saved = save_discovered_devices([], db_session)
+
+    db_session.refresh(device_online)
+    assert device_online.status == "offline"
+
+    evt = db_session.query(Event).filter(
+        Event.device_id == device_online.id,
+        Event.event_type == "device_offline",
+    ).first()
+    assert evt is not None
+    assert "went offline / disconnected from the LAN" in evt.message
+

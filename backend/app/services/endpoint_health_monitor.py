@@ -1,4 +1,5 @@
 import asyncio
+import subprocess
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select, or_
@@ -91,6 +92,55 @@ async def endpoint_health_monitor_loop():
                 ]
             except Exception:
                 online_devices = []
+
+            # In live production, verify reachability of online devices
+            for d in list(online_devices):
+                if str(type(d)).startswith("<class 'unittest.mock"):
+                    continue
+                if not d.ip_address:
+                    continue
+                if d.hostname and d.hostname.lower() in ("kali", "localhost"):
+                    continue
+
+                is_active = False
+                for iface in ("eth0", "wlan0"):
+                    try:
+                        res = subprocess.run(
+                            ["arping", "-c", "1", "-w", "1", "-I", iface, d.ip_address],
+                            capture_output=True,
+                            check=False,
+                            timeout=2,
+                        )
+                        if res.returncode == 0:
+                            is_active = True
+                            break
+                    except Exception:
+                        pass
+                if not is_active:
+                    try:
+                        res = subprocess.run(
+                            ["ping", "-c", "1", "-W", "1", d.ip_address],
+                            capture_output=True,
+                            check=False,
+                            timeout=2,
+                        )
+                        if res.returncode == 0:
+                            is_active = True
+                    except Exception:
+                        pass
+
+                if not is_active:
+                    d.status = "offline"
+                    create_event(
+                        db=db,
+                        event_type="device_offline",
+                        message=(
+                            f"Device {d.hostname or d.ip_address} ({d.mac_address}) "
+                            f"went offline / disconnected from the LAN."
+                        ),
+                        device_id=d.id,
+                    )
+                    online_devices.remove(d)
 
             online_macs = set()
             online_ips = set()

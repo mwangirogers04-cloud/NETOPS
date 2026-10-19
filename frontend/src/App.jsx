@@ -1174,7 +1174,15 @@ const DevicesPage = () => {
             style={deviceFilter === "online" ? { background: "var(--accent-color, #3b82f6)", color: "#fff" } : {}}
             onClick={() => setDeviceFilter("online")}
           >
-            Online ({devices.filter(d => d.status === "online").length})
+            🟢 Online ({devices.filter(d => d.status === "online").length})
+          </button>
+          <button
+            type="button"
+            className={`secondary-button small ${deviceFilter === "offline" ? "active" : ""}`}
+            style={deviceFilter === "offline" ? { background: "#dc2626", color: "#fff" } : { borderColor: "#ef4444", color: "#f87171" }}
+            onClick={() => setDeviceFilter("offline")}
+          >
+            🔴 Offline ({devices.filter(d => d.status === "offline").length})
           </button>
           <button
             type="button"
@@ -1561,6 +1569,7 @@ const DevicesPage = () => {
             <thead>
               <tr>
                 <th>DEVICE</th>
+                <th>CONNECTION</th>
                 <th>TYPE</th>
                 <th>VLAN</th>
                 <th>UPDATE STATUS</th>
@@ -1575,7 +1584,7 @@ const DevicesPage = () => {
             <tbody>
               {devices.length === 0 ? (
                 <tr>
-                  <td colSpan="9">
+                  <td colSpan="10">
                     <div className="empty-state">
                       No devices detected.
                     </div>
@@ -1588,6 +1597,10 @@ const DevicesPage = () => {
 
     if (deviceFilter === "online") {
       return device.status === "online";
+    }
+
+    if (deviceFilter === "offline") {
+      return device.status === "offline";
     }
 
     if (deviceFilter === "needs_updates") {
@@ -1644,6 +1657,38 @@ if (deviceFilter === "quarantined") {
                       <div className="device-secondary">
                         {device.mac_address || "-"}
                       </div>
+                    </td>
+
+                    <td>
+                      {device.status === "online" ? (
+                        <span
+                          className="status-badge allowed"
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "5px",
+                            fontSize: "11px",
+                            fontWeight: "700",
+                            padding: "2px 8px",
+                          }}
+                        >
+                          <span className="status-dot online" /> ONLINE
+                        </span>
+                      ) : (
+                        <span
+                          className="status-badge blocked"
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "5px",
+                            fontSize: "11px",
+                            fontWeight: "700",
+                            padding: "2px 8px",
+                          }}
+                        >
+                          <span className="status-dot offline" /> OFFLINE
+                        </span>
+                      )}
                     </td>
 
                     <td>
@@ -2080,6 +2125,7 @@ onClick={() => {
 
 const LanScannerPage = () => {
   const onlineDevices = devices.filter((d) => d.status === "online");
+  const offlineDevices = devices.filter((d) => d.status === "offline");
   const ipChangedEvents = events.filter((e) => e.event_type === "ip_address_changed");
   const ipChangedDeviceIds = new Set(ipChangedEvents.map((e) => e.device_id));
 
@@ -2087,6 +2133,7 @@ const LanScannerPage = () => {
   const filteredDevices = devices.filter((device) => {
     // Status filter
     if (lanFilterStatus === "all" && device.status !== "online") return false;
+    if (lanFilterStatus === "offline" && device.status !== "offline") return false;
     if (lanFilterStatus === "ip-changed" && !ipChangedDeviceIds.has(device.id)) return false;
     if (lanFilterStatus === "allowed" && (device.enforcement_status !== "allowed" || device.status !== "online")) return false;
     if (lanFilterStatus === "quarantined" && (device.enforcement_status === "allowed" || device.status !== "online")) return false;
@@ -2274,6 +2321,11 @@ const LanScannerPage = () => {
           description="Active physical and virtual devices discovered on this subnet."
         />
         <ReportCard
+          title="Offline / Disconnected"
+          value={offlineDevices.length}
+          description="Previously registered devices not responding to active ARP/ICMP probes."
+        />
+        <ReportCard
           title="Dynamic IP Changes"
           value={ipChangedDeviceIds.size}
           description="Devices that acquired new dynamic DHCP IP addresses."
@@ -2299,7 +2351,15 @@ const LanScannerPage = () => {
               className={lanFilterStatus === "all" ? "primary-button small" : "secondary-button small"}
               onClick={() => setLanFilterStatus("all")}
             >
-              All Online ({onlineDevices.length})
+              🟢 All Online ({onlineDevices.length})
+            </button>
+            <button
+              type="button"
+              className={lanFilterStatus === "offline" ? "primary-button small" : "secondary-button small"}
+              onClick={() => setLanFilterStatus("offline")}
+              style={lanFilterStatus !== "offline" && offlineDevices.length > 0 ? { borderColor: "#ef4444", color: "#f87171" } : {}}
+            >
+              🔴 Offline ({offlineDevices.length})
             </button>
             <button
               type="button"
@@ -2370,6 +2430,7 @@ const LanScannerPage = () => {
             <thead>
               <tr>
                 <th>DEVICE / HOSTNAME</th>
+                <th>CONNECTION</th>
                 <th>CURRENT IP ADDRESS</th>
                 <th>MAC ADDRESS</th>
                 <th>VLAN SEGMENT</th>
@@ -2380,7 +2441,7 @@ const LanScannerPage = () => {
             <tbody>
               {filteredDevices.length === 0 ? (
                 <tr>
-                  <td colSpan={6} style={{ textAlign: "center", padding: "32px", color: "#94a3b8" }}>
+                  <td colSpan={7} style={{ textAlign: "center", padding: "32px", color: "#94a3b8" }}>
                     No devices match the selected filter. Click <strong>"Scan All LAN Devices"</strong> above to discover live machines on the subnet.
                   </td>
                 </tr>
@@ -2395,8 +2456,8 @@ const LanScannerPage = () => {
                       key={device.id}
                       style={
                         highlightedDeviceId === device.id || hasIpChange
-                          ? { background: "rgba(59, 130, 246, 0.08)" }
-                          : {}
+                            ? { background: "rgba(59, 130, 246, 0.08)" }
+                            : {}
                       }
                     >
                       {/* DEVICE / HOSTNAME */}
@@ -2445,6 +2506,39 @@ const LanScannerPage = () => {
                             </div>
                           </div>
                         </div>
+                      </td>
+
+                      {/* CONNECTION */}
+                      <td>
+                        {device.status === "online" ? (
+                          <span
+                            className="status-badge allowed"
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "5px",
+                              fontSize: "11px",
+                              fontWeight: "700",
+                              padding: "2px 8px",
+                            }}
+                          >
+                            <span className="status-dot online" /> ONLINE
+                          </span>
+                        ) : (
+                          <span
+                            className="status-badge blocked"
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "5px",
+                              fontSize: "11px",
+                              fontWeight: "700",
+                              padding: "2px 8px",
+                            }}
+                          >
+                            <span className="status-dot offline" /> OFFLINE
+                          </span>
+                        )}
                       </td>
 
                       {/* CURRENT IP ADDRESS */}

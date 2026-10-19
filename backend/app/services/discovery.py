@@ -251,10 +251,20 @@ def get_neighbor_devices():
         if len(mac_address) != 17:
             continue
 
+        # Check neighbor state (last token in 'ip neigh show')
+        state = parts[-1].upper() if len(parts) > lladdr_index + 1 else "UNKNOWN"
+        dev_iface = parts[parts.index("dev") + 1] if "dev" in parts and parts.index("dev") + 1 < len(parts) else None
+
+        # Exclude failed or incomplete resolution
+        if state in ("FAILED", "INCOMPLETE"):
+            continue
+
         devices.append(
             {
                 "ip_address": ip_address,
                 "mac_address": mac_address,
+                "state": state,
+                "interface": dev_iface,
                 "hostname": None,
                 "vendor": None,
                 "device_type": "unknown",
@@ -411,6 +421,34 @@ def discover_devices(network: str):
 
             continue
 
+        # If not discovered by nmap or arp-scan, verify reachability
+        # rather than blindly accepting a stale ARP cache entry
+        state = neighbor.get("state")
+        ip_addr = neighbor.get("ip_address")
+        iface = neighbor.get("interface")
+
+        if state not in ("REACHABLE", "PERMANENT"):
+            is_active = False
+            if ip_addr:
+                try:
+                    probe_cmd = ["arping", "-c", "1", "-w", "1"]
+                    if iface:
+                        probe_cmd.extend(["-I", iface])
+                    probe_cmd.append(ip_addr)
+                    probe_res = subprocess.run(
+                        probe_cmd,
+                        capture_output=True,
+                        check=False,
+                        timeout=2,
+                    )
+                    if probe_res.returncode == 0:
+                        is_active = True
+                except Exception:
+                    pass
+            if not is_active:
+                # Disconnected machine: do not add to discovered devices
+                continue
+
         if (
             neighbor["ip_address"] == local_ip
             and mac_address == local_mac
@@ -445,7 +483,7 @@ def save_discovered_devices(
     saved_devices = []
 
     discovered_macs = {
-        device.get("mac_address", "").upper()
+        device.get("mac_address", "").replace(":", "").replace("-", "").upper()
         for device in devices
         if device.get("mac_address")
     }
@@ -459,12 +497,25 @@ def save_discovered_devices(
     # ---------------------------------------------------------
 
     for existing_device in existing_devices:
+        dev_mac = (
+            existing_device.mac_address.replace(":", "").replace("-", "").upper()
+            if existing_device.mac_address
+            else ""
+        )
         if (
             existing_device.status == "online"
-            and existing_device.mac_address.upper()
-            not in discovered_macs
+            and dev_mac not in discovered_macs
         ):
             existing_device.status = "offline"
+            create_event(
+                db,
+                "device_offline",
+                (
+                    f"Device {existing_device.hostname or existing_device.ip_address or dev_mac} "
+                    f"({existing_device.mac_address}) went offline / disconnected from the LAN."
+                ),
+                existing_device.id,
+            )
 
     # ---------------------------------------------------------
     # Process discovered devices
@@ -682,8 +733,20 @@ def save_discovered_devices(
                         "normal"
                     )
 
+            was_offline = (existing_device.status != "online")
             existing_device.status = "online"
             saved_devices.append(existing_device)
+
+            if was_offline:
+                create_event(
+                    db,
+                    "device_online",
+                    (
+                        f"Device {existing_device.hostname or existing_device.ip_address} "
+                        f"({existing_device.mac_address}) reconnected and is back online on the LAN."
+                    ),
+                    existing_device.id,
+                )
 
             if ip_changed:
                 try:
