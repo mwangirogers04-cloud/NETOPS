@@ -30,7 +30,42 @@ def is_valid_ip_address(ip_address: str | None) -> bool:
     except ValueError:
         return False
 
-DISCOVERY_INTERFACE = "wlan0"
+DISCOVERY_INTERFACE = "eth0"
+
+
+def get_default_interface() -> str:
+    """Find the active physical network interface for the default route or local IP."""
+    try:
+        res = subprocess.run(
+            ["ip", "-4", "route", "get", "8.8.8.8"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=3,
+        )
+        for line in res.stdout.splitlines():
+            parts = line.split()
+            if "dev" in parts:
+                return parts[parts.index("dev") + 1]
+    except Exception:
+        pass
+
+    try:
+        res = subprocess.run(
+            ["ip", "-4", "route", "show", "default"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=3,
+        )
+        for line in res.stdout.splitlines():
+            parts = line.split()
+            if "dev" in parts:
+                return parts[parts.index("dev") + 1]
+    except Exception:
+        pass
+
+    return "eth0"
 
 
 def get_local_ip():
@@ -45,21 +80,92 @@ def get_local_ip():
     return local_ip
 
 
-def get_local_mac():
-    result = subprocess.run(
-        ["ip", "link", "show", DISCOVERY_INTERFACE],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
+def get_local_mac(interface: str | None = None) -> str | None:
+    target_interface = interface or get_default_interface()
 
-    for line in result.stdout.splitlines():
-        line = line.strip()
+    try:
+        result = subprocess.run(
+            ["ip", "link", "show", target_interface],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=3,
+        )
 
-        if line.startswith("link/ether"):
-            return line.split()[1].upper()
+        for line in result.stdout.splitlines():
+            line = line.strip()
+
+            if line.startswith("link/ether"):
+                return line.split()[1].upper()
+    except Exception as exc:
+        print(f"[DISCOVERY] Note getting MAC on {target_interface}: {exc}")
+
+    # Fallback to standard physical interfaces
+    for alt in ("eth0", "wlan0", "enp0s3", "ens33"):
+        if alt == target_interface:
+            continue
+        try:
+            res = subprocess.run(
+                ["ip", "link", "show", alt],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=2,
+            )
+            for line in res.stdout.splitlines():
+                line = line.strip()
+                if line.startswith("link/ether"):
+                    return line.split()[1].upper()
+        except Exception:
+            pass
 
     return None
+
+
+def get_arp_scan_devices(network: str | None = None, interface: str | None = None) -> list[dict]:
+    """
+    Rapidly discover LAN devices using arp-scan.
+    arp-scan directly issues Layer 2 ARP requests on the local wire, discovering
+    all connected machines in 1-2 seconds even when firewalls block ICMP ping.
+    """
+    cmd = ["arp-scan"]
+    target_iface = interface or get_default_interface()
+    if target_iface:
+        cmd.extend(["--interface", target_iface])
+
+    if network:
+        cmd.append(network)
+    else:
+        cmd.append("--localnet")
+
+    cmd.extend(["--retry=2", "--timeout=800"])
+
+    discovered = []
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=10)
+        for line in res.stdout.splitlines():
+            parts = line.strip().split()
+            if len(parts) >= 2:
+                ip_cand = parts[0].strip()
+                mac_cand = parts[1].strip()
+                vendor_cand = " ".join(parts[2:]).strip() if len(parts) >= 3 else None
+
+                if is_valid_ip_address(ip_cand) and len(mac_cand) == 17 and ":" in mac_cand:
+                    discovered.append({
+                        "ip_address": ip_cand,
+                        "mac_address": mac_cand.upper(),
+                        "hostname": None,
+                        "vendor": vendor_cand if vendor_cand and "unknown" not in vendor_cand.lower() else None,
+                        "device_type": classify_device(
+                            hostname=None,
+                            vendor=vendor_cand,
+                            mac_address=mac_cand.upper(),
+                        ),
+                    })
+    except Exception as exc:
+        print(f"[DISCOVERY] arp-scan discovery note: {exc}")
+
+    return discovered
 
 
 def detect_local_subnets() -> dict:
@@ -268,6 +374,25 @@ def discover_devices(network: str):
                 mac_address=mac_address,
             ),
         }
+
+    # ---------------------------------------------------------
+    # Process Layer 2 ARP discovery (arp-scan)
+    # ---------------------------------------------------------
+
+    try:
+        arp_devices = get_arp_scan_devices(network=network)
+        for arp_dev in arp_devices:
+            mac = arp_dev["mac_address"]
+            if mac in discovered_by_mac:
+                existing = discovered_by_mac[mac]
+                if not existing.get("ip_address") and arp_dev.get("ip_address"):
+                    existing["ip_address"] = arp_dev["ip_address"]
+                if not existing.get("vendor") and arp_dev.get("vendor"):
+                    existing["vendor"] = arp_dev["vendor"]
+            else:
+                discovered_by_mac[mac] = arp_dev
+    except Exception as exc:
+        print(f"[DISCOVERY] Multi-vector ARP scan note: {exc}")
 
     # ---------------------------------------------------------
     # Process Linux neighbour-table fallback

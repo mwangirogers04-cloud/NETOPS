@@ -442,3 +442,65 @@ def test_run_patch_job_now_pending_and_scheduled(client, db_session):
     assert "Manual execution triggered" in data["log_output"]
 
 
+def test_get_endpoint_updates_includes_all_online_devices(client, db_session):
+    now = datetime.now(timezone.utc)
+    old_time = now - timedelta(hours=2)
+
+    # 1. Device that is online with an old EndpointUpdate
+    dev1 = Device(
+        mac_address="F0:1F:AF:4C:6A:E9",
+        ip_address="192.168.0.12",
+        hostname="DELL-PC",
+        device_type="computer",
+        status="online",
+        approval_status="approved",
+    )
+    db_session.add(dev1)
+
+    old_update = EndpointUpdate(
+        hostname="DELL-PC",
+        mac_address="F0:1F:AF:4C:6A:E9",
+        ip_address="192.168.0.12",
+        machine_id="F01FAF4C6AE9",
+        operating_system="Windows",
+        os_version="11/10",
+        architecture="AMD64",
+        update_status="stale",  # previously stale
+        pending_updates=2,
+        last_checked=old_time,
+    )
+    db_session.add(old_update)
+
+    # 2. Device that is online but has no EndpointUpdate record at all
+    dev2 = Device(
+        mac_address="7C:5A:1C:A4:0B:10",
+        ip_address="192.168.0.10",
+        hostname="SOPHOS-GATEWAY",
+        device_type="router",
+        status="online",
+        approval_status="approved",
+    )
+    db_session.add(dev2)
+    db_session.commit()
+
+    # Query GET /endpoint-updates/
+    res = client.get("/endpoint-updates/")
+    assert res.status_code == 200
+    data = res.json()
+
+    # Both online devices should be represented
+    dell_entry = next((e for e in data if e["mac_address"] == "F0:1F:AF:4C:6A:E9"), None)
+    assert dell_entry is not None
+    assert dell_entry["is_online"] is True
+    assert dell_entry["device_status"] == "online"
+    # An online machine should never report status "stale"
+    assert dell_entry["update_status"] != "stale"
+    assert dell_entry["update_status"] == "updates_available"
+
+    sophos_entry = next((e for e in data if e["mac_address"] == "7C:5A:1C:A4:0B:10"), None)
+    assert sophos_entry is not None
+    assert sophos_entry["is_online"] is True
+    assert sophos_entry["device_status"] == "online"
+
+
+

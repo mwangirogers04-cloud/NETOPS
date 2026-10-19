@@ -5076,8 +5076,13 @@ const Dashboard = () => {
                     ? (Date.now() - checkedAt.getTime()) / 60000
                     : Infinity;
 
+                  const isOnline =
+                    endpoint.device_status === "online" ||
+                    endpoint.is_online === true ||
+                    endpoint.status === "online";
+
                   const isFresh =
-                    ageMinutes >= 0 && ageMinutes <= 15;
+                    isOnline || (ageMinutes >= 0 && ageMinutes <= 15);
 
                   const activeJob = getActiveJobForDevice(endpoint);
 
@@ -5094,7 +5099,7 @@ const Dashboard = () => {
                       <td>
                         <span
                           className={`status-badge ${
-                            !isFresh
+                            !isFresh && !isOnline
                               ? "blocked"
                               : endpoint.update_status === "up_to_date"
                               ? "allowed"
@@ -5103,13 +5108,13 @@ const Dashboard = () => {
                               : "blocked"
                           }`}
                         >
-                          {!isFresh
+                          {!isFresh && !isOnline
                             ? "STALE / UNKNOWN"
                             : endpoint.update_status === "up_to_date"
                             ? "UP TO DATE"
                             : endpoint.update_status === "updates_available"
                             ? "NEEDS UPDATES"
-                            : endpoint.update_status}
+                            : endpoint.update_status || "UNKNOWN"}
                         </span>
                       </td>
                       <td>{endpoint.pending_updates ?? "—"}</td>
@@ -5435,29 +5440,47 @@ const EndpointUpdatesPage = () => {
     useState(false);
   const [endpointUpdatesError, setEndpointUpdatesError] =
     useState("");
-const endpointFreshness = (lastChecked) => {
-  if (!lastChecked) {
-    return "stale";
-  }
-const lastCheckedTime = new Date(`${lastChecked}Z`);
-  const now = new Date();
-console.log("FRESHNESS DEBUG:", lastChecked, new Date(lastChecked), now);
-  const ageMinutes =
-    (now.getTime() - lastCheckedTime.getTime()) / 60000;
+  const parseCheckedDate = (d) => {
+    if (!d) return null;
+    const str = String(d);
+    const dateObj = new Date(str.endsWith("Z") || str.includes("+") ? str : `${str}Z`);
+    return isNaN(dateObj.getTime()) ? null : dateObj;
+  };
 
-  return ageMinutes <= 15
-    ? "online"
-    : "stale";
-};  
-  const freshEndpointUpdates = endpointUpdates.filter(
-    (endpoint) => {
-      if (!endpoint.last_checked) return false;
+  const endpointFreshness = (endpointOrLastChecked, maybeEndpoint) => {
+    const endpoint =
+      typeof endpointOrLastChecked === "object" && endpointOrLastChecked !== null
+        ? endpointOrLastChecked
+        : maybeEndpoint || {};
+    const lastChecked =
+      typeof endpointOrLastChecked === "string"
+        ? endpointOrLastChecked
+        : endpoint.last_checked;
 
-      const checkedAt = new Date(`${endpoint.last_checked}Z`);
-      const ageMinutes = (Date.now() - checkedAt.getTime()) / 60000;
+    const isOnline =
+      endpoint.device_status === "online" ||
+      endpoint.is_online === true ||
+      endpoint.status === "online";
 
-      return ageMinutes >= 0 && ageMinutes <= 15;
+    if (isOnline) {
+      return "online";
     }
+
+    if (!lastChecked) {
+      return "stale";
+    }
+
+    const parsedDate = parseCheckedDate(lastChecked);
+    if (!parsedDate) {
+      return "stale";
+    }
+
+    const ageMinutes = (Date.now() - parsedDate.getTime()) / 60000;
+    return ageMinutes >= 0 && ageMinutes <= 15 ? "online" : "stale";
+  };
+
+  const freshEndpointUpdates = endpointUpdates.filter(
+    (endpoint) => endpointFreshness(endpoint) === "online"
   );
 
   const endpointsWithUpdates = freshEndpointUpdates.filter(
@@ -5677,7 +5700,7 @@ console.log("FRESHNESS DEBUG:", lastChecked, new Date(lastChecked), now);
         <td>
           <span
             className={`status-badge ${
-              endpointFreshness(endpoint.last_checked) !== "online"
+              endpointFreshness(endpoint) !== "online"
                 ? "blocked"
                 : endpoint.update_status === "up_to_date"
                 ? "allowed"
@@ -5686,13 +5709,13 @@ console.log("FRESHNESS DEBUG:", lastChecked, new Date(lastChecked), now);
                 : "blocked"
             }`}
           >
-            {endpointFreshness(endpoint.last_checked) !== "online"
+            {endpointFreshness(endpoint) !== "online"
               ? "STALE / UNKNOWN"
               : endpoint.update_status === "updates_available"
               ? "Updates Available"
               : endpoint.update_status === "up_to_date"
               ? "Up to Date"
-              : endpoint.update_status}
+              : endpoint.update_status || "Unknown"}
           </span>
         </td>
 
@@ -5708,24 +5731,20 @@ console.log("FRESHNESS DEBUG:", lastChecked, new Date(lastChecked), now);
                     </td>
 
                     <td>
-                      {new Date(
-                        `${endpoint.last_checked}Z`
-                      ).toLocaleString()}
+                      {parseCheckedDate(endpoint.last_checked)
+                        ? parseCheckedDate(endpoint.last_checked).toLocaleString()
+                        : endpoint.last_checked || "Never"}
                     </td>
 
                     <td>
                       <span
                         className={`status-badge ${
-                          endpointFreshness(
-                            endpoint.last_checked
-                          ) === "online"
+                          endpointFreshness(endpoint) === "online"
                             ? "allowed"
                             : "blocked"
                         }`}
                       >
-                        {endpointFreshness(
-                          endpoint.last_checked
-                        ) === "online"
+                        {endpointFreshness(endpoint) === "online"
                           ? "ONLINE"
                           : "STALE"}
                       </span>

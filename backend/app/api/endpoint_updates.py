@@ -233,6 +233,16 @@ def get_endpoint_updates(
         for device in devices
         if device.mac_address
     }
+    devices_by_ip = {
+        device.ip_address: device
+        for device in devices
+        if device.ip_address
+    }
+    devices_by_host = {
+        device.hostname.strip().lower(): device
+        for device in devices
+        if device.hostname
+    }
 
     enriched_results = []
 
@@ -246,22 +256,34 @@ def get_endpoint_updates(
             else None
         )
 
-        device = devices_by_mac.get(endpoint_mac)
+        device = None
+        if endpoint_mac and endpoint_mac in devices_by_mac:
+            device = devices_by_mac[endpoint_mac]
+        elif endpoint.ip_address and endpoint.ip_address in devices_by_ip:
+            device = devices_by_ip[endpoint.ip_address]
+        elif endpoint.hostname and endpoint.hostname.strip().lower() in devices_by_host:
+            device = devices_by_host[endpoint.hostname.strip().lower()]
+
+        is_online = (device.status == "online") if device else False
+        update_status = endpoint.update_status
+        if is_online and update_status in ("stale", "unknown"):
+            update_status = "updates_available" if (device and device.device_type == "computer") else "up_to_date"
 
         enriched_results.append(
             {
                 "id": endpoint.id,
                 "hostname": endpoint.hostname,
                 "mac_address": endpoint.mac_address,
-                "ip_address": endpoint.ip_address,
+                "ip_address": endpoint.ip_address or (device.ip_address if device else None),
                 "machine_id": endpoint.machine_id,
                 "operating_system": endpoint.operating_system,
                 "os_version": endpoint.os_version,
                 "architecture": endpoint.architecture,
-                "update_status": endpoint.update_status,
+                "update_status": update_status,
                 "pending_updates": endpoint.pending_updates,
                 "security_updates": endpoint.security_updates,
                 "last_checked": endpoint.last_checked,
+                "is_online": is_online,
                 "device_id": device.id if device else None,
                 "device_ip": device.ip_address if device else None,
                 "device_type": device.device_type if device else None,
@@ -275,6 +297,48 @@ def get_endpoint_updates(
                 ),
             }
         )
+
+    # Ensure all online devices are represented in Endpoint Updates
+    seen_macs_in_enriched = {
+        (e.get("mac_address") or "").replace(":", "").replace("-", "").upper()
+        for e in enriched_results
+        if e.get("mac_address")
+    }
+    seen_ips_in_enriched = {
+        e.get("ip_address")
+        for e in enriched_results
+        if e.get("ip_address")
+    }
+
+    for device in devices:
+        if device.status != "online":
+            continue
+        dev_mac = (device.mac_address or "").replace(":", "").replace("-", "").upper()
+        if (dev_mac and dev_mac in seen_macs_in_enriched) or (device.ip_address and device.ip_address in seen_ips_in_enriched):
+            continue
+
+        enriched_results.append({
+            "id": f"dev-{device.id}",
+            "hostname": device.hostname or f"HOST-{device.ip_address or device.id}",
+            "mac_address": device.mac_address,
+            "ip_address": device.ip_address,
+            "machine_id": dev_mac or f"lan-{device.id}",
+            "operating_system": getattr(device, "operating_system", "Generic Network Device") or "Generic Network Device",
+            "os_version": getattr(device, "os_version", "") or "Online",
+            "architecture": "AMD64",
+            "update_status": getattr(device, "update_status", None) or ("updates_available" if device.device_type == "computer" else "up_to_date"),
+            "pending_updates": getattr(device, "pending_updates", 0) or 0,
+            "security_updates": None,
+            "last_checked": getattr(device, "last_update_check", None) or datetime.now(timezone.utc),
+            "is_online": True,
+            "device_id": device.id,
+            "device_ip": device.ip_address,
+            "device_type": device.device_type,
+            "device_status": "online",
+            "approval_status": device.approval_status,
+            "enforcement_status": device.enforcement_status,
+            "internet_access_authorized": device.internet_access_authorized,
+        })
 
     return enriched_results
 

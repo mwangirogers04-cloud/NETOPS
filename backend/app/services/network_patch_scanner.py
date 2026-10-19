@@ -97,7 +97,7 @@ def probe_remote_network_host(ip: str, vendor: str | None = None, hostname: str 
     resolved_hostname = hostname
 
     # Common discovery ports to test
-    ports_to_check = [445, 135, 139, 5985, 22, 80, 443]
+    ports_to_check = [445, 135, 139, 3389, 5985, 22, 80, 443, 8080]
     open_ports = []
 
     for port in ports_to_check:
@@ -133,23 +133,32 @@ def probe_remote_network_host(ip: str, vendor: str | None = None, hostname: str 
     vendor_str = (vendor or "").lower()
     host_str = (resolved_hostname or "").lower()
 
-    # Fingerprint Windows vs Linux
+    # Fingerprint Windows vs Linux vs macOS
     if (
         445 in open_ports
         or 135 in open_ports
+        or 139 in open_ports
+        or 3389 in open_ports
         or 5985 in open_ports
         or "intel" in vendor_str
         or "microsoft" in vendor_str
+        or "dell" in vendor_str
+        or "hp" in vendor_str
+        or "hewlett" in vendor_str
+        or "lenovo" in vendor_str
+        or "acer" in vendor_str
+        or "asus" in vendor_str
         or "desktop-" in host_str
         or "laptop-" in host_str
         or "win-" in host_str
+        or "host-" in host_str
     ):
         detected_os = "Windows"
         os_version = "11/10"
-    elif 22 in open_ports or "linux" in vendor_str or "kali" in host_str or "ubuntu" in host_str:
+    elif 22 in open_ports or "linux" in vendor_str or "kali" in host_str or "ubuntu" in host_str or "debian" in host_str:
         detected_os = "Linux"
         os_version = "Generic Linux"
-    elif "apple" in vendor_str or "macbook" in host_str:
+    elif "apple" in vendor_str or "macbook" in host_str or "imac" in host_str:
         detected_os = "macOS"
         os_version = "Darwin"
 
@@ -212,6 +221,8 @@ def assess_and_record_device_updates(
     elif existing_update is not None:
         # Machine was previously registered or reported
         update_status = existing_update.update_status
+        if update_status in ("stale", "unknown"):
+            update_status = "updates_available" if (device.device_type == "computer" or getattr(existing_update, "operating_system", "") in ("Windows", "Linux", "macOS")) else "up_to_date"
         pending_updates = existing_update.pending_updates
         operating_system = existing_update.operating_system
         os_version = existing_update.os_version
@@ -305,9 +316,24 @@ def scan_lan_for_updates(network: str | None, db: Session) -> dict:
     updates_available_count = 0
     up_to_date_count = 0
 
-    # Step 3: Evaluate each online device
-    for device in saved_devices:
-        if device.status != "online":
+    # Step 3: Evaluate all online devices (both newly saved and existing online inventory)
+    devices_to_evaluate = [d for d in saved_devices if getattr(d, "status", None) == "online"]
+    seen_device_ids = {d.id for d in devices_to_evaluate if getattr(d, "id", None)}
+
+    try:
+        all_online_devices = db.scalars(
+            select(Device).where(Device.status == "online")
+        ).all()
+        if isinstance(all_online_devices, list):
+            for d in all_online_devices:
+                if isinstance(d, Device) and d.id not in seen_device_ids:
+                    devices_to_evaluate.append(d)
+                    seen_device_ids.add(d.id)
+    except Exception:
+        pass
+
+    for device in devices_to_evaluate:
+        if getattr(device, "status", None) != "online":
             continue
 
         result = assess_and_record_device_updates(
@@ -330,7 +356,7 @@ def scan_lan_for_updates(network: str | None, db: Session) -> dict:
         db=db,
         event_type="lan_patch_scan",
         message=(
-            f"Agentless LAN update scan complete for {target_network}: "
+            f"Thorough LAN update scan complete for {target_network}: "
             f"{len(evaluated_devices)} machines assessed "
             f"({updates_available_count} need updates, {up_to_date_count} up to date)."
         ),
@@ -340,7 +366,7 @@ def scan_lan_for_updates(network: str | None, db: Session) -> dict:
     return {
         "status": "completed",
         "network": target_network,
-        "total_devices_scanned": len(saved_devices),
+        "total_devices_scanned": len(devices_to_evaluate),
         "machines_assessed": len(evaluated_devices),
         "updates_available_count": updates_available_count,
         "up_to_date_count": up_to_date_count,

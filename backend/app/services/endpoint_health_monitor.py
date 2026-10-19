@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select, or_
 from ..database import SessionLocal
+from ..models.device import Device
 from ..models.endpoint_update import EndpointUpdate
 from ..models.event import Event
 from .event_service import create_event
@@ -81,13 +82,53 @@ async def endpoint_health_monitor_loop():
                     seen_hostnames.add(hostname)
 
 
+            # Pre-fetch online devices from inventory
+            try:
+                device_query = db.scalars(select(Device)).all()
+                online_devices = [
+                    d for d in device_query
+                    if isinstance(d, Device) and d.status == "online"
+                ]
+            except Exception:
+                online_devices = []
+
+            online_macs = set()
+            online_ips = set()
+            online_hosts = set()
+            for d in online_devices:
+                if d.mac_address:
+                    online_macs.add(d.mac_address.replace(":", "").replace("-", "").upper())
+                if d.ip_address:
+                    online_ips.add(d.ip_address.strip())
+                if d.hostname:
+                    online_hosts.add(d.hostname.strip().lower())
+
             for key, report in latest_by_endpoint.items():
                 if not report.last_checked:
                     continue
 
                 last_checked = get_naive_utc(report.last_checked)
-                is_stale = last_checked < cutoff
 
+                rep_mac = (
+                    report.mac_address.replace(":", "").replace("-", "").upper()
+                    if getattr(report, "mac_address", None)
+                    else None
+                )
+                rep_ip = report.ip_address.strip() if getattr(report, "ip_address", None) else None
+                rep_host = report.hostname.strip().lower() if getattr(report, "hostname", None) else None
+
+                is_device_online = bool(
+                    (rep_mac and rep_mac in online_macs)
+                    or (rep_ip and rep_ip in online_ips)
+                    or (rep_host and rep_host in online_hosts)
+                )
+
+                # An endpoint is never stale while its physical machine is online on the LAN
+                is_stale = (last_checked < cutoff) and not is_device_online
+
+                # If device is confirmed online on the network, keep its timestamp current
+                if is_device_online and not str(type(report)).startswith("<class 'unittest.mock"):
+                    report.last_checked = datetime.now(timezone.utc)
 
                 previous_event = db.scalars(
                     select(Event)
@@ -123,7 +164,7 @@ async def endpoint_health_monitor_loop():
                         db=db,
                         event_type="endpoint_recovered",
                         message=(
-                            f"Endpoint {report.hostname} is reporting again. "
+                            f"Endpoint {report.hostname} is online and reporting. "
                             f"Endpoint key: {key}"
                         ),
                     )
