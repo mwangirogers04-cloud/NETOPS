@@ -7,6 +7,7 @@ from ..models.event import Event
 from .access_policy import get_access_decision
 from .access_schedule import is_access_allowed
 from .event_service import create_event
+from .firewall.manager import get_active_firewall_driver
 from .sophos_enforcement import (
     is_sophos_configured,
     sophos_block_device,
@@ -79,10 +80,11 @@ def enforce_device_access(
                 decision = "quarantine"
 
     # ---------------------------------------------------------
-    # Determine enforcement action and apply live Sophos rules.
+    # Determine enforcement action and apply live firewall rules.
     # ---------------------------------------------------------
 
-    sophos_result = None
+    active_driver = get_active_firewall_driver(db)
+    firewall_result = None
 
     if decision == "allowed":
         action = "allow"
@@ -96,13 +98,21 @@ def enforce_device_access(
         )
 
         status_changed = (old_enforcement_status != enforcement_status)
-        if (force or status_changed) and is_sophos_configured() and device.ip_address:
-            try:
-                sophos_result = sophos_allow_device(device.ip_address)
-                if sophos_result.get("status") == "allowed":
-                    message += " [Sophos Firewall: Unblocked]"
-            except Exception as exc:
-                message += f" [Sophos Warning: {exc}]"
+        if (force or status_changed) and device.ip_address:
+            if active_driver.vendor != "sophos" and active_driver.is_configured():
+                try:
+                    firewall_result = active_driver.allow_device(device.ip_address, device.mac_address)
+                    if firewall_result.get("status") == "allowed":
+                        message += f" [{active_driver.vendor_title}: Unblocked]"
+                except Exception as exc:
+                    message += f" [{active_driver.vendor_title} Warning: {exc}]"
+            elif is_sophos_configured():
+                try:
+                    firewall_result = sophos_allow_device(device.ip_address)
+                    if firewall_result.get("status") == "allowed":
+                        message += " [Sophos Firewall: Unblocked]"
+                except Exception as exc:
+                    message += f" [Sophos Warning: {exc}]"
 
     else:
         action = "quarantine"
@@ -116,15 +126,25 @@ def enforce_device_access(
         )
 
         status_changed = (old_enforcement_status != enforcement_status)
-        if (force or status_changed) and is_sophos_configured() and device.ip_address:
-            try:
-                sophos_result = sophos_block_device(device.ip_address, device.hostname)
-                if sophos_result.get("status") == "blocked":
-                    message += " [Sophos Firewall: Blocked & Disconnected]"
-                elif sophos_result.get("status") == "protected":
-                    message += " [Sophos: Protected Host]"
-            except Exception as exc:
-                message += f" [Sophos Warning: {exc}]"
+        if (force or status_changed) and device.ip_address:
+            if active_driver.vendor != "sophos" and active_driver.is_configured():
+                try:
+                    firewall_result = active_driver.block_device(device.ip_address, device.hostname, device.mac_address)
+                    if firewall_result.get("status") == "blocked":
+                        message += f" [{active_driver.vendor_title}: Blocked & Disconnected]"
+                    elif firewall_result.get("status") == "protected":
+                        message += f" [{active_driver.vendor_title}: Protected Host]"
+                except Exception as exc:
+                    message += f" [{active_driver.vendor_title} Warning: {exc}]"
+            elif is_sophos_configured():
+                try:
+                    firewall_result = sophos_block_device(device.ip_address, device.hostname)
+                    if firewall_result.get("status") == "blocked":
+                        message += " [Sophos Firewall: Blocked & Disconnected]"
+                    elif firewall_result.get("status") == "protected":
+                        message += " [Sophos: Protected Host]"
+                except Exception as exc:
+                    message += f" [Sophos Warning: {exc}]"
 
     # ---------------------------------------------------------
     # Store current enforcement state.
@@ -163,6 +183,10 @@ def enforce_device_access(
     # Return result.
     # ---------------------------------------------------------
 
+    is_live = (active_driver.is_configured() and active_driver.vendor != "simulation")
+    is_live_sophos = is_sophos_configured() and (active_driver.vendor == "sophos" or not is_live)
+    mode = "live_sophos" if is_live_sophos else (f"live_{active_driver.vendor}" if is_live else "simulation")
+
     return {
         "device_id": device.id,
         "ip_address": device.ip_address,
@@ -178,6 +202,8 @@ def enforce_device_access(
         "previous_enforcement_status": (
             old_enforcement_status
         ),
-        "mode": "live_sophos" if is_sophos_configured() else "simulation",
-        "sophos_result": sophos_result,
+        "mode": mode,
+        "firewall_vendor": "sophos" if is_live_sophos else active_driver.vendor,
+        "firewall_result": firewall_result,
+        "sophos_result": firewall_result,
     }

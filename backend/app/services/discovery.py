@@ -10,6 +10,7 @@ from ..models.device import Device
 from ..models.event import Event
 from .event_service import create_event
 from .vlan_policy import get_vlan_for_device_type
+from .firewall.manager import get_active_firewall_driver
 from .sophos_enforcement import (
     is_sophos_configured,
     sophos_allow_device,
@@ -600,7 +601,13 @@ def save_discovered_devices(
                     other.ip_address = None
 
             if ip_changed:
-                if is_sophos_configured() and old_ip:
+                active_fw = get_active_firewall_driver(db)
+                if active_fw.vendor != "sophos" and active_fw.is_configured() and old_ip:
+                    try:
+                        active_fw.allow_device(old_ip)
+                    except Exception as exc:
+                        print(f"[DISCOVERY] Error releasing old IP {old_ip} on {active_fw.vendor_title}: {exc}")
+                elif is_sophos_configured() and old_ip:
                     try:
                         sophos_allow_device(old_ip)
                     except Exception as exc:

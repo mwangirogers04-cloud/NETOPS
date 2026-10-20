@@ -2333,12 +2333,12 @@ const LanScannerPage = () => {
         <ReportCard
           title="Allowed Internet"
           value={allowedCount}
-          description="Devices authorized and actively passing traffic through Sophos."
+          description="Devices authorized and actively passing traffic through active firewall."
         />
         <ReportCard
-          title="Quarantined on Sophos"
+          title="Quarantined on Firewall"
           value={quarantinedCount}
-          description="Devices dropped by Sophos firewall top quarantine rule."
+          description="Devices dropped by active firewall quarantine policy."
         />
       </div>
 
@@ -2653,8 +2653,8 @@ const LanScannerPage = () => {
                             }}
                           >
                             {isAllowed
-                              ? "Sophos: Active Traffic"
-                              : "Sophos: Dropped by Rule"}
+                              ? "Firewall: Active Traffic"
+                              : "Firewall: Dropped by Rule"}
                           </div>
                           {schedule && schedule.is_active && (
                             <div
@@ -2693,7 +2693,7 @@ const LanScannerPage = () => {
                               disabled={
                                 actionLoading === `disallow-${device.id}`
                               }
-                              title="Instantly block Internet access on Sophos Firewall"
+                              title="Instantly block Internet access on Firewall"
                             >
                               {actionLoading === `disallow-${device.id}`
                                 ? "Blocking..."
@@ -2713,7 +2713,7 @@ const LanScannerPage = () => {
                                 background: "#10b981",
                                 borderColor: "#10b981",
                               }}
-                              title="Allow Internet access on Sophos Firewall"
+                              title="Allow Internet access on Firewall"
                             >
                               {actionLoading === `allow-${device.id}`
                                 ? "Allowing..."
@@ -4666,156 +4666,623 @@ return (
   // ------------------------------------------------------------
 
   const SettingsPage = () => {
-    const [sophosStatus, setSophosStatus] = useState(null);
-    const [sophosLoading, setSophosLoading] = useState(false);
+    const [firewallVendors, setFirewallVendors] = useState([]);
+    const [activeDriver, setActiveDriver] = useState(null);
+    const [savedConfigs, setSavedConfigs] = useState([]);
+    const [liveStatus, setLiveStatus] = useState(null);
+    const [loadingLiveStatus, setLoadingLiveStatus] = useState(false);
+    const [activeTab, setActiveTab] = useState("active"); // "active" | "configure" | "profiles"
+    const [selectedVendor, setSelectedVendor] = useState("sophos");
+    const [testingConnection, setTestingConnection] = useState(false);
+    const [testResult, setTestResult] = useState(null);
+    const [savingConfig, setSavingConfig] = useState(false);
+    const [saveFeedback, setSaveFeedback] = useState(null);
 
-    const checkSophos = () => {
-      setSophosLoading(true);
-      fetch(`${API_URL}/sophos/live-status`)
-        .then((r) => r.json())
-        .then((data) => setSophosStatus(data))
-        .catch((err) => setSophosStatus({ connected: false, error: err.message }))
-        .finally(() => setSophosLoading(false));
+    const [form, setForm] = useState({
+      id: null,
+      vendor: "sophos",
+      name: "Sophos XG/XGS Firewall",
+      management_url: "https://192.168.0.10:4444",
+      api_key: "",
+      username: "Admin",
+      password: "",
+      verify_tls: false,
+      quarantine_group: "NETOPS_Quarantine",
+      quarantine_rule: "NETOPS_Quarantine_Block",
+      is_active: true,
+    });
+
+    const loadFirewallData = async () => {
+      try {
+        const [vRes, cRes] = await Promise.all([
+          fetch(`${API_URL}/firewall/vendors`),
+          fetch(`${API_URL}/firewall/config`),
+        ]);
+        if (vRes.ok) {
+          const vendors = await vRes.json();
+          setFirewallVendors(vendors);
+        }
+        if (cRes.ok) {
+          const configData = await cRes.json();
+          setActiveDriver(configData.active_driver);
+          setSavedConfigs(configData.saved_configs || []);
+          if (configData.active_driver?.vendor) {
+            setSelectedVendor(configData.active_driver.vendor);
+          }
+        }
+      } catch (err) {
+        console.error("Error loading firewall config:", err);
+      }
+    };
+
+    const checkLiveStatus = async () => {
+      setLoadingLiveStatus(true);
+      try {
+        const res = await fetch(`${API_URL}/firewall/live-status`);
+        if (res.ok) {
+          const data = await res.json();
+          setLiveStatus(data);
+        }
+      } catch (err) {
+        setLiveStatus({ connected: false, error: err.message });
+      } finally {
+        setLoadingLiveStatus(false);
+      }
     };
 
     useEffect(() => {
-      checkSophos();
+      loadFirewallData();
+      checkLiveStatus();
     }, []);
+
+    const handleSelectVendor = (vendorId) => {
+      setSelectedVendor(vendorId);
+      const v = firewallVendors.find((item) => item.id === vendorId);
+      setForm((prev) => ({
+        ...prev,
+        vendor: vendorId,
+        name: prev.id ? prev.name : `${v?.name || vendorId} Profile`,
+        management_url: prev.id ? prev.management_url : (v?.url_placeholder || ""),
+      }));
+      setTestResult(null);
+    };
+
+    const handleTestConnection = async () => {
+      setTestingConnection(true);
+      setTestResult(null);
+      try {
+        const res = await fetch(`${API_URL}/firewall/test`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            vendor: form.vendor,
+            management_url: form.management_url,
+            api_key: form.api_key || null,
+            username: form.username || null,
+            password: form.password || null,
+            verify_tls: form.verify_tls,
+            quarantine_group: form.quarantine_group,
+          }),
+        });
+        const data = await res.json();
+        setTestResult(data);
+      } catch (err) {
+        setTestResult({ connected: false, error: err.message });
+      } finally {
+        setTestingConnection(false);
+      }
+    };
+
+    const handleSaveConfig = async (e) => {
+      e.preventDefault();
+      setSavingConfig(true);
+      setSaveFeedback(null);
+      try {
+        const res = await fetch(`${API_URL}/firewall/config`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(form),
+        });
+        const data = await res.json();
+        if (res.ok) {
+          setSaveFeedback({ type: "success", text: data.message || "Configuration saved." });
+          await loadFirewallData();
+          await checkLiveStatus();
+        } else {
+          setSaveFeedback({ type: "error", text: data.detail || "Failed to save configuration." });
+        }
+      } catch (err) {
+        setSaveFeedback({ type: "error", text: err.message });
+      } finally {
+        setSavingConfig(false);
+      }
+    };
+
+    const handleActivateProfile = async (id) => {
+      try {
+        const res = await fetch(`${API_URL}/firewall/activate/${id}`, { method: "POST" });
+        if (res.ok) {
+          await loadFirewallData();
+          await checkLiveStatus();
+        }
+      } catch (err) {
+        alert("Activation failed: " + err.message);
+      }
+    };
+
+    const curVendorMeta = firewallVendors.find((v) => v.id === selectedVendor) || {
+      id: selectedVendor,
+      name: selectedVendor,
+      icon: "🛡️",
+      requires_username: true,
+      requires_password: true,
+      requires_api_key: false,
+    };
 
     return (
       <div className="page">
         <div className="page-header">
           <div>
             <div className="page-title">
-              Settings
+              ⚙️ Settings &amp; Multi-Vendor Firewall Center
             </div>
-
             <div className="page-description">
-              NETOPS platform configuration &amp; hardware integrations.
+              Universal firewall integration hub supporting Sophos, Fortinet FortiGate, MikroTik RouterOS, pfSense, Cisco ASA, and Linux Gateways.
             </div>
           </div>
         </div>
 
-        <div className="settings-grid">
-          <div className="panel">
-            <div className="panel-header">
-              <div>
-                <div className="panel-title">
-                  Backend API
-                </div>
-
-                <div className="panel-subtitle">
-                  NETOPS FastAPI service
-                </div>
-              </div>
-            </div>
-
-            <div className="settings-row">
-              <span>API URL</span>
-              <code>{API_URL}</code>
-            </div>
-
-            <div className="settings-row">
-              <span>WebSocket</span>
-              <code>{WS_URL}</code>
-            </div>
-          </div>
-
-          <div className="panel">
-            <div className="panel-header">
-              <div>
-                <div className="panel-title">
-                  Connection
-                </div>
-
-                <div className="panel-subtitle">
-                  Current frontend status
-                </div>
-              </div>
-            </div>
-
-            <div className="settings-row">
-              <span>API</span>
-
-              <span className="settings-status">
-                <span className="status-dot online" />
-                Connected
-              </span>
-            </div>
-
-            <div className="settings-row">
-              <span>WebSocket</span>
-
-              <span className="settings-status">
-                <span
-                  className={
-                    wsConnected
-                      ? "status-dot online"
-                      : "status-dot offline"
-                  }
-                />
-
-                {wsConnected
-                  ? "Connected"
-                  : "Disconnected"}
-              </span>
-            </div>
-
-            <div className="settings-row">
-              <span>Refresh interval</span>
-              <span>10 seconds</span>
-            </div>
-          </div>
-
-          <div className="panel" style={{ gridColumn: "span 2" }}>
-            <div className="panel-header">
-              <div>
-                <div className="panel-title">Sophos Firewall Integration</div>
-                <div className="panel-subtitle">Physical network isolation &amp; quarantine enforcement</div>
-              </div>
-              <button
-                type="button"
-                className="secondary-button small"
-                onClick={checkSophos}
-                disabled={sophosLoading}
-              >
-                {sophosLoading ? "Checking..." : "Refresh Status"}
-              </button>
-            </div>
-
-            <div className="settings-row">
-              <span>Firewall Appliance</span>
-              <code>192.168.0.10:4444 {sophosStatus?.api_version ? `(SFOS ${sophosStatus.api_version})` : ""}</code>
-            </div>
-
-            <div className="settings-row">
-              <span>Enforcement Status</span>
-              <span className="settings-status">
-                <span className={`status-dot ${sophosStatus?.connected ? "online" : "offline"}`} />
-                {sophosStatus?.connected ? "Active & Enforcing (Real Firewall)" : "Connecting / Error"}
-              </span>
-            </div>
-
-            <div className="settings-row">
-              <span>Quarantine Firewall Rule</span>
-              <span style={{ color: sophosStatus?.quarantine_rule_active ? "#22c55e" : "#ef4444", fontWeight: "600" }}>
-                {sophosStatus?.quarantine_rule_active ? "NETOPS_Quarantine_Block (Top Drop Rule Live)" : "Rule Not Found"}
-              </span>
-            </div>
-
-            <div className="settings-row">
-              <span>Active Quarantined Hosts</span>
-              <span style={{ fontWeight: "600", color: "#f59e0b" }}>
-                {sophosStatus?.quarantined_hosts_count !== undefined ? `${sophosStatus.quarantined_hosts_count} device(s) isolated` : "Querying..."}
-              </span>
-            </div>
-
-            <div className="settings-row">
-              <span>Protected Infrastructure IPs</span>
-              <code style={{ fontSize: "11px" }}>192.168.0.1, 192.168.0.10, 192.168.0.13, 192.168.0.101</code>
-            </div>
-          </div>
+        {/* TAB BUTTONS */}
+        <div style={{ display: "flex", gap: "8px", marginBottom: "20px", borderBottom: "1px solid #334155", paddingBottom: "12px", flexWrap: "wrap" }}>
+          <button
+            type="button"
+            className={activeTab === "active" ? "primary-button small" : "secondary-button small"}
+            onClick={() => setActiveTab("active")}
+            style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+          >
+            <span>🛡️</span> Active Firewall &amp; Status
+          </button>
+          <button
+            type="button"
+            className={activeTab === "configure" ? "primary-button small" : "secondary-button small"}
+            onClick={() => setActiveTab("configure")}
+            style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+          >
+            <span>➕</span> Configure / Change Firewall
+          </button>
+          <button
+            type="button"
+            className={activeTab === "profiles" ? "primary-button small" : "secondary-button small"}
+            onClick={() => setActiveTab("profiles")}
+            style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+          >
+            <span>📋</span> Saved Firewall Profiles ({savedConfigs.length})
+          </button>
         </div>
+
+        {/* TAB 1: ACTIVE FIREWALL & STATUS */}
+        {activeTab === "active" && (
+          <div className="settings-grid">
+            <div className="panel" style={{ gridColumn: "span 2", background: "linear-gradient(180deg, #1e293b 0%, #0f172a 100%)", borderColor: "#3b82f6" }}>
+              <div className="panel-header">
+                <div>
+                  <div className="panel-title" style={{ display: "flex", alignItems: "center", gap: "10px", fontSize: "16px" }}>
+                    <span>{liveStatus?.vendor === "fortinet" ? "🏰" : liveStatus?.vendor === "mikrotik" ? "🌐" : liveStatus?.vendor === "pfsense" ? "🧱" : liveStatus?.vendor === "cisco_asa" ? "🦅" : liveStatus?.vendor === "linux_iptables" ? "🐧" : "🛡️"}</span>
+                    Active Firewall: {liveStatus?.vendor_title || activeDriver?.vendor_title || "Sophos XG/XGS (SFOS)"}
+                  </div>
+                  <div className="panel-subtitle">
+                    Live isolation, dynamic DHCP synchronization &amp; quarantine enforcement engine
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="secondary-button small"
+                  onClick={checkLiveStatus}
+                  disabled={loadingLiveStatus}
+                >
+                  {loadingLiveStatus ? "Checking..." : "🔄 Refresh Status"}
+                </button>
+              </div>
+
+              <div className="settings-row">
+                <span>Active Vendor Platform</span>
+                <span style={{ fontWeight: "700", color: "#60a5fa" }}>
+                  {liveStatus?.vendor_title || activeDriver?.vendor_title || "Sophos XG/XGS"}
+                </span>
+              </div>
+
+              <div className="settings-row">
+                <span>Management Endpoint</span>
+                <code>{activeDriver?.management_url || "192.168.0.10:4444"} {liveStatus?.api_version ? `(${liveStatus.api_version})` : ""}</code>
+              </div>
+
+              <div className="settings-row">
+                <span>Live Reachability Status</span>
+                <span className="settings-status">
+                  <span className={`status-dot ${liveStatus?.connected ? "online" : "offline"}`} />
+                  {liveStatus?.connected ? "Active & Enforcing (Live Hardware Connected)" : liveStatus?.error ? `Disconnected: ${liveStatus.error}` : "Checking..."}
+                </span>
+              </div>
+
+              <div className="settings-row">
+                <span>Quarantine Policy / Rule</span>
+                <span style={{ color: liveStatus?.quarantine_rule_active ? "#22c55e" : "#ef4444", fontWeight: "600" }}>
+                  {liveStatus?.quarantine_rule_active ? `${activeDriver?.quarantine_rule || "NETOPS_Quarantine_Block"} (Active)` : "Not Installed / Group Empty"}
+                </span>
+              </div>
+
+              <div className="settings-row">
+                <span>Active Quarantined Devices</span>
+                <span style={{ fontWeight: "700", color: "#f59e0b" }}>
+                  {liveStatus?.quarantined_hosts_count !== undefined ? `${liveStatus.quarantined_hosts_count} device(s) isolated` : "Querying..."}
+                </span>
+              </div>
+
+              <div className="settings-row">
+                <span>Protected Infrastructure IPs</span>
+                <code style={{ fontSize: "11px" }}>192.168.0.1, 192.168.0.10, 192.168.0.13, 192.168.0.101</code>
+              </div>
+
+              <div style={{ padding: "12px 16px", marginTop: "12px", background: "rgba(59, 130, 246, 0.08)", borderRadius: "6px", fontSize: "12px", color: "#93c5fd" }}>
+                💡 <strong>Multi-Vendor Flexibility:</strong> Need to switch to a Fortinet FortiGate, MikroTik RouterOS, pfSense, Cisco ASA, or Linux Gateway? Switch to the <strong>Configure / Change Firewall</strong> tab above.
+              </div>
+            </div>
+
+            {/* PLATFORM API PANELS */}
+            <div className="panel">
+              <div className="panel-header">
+                <div>
+                  <div className="panel-title">Backend API Service</div>
+                  <div className="panel-subtitle">FastAPI REST engine</div>
+                </div>
+              </div>
+              <div className="settings-row">
+                <span>API URL</span>
+                <code>{API_URL}</code>
+              </div>
+              <div className="settings-row">
+                <span>WebSocket</span>
+                <code>{WS_URL}</code>
+              </div>
+            </div>
+
+            <div className="panel">
+              <div className="panel-header">
+                <div>
+                  <div className="panel-title">Frontend Status</div>
+                  <div className="panel-subtitle">WebSocket telemetry sync</div>
+                </div>
+              </div>
+              <div className="settings-row">
+                <span>WebSocket Link</span>
+                <span className="settings-status">
+                  <span className={`status-dot ${wsConnected ? "online" : "offline"}`} />
+                  {wsConnected ? "Real-Time Connected" : "Reconnecting"}
+                </span>
+              </div>
+              <div className="settings-row">
+                <span>Scan Subnet</span>
+                <code>{detectedSubnet}</code>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 2: CONFIGURE / CHANGE FIREWALL */}
+        {activeTab === "configure" && (
+          <div>
+            {/* VENDOR SELECTOR CARDS */}
+            <div style={{ marginBottom: "20px" }}>
+              <div style={{ fontSize: "13px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.06em", color: "#94a3b8", marginBottom: "10px" }}>
+                1. SELECT FIREWALL APPLIANCE VENDOR
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: "12px" }}>
+                {firewallVendors.map((v) => {
+                  const isSelected = selectedVendor === v.id;
+                  return (
+                    <div
+                      key={v.id}
+                      onClick={() => handleSelectVendor(v.id)}
+                      style={{
+                        padding: "14px",
+                        borderRadius: "8px",
+                        border: isSelected ? "2px solid #3b82f6" : "1px solid #334155",
+                        background: isSelected ? "rgba(59, 130, 246, 0.15)" : "#0f172a",
+                        cursor: "pointer",
+                        transition: "all 0.15s ease",
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+                        <span style={{ fontSize: "22px" }}>{v.icon}</span>
+                        <div style={{ fontWeight: "700", fontSize: "14px", color: isSelected ? "#60a5fa" : "#f8fafc" }}>
+                          {v.name}
+                        </div>
+                      </div>
+                      <div style={{ fontSize: "11px", color: "#94a3b8", lineHeight: "1.4" }}>
+                        {v.description}
+                      </div>
+                      <div style={{ marginTop: "8px", fontSize: "10px", color: "#64748b" }}>
+                        Default Port: <strong>{v.default_port ? v.default_port : "Local"}</strong>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* CONFIGURATION FORM */}
+            <div className="panel" style={{ maxWidth: "800px" }}>
+              <div className="panel-header">
+                <div>
+                  <div className="panel-title" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <span>{curVendorMeta.icon}</span> Configure {curVendorMeta.name}
+                  </div>
+                  <div className="panel-subtitle">
+                    Enter the management address and credentials for this appliance.
+                  </div>
+                </div>
+              </div>
+
+              {saveFeedback && (
+                <div
+                  style={{
+                    padding: "10px 14px",
+                    borderRadius: "6px",
+                    marginBottom: "16px",
+                    background: saveFeedback.type === "success" ? "rgba(16, 185, 129, 0.15)" : "rgba(239, 68, 68, 0.15)",
+                    border: `1px solid ${saveFeedback.type === "success" ? "#10b981" : "#ef4444"}`,
+                    color: saveFeedback.type === "success" ? "#34d399" : "#f87171",
+                    fontSize: "13px",
+                  }}
+                >
+                  {saveFeedback.text}
+                </div>
+              )}
+
+              <form onSubmit={handleSaveConfig}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "16px" }}>
+                  <div>
+                    <label style={{ display: "block", marginBottom: "6px", fontSize: "12px", fontWeight: "700", color: "#cbd5e1" }}>
+                      Profile Name
+                    </label>
+                    <input
+                      type="text"
+                      value={form.name}
+                      onChange={(e) => setForm({ ...form, name: e.target.value })}
+                      placeholder="e.g. Primary Edge Firewall"
+                      required
+                      style={{ width: "100%", padding: "8px 12px", background: "#0b1120", border: "1px solid #334155", borderRadius: "6px", color: "#f8fafc", fontSize: "13px" }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ display: "block", marginBottom: "6px", fontSize: "12px", fontWeight: "700", color: "#cbd5e1" }}>
+                      Management URL / IP
+                    </label>
+                    <input
+                      type="text"
+                      value={form.management_url}
+                      onChange={(e) => setForm({ ...form, management_url: e.target.value })}
+                      placeholder={curVendorMeta.url_placeholder || "https://192.168.0.1"}
+                      style={{ width: "100%", padding: "8px 12px", background: "#0b1120", border: "1px solid #334155", borderRadius: "6px", color: "#f8fafc", fontSize: "13px", fontFamily: "monospace" }}
+                    />
+                  </div>
+                </div>
+
+                {curVendorMeta.requires_api_key && (
+                  <div style={{ marginBottom: "16px" }}>
+                    <label style={{ display: "block", marginBottom: "6px", fontSize: "12px", fontWeight: "700", color: "#cbd5e1" }}>
+                      API Token / Secret Key
+                    </label>
+                    <input
+                      type="password"
+                      value={form.api_key}
+                      onChange={(e) => setForm({ ...form, api_key: e.target.value })}
+                      placeholder="Enter API token (e.g. FortiOS REST token or pfSense key)"
+                      style={{ width: "100%", padding: "8px 12px", background: "#0b1120", border: "1px solid #334155", borderRadius: "6px", color: "#f8fafc", fontSize: "13px", fontFamily: "monospace" }}
+                    />
+                  </div>
+                )}
+
+                {(curVendorMeta.requires_username || curVendorMeta.requires_password) && (
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "16px" }}>
+                    {curVendorMeta.requires_username && (
+                      <div>
+                        <label style={{ display: "block", marginBottom: "6px", fontSize: "12px", fontWeight: "700", color: "#cbd5e1" }}>
+                          Administrator Username
+                        </label>
+                        <input
+                          type="text"
+                          value={form.username}
+                          onChange={(e) => setForm({ ...form, username: e.target.value })}
+                          placeholder="e.g. Admin or admin"
+                          style={{ width: "100%", padding: "8px 12px", background: "#0b1120", border: "1px solid #334155", borderRadius: "6px", color: "#f8fafc", fontSize: "13px" }}
+                        />
+                      </div>
+                    )}
+                    {curVendorMeta.requires_password && (
+                      <div>
+                        <label style={{ display: "block", marginBottom: "6px", fontSize: "12px", fontWeight: "700", color: "#cbd5e1" }}>
+                          Administrator Password
+                        </label>
+                        <input
+                          type="password"
+                          value={form.password}
+                          onChange={(e) => setForm({ ...form, password: e.target.value })}
+                          placeholder="••••••••"
+                          style={{ width: "100%", padding: "8px 12px", background: "#0b1120", border: "1px solid #334155", borderRadius: "6px", color: "#f8fafc", fontSize: "13px" }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "16px" }}>
+                  <div>
+                    <label style={{ display: "block", marginBottom: "6px", fontSize: "12px", fontWeight: "700", color: "#cbd5e1" }}>
+                      Quarantine Group / Address List Name
+                    </label>
+                    <input
+                      type="text"
+                      value={form.quarantine_group}
+                      onChange={(e) => setForm({ ...form, quarantine_group: e.target.value })}
+                      style={{ width: "100%", padding: "8px 12px", background: "#0b1120", border: "1px solid #334155", borderRadius: "6px", color: "#f8fafc", fontSize: "13px", fontFamily: "monospace" }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: "block", marginBottom: "6px", fontSize: "12px", fontWeight: "700", color: "#cbd5e1" }}>
+                      Top Quarantine Block Rule Name
+                    </label>
+                    <input
+                      type="text"
+                      value={form.quarantine_rule}
+                      onChange={(e) => setForm({ ...form, quarantine_rule: e.target.value })}
+                      style={{ width: "100%", padding: "8px 12px", background: "#0b1120", border: "1px solid #334155", borderRadius: "6px", color: "#f8fafc", fontSize: "13px", fontFamily: "monospace" }}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", gap: "24px", alignItems: "center", marginBottom: "20px" }}>
+                  <label style={{ display: "inline-flex", alignItems: "center", gap: "8px", fontSize: "13px", cursor: "pointer", color: "#cbd5e1" }}>
+                    <input
+                      type="checkbox"
+                      checked={form.verify_tls}
+                      onChange={(e) => setForm({ ...form, verify_tls: e.target.checked })}
+                    />
+                    Verify SSL/TLS Certificate (Recommended False for Self-Signed certs)
+                  </label>
+
+                  <label style={{ display: "inline-flex", alignItems: "center", gap: "8px", fontSize: "13px", cursor: "pointer", color: "#60a5fa", fontWeight: "600" }}>
+                    <input
+                      type="checkbox"
+                      checked={form.is_active}
+                      onChange={(e) => setForm({ ...form, is_active: e.target.checked })}
+                    />
+                    Set as Currently Active Firewall
+                  </label>
+                </div>
+
+                {/* TEST RESULT FEEDBACK BANNER */}
+                {testResult && (
+                  <div
+                    style={{
+                      padding: "12px 16px",
+                      borderRadius: "6px",
+                      marginBottom: "16px",
+                      background: testResult.connected ? "rgba(16, 185, 129, 0.15)" : "rgba(239, 68, 68, 0.15)",
+                      border: `1px solid ${testResult.connected ? "#10b981" : "#ef4444"}`,
+                    }}
+                  >
+                    <div style={{ fontWeight: "700", fontSize: "14px", color: testResult.connected ? "#34d399" : "#f87171", display: "flex", alignItems: "center", gap: "6px" }}>
+                      <span>{testResult.connected ? "✓" : "✗"}</span>
+                      {testResult.connected ? "Connection Test Successful!" : "Connection Test Failed"}
+                    </div>
+                    <div style={{ fontSize: "12px", marginTop: "4px", color: "#cbd5e1" }}>
+                      {testResult.connected ? (
+                        <>Connected to <strong>{testResult.vendor_title}</strong> at <code>{testResult.firewall_ip || form.management_url}</code>. Firmware: <code>{testResult.api_version || "OK"}</code>. Quarantine Rule Active: {testResult.quarantine_rule_active ? "Yes" : "No"}.</>
+                      ) : (
+                        <>Error: {testResult.error || "Appliance refused connection or credentials invalid."}</>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* ACTION BUTTONS */}
+                <div style={{ display: "flex", gap: "10px" }}>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={handleTestConnection}
+                    disabled={testingConnection}
+                    style={{ fontWeight: "600", display: "inline-flex", alignItems: "center", gap: "6px" }}
+                  >
+                    <span>⚡</span> {testingConnection ? "Testing Connection..." : "Test Connection"}
+                  </button>
+
+                  <button
+                    type="submit"
+                    className="primary-button"
+                    disabled={savingConfig}
+                    style={{ fontWeight: "700", display: "inline-flex", alignItems: "center", gap: "6px" }}
+                  >
+                    <span>💾</span> {savingConfig ? "Saving & Enforcing..." : "Save & Activate Firewall"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 3: SAVED FIREWALL PROFILES */}
+        {activeTab === "profiles" && (
+          <div className="panel">
+            <div className="panel-header">
+              <div>
+                <div className="panel-title">Saved Firewall Integration Profiles</div>
+                <div className="panel-subtitle">Manage multiple firewalls across headquarters, branches, or data centers.</div>
+              </div>
+            </div>
+
+            <div className="table-container">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>STATUS</th>
+                    <th>PROFILE NAME</th>
+                    <th>VENDOR</th>
+                    <th>MANAGEMENT URL</th>
+                    <th>QUARANTINE RULE</th>
+                    <th style={{ textAlign: "right" }}>ACTIONS</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {savedConfigs.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} style={{ textAlign: "center", padding: "24px", color: "#94a3b8" }}>
+                        No firewall profiles saved in database yet. Sophos is currently loaded from environment settings. Click <strong>"Configure / Change Firewall"</strong> to add one.
+                      </td>
+                    </tr>
+                  ) : (
+                    savedConfigs.map((cfg) => (
+                      <tr key={cfg.id} style={cfg.is_active ? { background: "rgba(59, 130, 246, 0.08)" } : {}}>
+                        <td>
+                          {cfg.is_active ? (
+                            <span className="status-badge allowed" style={{ fontSize: "11px", fontWeight: "700" }}>
+                              ACTIVE
+                            </span>
+                          ) : (
+                            <span className="status-badge offline" style={{ fontSize: "11px" }}>
+                              STANDBY
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ fontWeight: "700", color: "#f8fafc" }}>{cfg.name}</td>
+                        <td>
+                          <span style={{ textTransform: "uppercase", fontSize: "11px", padding: "2px 6px", background: "#334155", borderRadius: "4px", color: "#cbd5e1" }}>
+                            {cfg.vendor}
+                          </span>
+                        </td>
+                        <td><code style={{ fontSize: "12px" }}>{cfg.management_url || "Local"}</code></td>
+                        <td><code>{cfg.quarantine_rule}</code></td>
+                        <td style={{ textAlign: "right" }}>
+                          {!cfg.is_active && (
+                            <button
+                              type="button"
+                              className="primary-button small"
+                              onClick={() => handleActivateProfile(cfg.id)}
+                            >
+                              ⚡ Activate
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
     );
   };

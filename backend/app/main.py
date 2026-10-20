@@ -12,6 +12,7 @@ from .models.access_schedule import AccessSchedule
 from .models.endpoint_update import EndpointUpdate
 from .models.patch_job import PatchJob
 from .models.user import PasswordResetOTP, User, UserSession
+from .models.firewall_config import FirewallConfig
 
 from .api.devices import router as devices_router
 from .api.events import router as events_router
@@ -21,6 +22,7 @@ from .api.access_schedules import router as access_schedules_router
 from .api.endpoint_updates import router as endpoint_updates_router
 from .api.cisco import router as cisco_router
 from .api.sophos import router as sophos_router
+from .api.firewall import router as firewall_router
 from .api.simulation import router as simulation_router
 from .api.auth import router as auth_router
 from .api.users import router as users_router
@@ -80,6 +82,7 @@ app.include_router(access_schedules_router)
 app.include_router(endpoint_updates_router)
 app.include_router(cisco_router)
 app.include_router(sophos_router)
+app.include_router(firewall_router)
 app.include_router(simulation_router)
 app.include_router(auth_router)
 app.include_router(users_router)
