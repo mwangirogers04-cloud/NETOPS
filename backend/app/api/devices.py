@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models.device import Device
 from ..models.endpoint_update import EndpointUpdate
+from ..models.access_schedule import AccessSchedule
 from ..schemas.device import (
     DeviceCreate,
     DeviceResponse,
@@ -474,6 +475,22 @@ def disallow_device(
     # --------------------------------------------------------
 
     device.internet_access_authorized = False
+
+    # When manually disconnected, disable active access schedules so the manual
+    # disconnect is respected
+    try:
+        active_schedules = (
+            db.query(AccessSchedule)
+            .filter(
+                AccessSchedule.device_id == device.id,
+                AccessSchedule.enabled.is_(True),
+            )
+            .all()
+        )
+        for sch in active_schedules:
+            sch.enabled = False
+    except Exception:
+        pass
 
     result = enforce_device_access(
         device,

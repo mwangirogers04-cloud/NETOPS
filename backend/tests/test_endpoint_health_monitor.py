@@ -213,3 +213,66 @@ def test_online_endpoint_never_marked_stale(monkeypatch):
     db.commit.assert_called_once()
     db.close.assert_called_once()
 
+
+def test_offline_device_reconnected_transitions_to_online(monkeypatch):
+    from unittest.mock import patch
+    from backend.app.models.device import Device
+    dev = Device(
+        id=46,
+        mac_address="F0:1F:AF:4C:6A:E9",
+        ip_address="192.168.0.12",
+        hostname="HOST-192-168-0-12",
+        status="offline",
+    )
+    # Use a dummy non-mock class for db so is_mock_env is False
+    class RealDbSession:
+        def __init__(self):
+            self.committed = False
+            self.closed = False
+        def scalars(self, query):
+            mock_res = MagicMock()
+            q_str = str(query).lower()
+            if "device" in q_str:
+                mock_res.all.return_value = [dev]
+            else:
+                mock_res.all.return_value = []
+            mock_res.first.return_value = None
+            return mock_res
+        def commit(self):
+            self.committed = True
+        def close(self):
+            self.closed = True
+        def rollback(self):
+            pass
+
+    db_instance = RealDbSession()
+    monkeypatch.setattr(monitor, "SessionLocal", lambda: db_instance)
+    event_mock = MagicMock()
+    monkeypatch.setattr(monitor, "create_event", event_mock)
+
+    async def stop_after_one_cycle(_seconds):
+        raise RuntimeError("stop test loop")
+
+    monkeypatch.setattr(monitor.asyncio, "sleep", stop_after_one_cycle)
+
+    with patch("backend.app.services.endpoint_health_monitor.subprocess.run") as mock_subproc:
+        fake_res = MagicMock()
+        fake_res.stdout = "192.168.0.12\tF0:1F:AF:4C:6A:E9\tDell Inc."
+        fake_res.returncode = 0
+        mock_subproc.return_value = fake_res
+
+        try:
+            asyncio.run(monitor.endpoint_health_monitor_loop())
+        except RuntimeError as err:
+            assert str(err) == "stop test loop"
+
+    assert dev.status == "online"
+    online_calls = [
+        c for c in event_mock.call_args_list if c.kwargs.get("event_type") == "device_online"
+    ]
+    assert len(online_calls) == 1
+    assert "HOST-192-168-0-12" in online_calls[0].kwargs["message"]
+    assert db_instance.committed is True
+    assert db_instance.closed is True
+
+

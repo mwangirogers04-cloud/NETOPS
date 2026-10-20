@@ -182,3 +182,77 @@ def test_network_enforcement_triggers_sophos():
         assert res["decision"] == "quarantine"
         assert res["mode"] == "live_sophos"
         mock_block.assert_called_once_with("192.168.0.99", "WORKSTATION-1")
+
+
+def test_network_enforcement_schedule_overrides_manual_disconnect():
+    from backend.app.models.access_schedule import AccessSchedule
+    device = Device(
+        id=46,
+        mac_address="F0:1F:AF:4C:6A:E9",
+        ip_address="192.168.0.12",
+        hostname="HOST-192-168-0-12",
+        device_type="computer",
+        approval_status="approved",
+        enforcement_status="quarantined",
+        internet_access_authorized=False,  # Manually disconnected previously
+        vlan_id=20,
+    )
+    schedule = AccessSchedule(
+        id=1,
+        device_id=46,
+        enabled=True,
+        days="daily",
+        start_time="08:00:00",
+        end_time="17:00:00",
+    )
+    db = MagicMock()
+    db.scalar.return_value = None
+    db.query.return_value.filter.return_value.all.return_value = [schedule]
+
+    with (
+        patch("backend.app.services.network_enforcement.is_access_allowed", return_value=True),
+        patch("backend.app.services.network_enforcement.is_sophos_configured", return_value=False),
+        patch("backend.app.services.network_enforcement.create_event"),
+    ):
+        res = enforce_device_access(device, db, force=True)
+
+        assert res["decision"] == "allowed"
+        assert res["enforcement_status"] == "allowed"
+        assert device.internet_access_authorized is True
+
+
+def test_network_enforcement_schedule_quarantines_outside_window():
+    from backend.app.models.access_schedule import AccessSchedule
+    device = Device(
+        id=46,
+        mac_address="F0:1F:AF:4C:6A:E9",
+        ip_address="192.168.0.12",
+        hostname="HOST-192-168-0-12",
+        device_type="computer",
+        approval_status="approved",
+        enforcement_status="allowed",
+        internet_access_authorized=True,
+        vlan_id=20,
+    )
+    schedule = AccessSchedule(
+        id=1,
+        device_id=46,
+        enabled=True,
+        days="daily",
+        start_time="08:00:00",
+        end_time="17:00:00",
+    )
+    db = MagicMock()
+    db.scalar.return_value = None
+    db.query.return_value.filter.return_value.all.return_value = [schedule]
+
+    with (
+        patch("backend.app.services.network_enforcement.is_access_allowed", return_value=False),
+        patch("backend.app.services.network_enforcement.is_sophos_configured", return_value=False),
+        patch("backend.app.services.network_enforcement.create_event"),
+    ):
+        res = enforce_device_access(device, db, force=True)
+
+        assert res["decision"] == "quarantine"
+        assert res["enforcement_status"] == "quarantined"
+        assert device.internet_access_authorized is False

@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from ..models.device import Device
 from ..models.event import Event
+from ..models.access_schedule import AccessSchedule
 from .access_policy import get_access_decision
 from .access_schedule import is_access_allowed
 from .event_service import create_event
@@ -58,26 +59,41 @@ def enforce_device_access(
         device.internet_access_authorized = False
         decision = "quarantine"
 
-    elif not device.internet_access_authorized:
-        # Approval does NOT automatically grant Internet access.
-        # The administrator must explicitly authorize access.
-        decision = "quarantine"
-
     else:
-        decision = get_access_decision(
-            device.device_type,
-            device.approval_status,
-        )
+        # Check if device has an active access schedule
+        has_active_schedule = False
+        try:
+            schedule_records = db.query(AccessSchedule).filter(
+                AccessSchedule.device_id == device.id,
+                AccessSchedule.enabled.is_(True),
+            ).all()
+            if isinstance(schedule_records, (list, tuple)):
+                has_active_schedule = len(schedule_records) > 0
+        except Exception:
+            has_active_schedule = False
 
-        if decision == "allowed":
+        if has_active_schedule:
             schedule_allows_access = is_access_allowed(
                 db,
                 device.id,
                 current_datetime=current_datetime,
             )
-
-            if not schedule_allows_access:
+            if schedule_allows_access:
+                # Active schedule currently allows access -> restore/grant authorization
+                decision = "allowed"
+                device.internet_access_authorized = True
+            else:
+                # Active schedule currently outside allowed hours -> quarantine
                 decision = "quarantine"
+                device.internet_access_authorized = False
+        elif not device.internet_access_authorized:
+            # Without active schedule, honor administrator manual disallow/disconnect
+            decision = "quarantine"
+        else:
+            decision = get_access_decision(
+                device.device_type,
+                device.approval_status,
+            )
 
     # ---------------------------------------------------------
     # Determine enforcement action and apply live firewall rules.

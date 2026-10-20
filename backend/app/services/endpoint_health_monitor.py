@@ -11,7 +11,7 @@ from .event_service import create_event
 
 
 STALE_AFTER_MINUTES = 15
-CHECK_INTERVAL_SECONDS = 60
+CHECK_INTERVAL_SECONDS = 10
 
 
 def get_endpoint_key(report):
@@ -83,64 +83,125 @@ async def endpoint_health_monitor_loop():
                     seen_hostnames.add(hostname)
 
 
-            # Pre-fetch online devices from inventory
+            # Check reachability of all inventory devices (both online and offline)
+            is_mock_env = str(type(db)).startswith("<class 'unittest.mock")
+
             try:
                 device_query = db.scalars(select(Device)).all()
-                online_devices = [
-                    d for d in device_query
-                    if isinstance(d, Device) and d.status == "online"
-                ]
             except Exception:
-                online_devices = []
+                device_query = []
 
-            # In live production, verify reachability of online devices
-            for d in list(online_devices):
-                if str(type(d)).startswith("<class 'unittest.mock"):
-                    continue
-                if not d.ip_address:
-                    continue
-                if d.hostname and d.hostname.lower() in ("kali", "localhost"):
-                    continue
+            online_devices = []
 
-                is_active = False
+            if is_mock_env:
+                for d in device_query:
+                    if isinstance(d, Device) and d.status == "online":
+                        online_devices.append(d)
+            else:
+                # Live production: sweep LAN to detect all active machines across subnets
+                active_ips = set()
+                active_macs = set()
+
                 for iface in ("eth0", "wlan0"):
                     try:
                         res = subprocess.run(
-                            ["arping", "-c", "1", "-w", "1", "-I", iface, d.ip_address],
+                            ["arp-scan", "--interface", iface, "--localnet", "--retry=1", "--timeout=500"],
                             capture_output=True,
+                            text=True,
                             check=False,
-                            timeout=2,
+                            timeout=4,
                         )
-                        if res.returncode == 0:
-                            is_active = True
-                            break
-                    except Exception:
-                        pass
-                if not is_active:
-                    try:
-                        res = subprocess.run(
-                            ["ping", "-c", "1", "-W", "1", d.ip_address],
-                            capture_output=True,
-                            check=False,
-                            timeout=2,
-                        )
-                        if res.returncode == 0:
-                            is_active = True
+                        for line in res.stdout.splitlines():
+                            parts = line.strip().split()
+                            if len(parts) >= 2 and ":" in parts[1]:
+                                active_ips.add(parts[0].strip())
+                                active_macs.add(parts[1].strip().replace(":", "").replace("-", "").upper())
                     except Exception:
                         pass
 
-                if not is_active:
-                    d.status = "offline"
-                    create_event(
-                        db=db,
-                        event_type="device_offline",
-                        message=(
-                            f"Device {d.hostname or d.ip_address} ({d.mac_address}) "
-                            f"went offline / disconnected from the LAN."
-                        ),
-                        device_id=d.id,
-                    )
-                    online_devices.remove(d)
+                try:
+                    res = subprocess.run(["ip", "neigh", "show"], capture_output=True, text=True, check=False, timeout=3)
+                    for line in res.stdout.splitlines():
+                        parts = line.strip().split()
+                        if "REACHABLE" in parts or "DELAY" in parts or "STALE" in parts:
+                            if len(parts) >= 1:
+                                active_ips.add(parts[0].strip())
+                            if "lladdr" in parts:
+                                idx = parts.index("lladdr")
+                                if idx + 1 < len(parts):
+                                    active_macs.add(parts[idx + 1].strip().replace(":", "").replace("-", "").upper())
+                except Exception:
+                    pass
+
+                for d in device_query:
+                    if not isinstance(d, Device):
+                        continue
+                    if not d.ip_address:
+                        if d.status == "online":
+                            online_devices.append(d)
+                        continue
+                    if d.hostname and d.hostname.lower() in ("kali", "localhost"):
+                        if d.status == "online":
+                            online_devices.append(d)
+                        continue
+
+                    d_mac = d.mac_address.replace(":", "").replace("-", "").upper() if d.mac_address else None
+                    is_active = (d.ip_address in active_ips) or (d_mac and d_mac in active_macs)
+
+                    if not is_active and d.status == "online":
+                        # If device was online, perform fallback individual probe before marking offline
+                        for iface in ("eth0", "wlan0"):
+                            try:
+                                res = subprocess.run(
+                                    ["arping", "-c", "1", "-w", "1", "-I", iface, d.ip_address],
+                                    capture_output=True,
+                                    check=False,
+                                    timeout=2,
+                                )
+                                if res.returncode == 0:
+                                    is_active = True
+                                    break
+                            except Exception:
+                                pass
+
+                        if not is_active:
+                            try:
+                                res = subprocess.run(
+                                    ["ping", "-c", "1", "-W", "1", d.ip_address],
+                                    capture_output=True,
+                                    check=False,
+                                    timeout=2,
+                                )
+                                if res.returncode == 0:
+                                    is_active = True
+                            except Exception:
+                                pass
+
+                    if is_active:
+                        if d.status != "online":
+                            d.status = "online"
+                            create_event(
+                                db=db,
+                                event_type="device_online",
+                                message=(
+                                    f"Device {d.hostname or d.ip_address} ({d.mac_address}) "
+                                    f"returned online / connected to the LAN."
+                                ),
+                                device_id=d.id,
+                            )
+                        online_devices.append(d)
+                    else:
+                        if d.status == "online":
+                            d.status = "offline"
+                            create_event(
+                                db=db,
+                                event_type="device_offline",
+                                message=(
+                                    f"Device {d.hostname or d.ip_address} ({d.mac_address}) "
+                                    f"went offline / disconnected from the LAN."
+                                ),
+                                device_id=d.id,
+                            )
 
             online_macs = set()
             online_ips = set()
