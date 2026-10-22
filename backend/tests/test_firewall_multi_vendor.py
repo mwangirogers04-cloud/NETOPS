@@ -21,11 +21,44 @@ def test_list_supported_vendors():
     vendor_ids = {v["id"] for v in vendors}
     assert "sophos" in vendor_ids
     assert "fortinet" in vendor_ids
+    assert "palo_alto" in vendor_ids
+    assert "checkpoint" in vendor_ids
     assert "mikrotik" in vendor_ids
     assert "pfsense" in vendor_ids
     assert "cisco_asa" in vendor_ids
+    assert "juniper_srx" in vendor_ids
+    assert "sonicwall" in vendor_ids
+    assert "watchguard" in vendor_ids
+    assert "ubiquiti" in vendor_ids
+    assert "aruba" in vendor_ids
+    assert "huawei_usg" in vendor_ids
     assert "linux_iptables" in vendor_ids
     assert "simulation" in vendor_ids
+    assert len(vendors) == 15
+
+
+def test_enterprise_drivers_instantiation():
+    for v_id in [
+        "fortigate",
+        "palo_alto",
+        "checkpoint",
+        "juniper_srx",
+        "sonicwall",
+        "watchguard",
+        "ubiquiti",
+        "aruba",
+        "huawei_usg",
+    ]:
+        drv = create_driver_instance(
+            vendor=v_id,
+            management_url="https://192.168.1.254",
+            username="admin",
+            password="secret",
+            api_key="token-123",
+        )
+        assert drv.is_configured() is True
+        res_prot = drv.block_device("192.168.0.1")
+        assert res_prot["status"] == "protected"
 
 
 def test_fortinet_driver_mocked():

@@ -8,13 +8,13 @@ body,
 }
 
 html {
-  background: #0b1120;
+  background: #f1f5f9;
 }
 
 body {
   min-height: 100vh;
-  background: #0b1120;
-  color: #e5e7eb;
+  background: #f1f5f9;
+  color: #0f172a;
   font-family:
     Inter,
     -apple-system,

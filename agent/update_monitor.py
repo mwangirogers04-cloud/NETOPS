@@ -122,6 +122,21 @@ def check_linux_updates():
             if line.strip() and not line.startswith("Listing...")
         ]
 
+        # Exclude held-back packages that apt-get upgrade does not install
+        if lines:
+            sim_res = subprocess.run(
+                ["apt-get", "-s", "--with-new-pkgs", "upgrade"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if sim_res.returncode == 0:
+                lines = [
+                    l.strip()
+                    for l in sim_res.stdout.splitlines()
+                    if l.strip().startswith("Inst ")
+                ]
+
         return {
             "update_status": (
                 "updates_available"

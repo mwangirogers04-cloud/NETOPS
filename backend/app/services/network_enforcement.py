@@ -9,6 +9,7 @@ from .access_policy import get_access_decision
 from .access_schedule import is_access_allowed
 from .event_service import create_event
 from .firewall.manager import get_active_firewall_driver
+from .l2_quarantine import quarantine_device_l2, restore_device_l2
 from .sophos_enforcement import (
     is_sophos_configured,
     sophos_block_device,
@@ -51,7 +52,13 @@ def enforce_device_access(
     # device classification, and access schedule.
     # ---------------------------------------------------------
 
-    if device.approval_status in {"pending", "rejected"}:
+    if old_enforcement_status == "isolated":
+        # Explicitly isolated devices remain isolated in VLAN 90 with no internet access
+        device.internet_access_authorized = False
+        device.vlan_id = 90
+        decision = "isolated"
+
+    elif device.approval_status in {"pending", "rejected"}:
         decision = "quarantine"
 
     elif getattr(device, "vlan_id", None) == 90:
@@ -115,6 +122,15 @@ def enforce_device_access(
 
         status_changed = (old_enforcement_status != enforcement_status)
         if (force or status_changed) and device.ip_address:
+            try:
+                dev_iface = getattr(device, "network_interface", None)
+                restore_device_l2(
+                    device.ip_address,
+                    device.mac_address,
+                    interface=dev_iface if isinstance(dev_iface, str) else None,
+                )
+            except Exception:
+                pass
             if active_driver.vendor != "sophos" and active_driver.is_configured():
                 try:
                     firewall_result = active_driver.allow_device(device.ip_address, device.mac_address)
@@ -131,8 +147,12 @@ def enforce_device_access(
                     message += f" [Sophos Warning: {exc}]"
 
     else:
-        action = "quarantine"
-        enforcement_status = "quarantined"
+        if decision == "isolated":
+            action = "isolate"
+            enforcement_status = "isolated"
+        else:
+            action = "quarantine"
+            enforcement_status = "quarantined"
 
         message = (
             f"Internet access blocked for device "
@@ -143,6 +163,16 @@ def enforce_device_access(
 
         status_changed = (old_enforcement_status != enforcement_status)
         if (force or status_changed) and device.ip_address:
+            try:
+                dev_iface = getattr(device, "network_interface", None)
+                quarantine_device_l2(
+                    device.ip_address,
+                    device.mac_address,
+                    burst=3,
+                    interface=dev_iface if isinstance(dev_iface, str) else None,
+                )
+            except Exception:
+                pass
             if active_driver.vendor != "sophos" and active_driver.is_configured():
                 try:
                     firewall_result = active_driver.block_device(device.ip_address, device.hostname, device.mac_address)

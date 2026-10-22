@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models.user import User
 from ..services.auth_service import (
+    check_user_conflicts,
     generate_activation_link,
     generate_activation_token,
     hash_password,
@@ -185,29 +186,22 @@ def create_user(
             detail="Only Super Administrators can create Admin accounts.",
         )
 
-    # Check for existing username or email
+    # Check for existing username, email, or phone number
     clean_username = req.username.strip()
     clean_email = str(req.email).strip().lower()
+    clean_phone = req.phone_number.strip()
 
-    existing = db.scalar(
-        select(User).where(
-            or_(
-                func.lower(User.username) == clean_username.lower(),
-                func.lower(User.email) == clean_email,
-            )
-        )
+    conflicts = check_user_conflicts(
+        db=db,
+        username=clean_username,
+        email=clean_email,
+        phone_number=clean_phone,
     )
-    if existing:
-        if existing.username.lower() == clean_username.lower():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Username '{clean_username}' is already taken.",
-            )
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Email '{clean_email}' is already registered.",
-            )
+    if not conflicts["available"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=conflicts["detail"],
+        )
 
     token = generate_activation_token()
     login_link = generate_activation_link(token)
@@ -297,39 +291,41 @@ def update_user(
                 )
         user.role = req.role
 
-    # Check username collision if changed
-    if req.username is not None and req.username.strip().lower() != user.username.lower():
-        clean_user = req.username.strip()
-        existing = db.scalar(
-            select(User).where(
-                func.lower(User.username) == clean_user.lower(),
-                User.id != user_id,
-            )
+    # Check username, email, and phone number collisions if changed
+    check_username = (
+        req.username.strip()
+        if req.username is not None and req.username.strip().lower() != user.username.lower()
+        else None
+    )
+    check_email = (
+        str(req.email).strip().lower()
+        if req.email is not None and str(req.email).strip().lower() != user.email.lower()
+        else None
+    )
+    check_phone = (
+        req.phone_number.strip()
+        if req.phone_number is not None and req.phone_number.strip() != (user.phone_number or "")
+        else None
+    )
+
+    if check_username or check_email or check_phone:
+        conflicts = check_user_conflicts(
+            db=db,
+            username=check_username,
+            email=check_email,
+            phone_number=check_phone,
+            exclude_user_id=user_id,
         )
-        if existing:
+        if not conflicts["available"]:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Username '{clean_user}' is already taken.",
+                detail=conflicts["detail"],
             )
-        user.username = clean_user
 
-    # Check email collision if changed
-    if req.email is not None and str(req.email).strip().lower() != user.email.lower():
-        clean_email = str(req.email).strip().lower()
-        existing = db.scalar(
-            select(User).where(
-                func.lower(User.email) == clean_email,
-                User.id != user_id,
-            )
-        )
-        if existing:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Email '{clean_email}' is already registered to another account.",
-            )
-        user.email = clean_email
-
-    # Phone number
+    if req.username is not None:
+        user.username = req.username.strip()
+    if req.email is not None:
+        user.email = str(req.email).strip().lower()
     if req.phone_number is not None:
         user.phone_number = req.phone_number.strip()
 

@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from ..models.device import Device
 from ..models.endpoint_update import EndpointUpdate
+from ..models.patch_job import PatchJob
 from .event_service import create_event
 from .discovery import (
     discover_devices,
@@ -66,6 +67,22 @@ def check_local_updates() -> dict:
             for line in result.stdout.splitlines()
             if line.strip() and not line.startswith("Listing...")
         ]
+        # Filter out packages held back by apt-get upgrade when running on live host
+        if len(lines) > 10:
+            sim_res = subprocess.run(
+                ["apt-get", "-s", "--with-new-pkgs", "upgrade"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=15,
+            )
+            if sim_res.returncode == 0 and hasattr(sim_res, "stdout") and isinstance(sim_res.stdout, str):
+                inst_lines = [
+                    l.strip()
+                    for l in sim_res.stdout.splitlines()
+                    if l.strip().startswith("Inst ")
+                ]
+                lines = inst_lines
         return {
             "operating_system": "Linux",
             "os_version": platform.release(),
@@ -218,6 +235,9 @@ def assess_and_record_device_updates(
         os_version = local_info["os_version"]
         architecture = local_info["architecture"]
         hostname = device.hostname or platform.node()
+        if existing_update is not None and getattr(existing_update, "update_status", None) == "up_to_date":
+            update_status = "up_to_date"
+            pending_updates = 0
     elif existing_update is not None:
         # Machine was previously registered or reported
         update_status = existing_update.update_status

@@ -191,3 +191,48 @@ def test_http_scan_returns_successful_response(monkeypatch):
 
     discover_mock.assert_called_once_with("192.168.1.0/24")
     save_mock.assert_called_once()
+
+
+def test_http_scan_with_wlan0_interface(monkeypatch):
+    discovered = [
+        {
+            "ip_address": "192.168.0.105",
+            "mac_address": "11:22:33:44:55:66",
+            "interface": "wlan0",
+            "medium": "wireless",
+            "hostname": "WIFI-LAPTOP",
+            "vendor": "Intel",
+        }
+    ]
+
+    saved_device = MagicMock()
+    saved_device.id = 2
+    saved_device.ip_address = "192.168.0.105"
+    saved_device.mac_address = "11:22:33:44:55:66"
+    saved_device.hostname = "WIFI-LAPTOP"
+    saved_device.vendor = "Intel"
+    saved_device.device_type = "computer"
+    saved_device.classification_status = "normal"
+    saved_device.vlan_id = 20
+    saved_device.approval_status = "pending"
+    saved_device.status = "online"
+
+    discover_mock = MagicMock(return_value=discovered)
+    save_mock = MagicMock(return_value=[saved_device])
+
+    monkeypatch.setattr(discovery, "discover_devices", discover_mock)
+    monkeypatch.setattr(discovery, "save_discovered_devices", save_mock)
+
+    response = client.post(
+        "/discovery/scan",
+        json={"network": "192.168.0.0/24", "interface": "wlan0"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "completed"
+    assert data["interface"] == "wlan0"
+    assert data["devices_discovered"] == 1
+    discover_mock.assert_called_once_with("192.168.0.0/24", interface="wlan0")
+    save_mock.assert_called_once()
+

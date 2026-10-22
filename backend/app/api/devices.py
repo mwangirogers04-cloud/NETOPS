@@ -39,7 +39,10 @@ def add_access_information(device: Device):
     Approval and Internet access are separate concepts.
     """
 
-    if device.approval_status in {"pending", "rejected"}:
+    if device.enforcement_status == "isolated":
+        device.access_decision = "isolated"
+
+    elif device.approval_status in {"pending", "rejected"}:
         device.access_decision = "quarantine"
 
     elif device.enforcement_status == "allowed":
@@ -54,7 +57,12 @@ def add_access_information(device: Device):
         device.approval_status,
     )
 
-    if device.approval_status in {"pending", "rejected"}:
+    if device.enforcement_status == "isolated":
+        device.access_reason = (
+            "Device is explicitly isolated from the network (VLAN 90)"
+        )
+
+    elif device.approval_status in {"pending", "rejected"}:
         device.access_reason = reason
 
     elif reason == "Unknown or unrecognized device type":
@@ -410,6 +418,9 @@ def allow_device(
     # --------------------------------------------------------
     # EXPLICIT INTERNET ACCESS GRANT
     # --------------------------------------------------------
+
+    if device.enforcement_status == "isolated":
+        device.enforcement_status = "quarantined"
 
     device.internet_access_authorized = True
     result = enforce_device_access(
@@ -819,6 +830,8 @@ def set_device_vlan(
             device.id,
         )
     else:
+        if device.enforcement_status == "isolated":
+            device.enforcement_status = "quarantined"
         create_event(
             db,
             "vlan_change",
@@ -842,4 +855,134 @@ def set_device_vlan(
     add_access_information(device)
 
     return device
+
+
+# ------------------------------------------------------------
+# ISOLATE DEVICE
+# ------------------------------------------------------------
+
+@router.post(
+    "/{device_id}/isolate",
+    response_model=DeviceResponse,
+)
+def isolate_device(
+    device_id: int,
+    db: Session = Depends(get_db),
+):
+    device = db.get(Device, device_id)
+
+    if device is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Device not found",
+        )
+
+    old_vlan = device.vlan_id
+
+    device.enforcement_status = "isolated"
+    device.internet_access_authorized = False
+    device.vlan_id = 90
+
+    # Disable active access schedules while device is explicitly isolated
+    try:
+        active_schedules = (
+            db.query(AccessSchedule)
+            .filter(
+                AccessSchedule.device_id == device.id,
+                AccessSchedule.enabled.is_(True),
+            )
+            .all()
+        )
+        for sch in active_schedules:
+            sch.enabled = False
+    except Exception:
+        pass
+
+    enforce_device_access(
+        device,
+        db,
+        force=True,
+    )
+
+    create_event(
+        db,
+        "device_isolated",
+        (
+            f"Device isolated by administrator: "
+            f"{device.hostname or 'Unknown Device'} "
+            f"({device.ip_address or 'No IP'}) "
+            f"MAC {device.mac_address}. "
+            f"Moved from VLAN {old_vlan or 90} to Quarantine VLAN 90 and network/internet access blocked."
+        ),
+        device.id,
+    )
+
+    db.commit()
+    db.refresh(device)
+
+    attach_update_information([device], db)
+    add_access_information(device)
+
+    return device
+
+
+# ------------------------------------------------------------
+# UNISOLATE / RELEASE DEVICE FROM ISOLATION
+# ------------------------------------------------------------
+
+@router.post(
+    "/{device_id}/unisolate",
+    response_model=DeviceResponse,
+)
+def unisolate_device(
+    device_id: int,
+    db: Session = Depends(get_db),
+):
+    device = db.get(Device, device_id)
+
+    if device is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Device not found",
+        )
+
+    device.enforcement_status = "quarantined"
+
+    if device.approval_status == "approved":
+        target_vlan = get_vlan_for_device_type(device.device_type)
+        if not target_vlan or target_vlan == 90:
+            target_vlan = 20
+            if not device.device_type or device.device_type == "unknown":
+                device.device_type = "computer"
+        device.vlan_id = target_vlan
+    else:
+        device.vlan_id = 90
+
+    enforce_device_access(
+        device,
+        db,
+        force=True,
+    )
+
+    create_event(
+        db,
+        "device_unisolated",
+        (
+            f"Device released from isolation by administrator: "
+            f"{device.hostname or 'Unknown Device'} "
+            f"({device.ip_address or 'No IP'}) "
+            f"MAC {device.mac_address}. "
+            f"Assigned to VLAN {device.vlan_id}."
+        ),
+        device.id,
+    )
+
+    db.commit()
+    db.refresh(device)
+
+    attach_update_information([device], db)
+    add_access_information(device)
+
+    return device
+
 

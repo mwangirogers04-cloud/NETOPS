@@ -1,4 +1,5 @@
 import ipaddress
+import os
 import socket
 import subprocess
 import xml.etree.ElementTree as ET
@@ -69,7 +70,69 @@ def get_default_interface() -> str:
     return "eth0"
 
 
-def get_local_ip():
+def is_wireless_interface(interface: str | None) -> bool:
+    """Return True if the network interface is a wireless (Wi-Fi / WLAN) adapter."""
+    if not interface:
+        return False
+    iface = interface.strip()
+    if iface.startswith(("wlan", "wl", "wifi", "ath", "ra")):
+        return True
+    return os.path.isdir(f"/sys/class/net/{iface}/wireless") or os.path.isdir(
+        f"/sys/class/net/{iface}/phy80211"
+    )
+
+
+def get_wireless_ssid(interface: str) -> str | None:
+    """Attempt to read the connected Wi-Fi SSID for a wireless interface."""
+    if not is_wireless_interface(interface):
+        return None
+    try:
+        res = subprocess.run(
+            ["iw", "dev", interface, "link"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=2,
+        )
+        for line in res.stdout.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("SSID:"):
+                return stripped.split("SSID:", 1)[1].strip() or None
+    except Exception:
+        pass
+    try:
+        res = subprocess.run(
+            ["iwgetid", interface, "-r"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=2,
+        )
+        ssid = res.stdout.strip()
+        if ssid:
+            return ssid
+    except Exception:
+        pass
+    return None
+
+
+def get_local_ip(interface: str | None = None):
+    if interface and interface != "all":
+        try:
+            res = subprocess.run(
+                ["ip", "-4", "-o", "addr", "show", "dev", interface, "scope", "global"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=2,
+            )
+            for line in res.stdout.splitlines():
+                parts = line.split()
+                if len(parts) >= 4 and "/" in parts[3]:
+                    return parts[3].split("/")[0]
+        except Exception:
+            pass
+
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
     try:
@@ -123,14 +186,8 @@ def get_local_mac(interface: str | None = None) -> str | None:
     return None
 
 
-def get_arp_scan_devices(network: str | None = None, interface: str | None = None) -> list[dict]:
-    """
-    Rapidly discover LAN devices using arp-scan.
-    arp-scan directly issues Layer 2 ARP requests on the local wire, discovering
-    all connected machines in 1-2 seconds even when firewalls block ICMP ping.
-    """
+def _run_arp_scan_on_interface(network: str | None, target_iface: str | None) -> list[dict]:
     cmd = ["arp-scan"]
-    target_iface = interface or get_default_interface()
     if target_iface:
         cmd.extend(["--interface", target_iface])
 
@@ -155,6 +212,8 @@ def get_arp_scan_devices(network: str | None = None, interface: str | None = Non
                     discovered.append({
                         "ip_address": ip_cand,
                         "mac_address": mac_cand.upper(),
+                        "interface": target_iface,
+                        "medium": "wireless" if is_wireless_interface(target_iface) else "wired",
                         "hostname": None,
                         "vendor": vendor_cand if vendor_cand and "unknown" not in vendor_cand.lower() else None,
                         "device_type": classify_device(
@@ -164,15 +223,55 @@ def get_arp_scan_devices(network: str | None = None, interface: str | None = Non
                         ),
                     })
     except Exception as exc:
-        print(f"[DISCOVERY] arp-scan discovery note: {exc}")
+        print(f"[DISCOVERY] arp-scan discovery note on {target_iface}: {exc}")
 
     return discovered
 
 
+def get_arp_scan_devices(network: str | None = None, interface: str | None = None) -> list[dict]:
+    """
+    Rapidly discover LAN and WLAN (Wi-Fi) devices using arp-scan.
+    arp-scan directly issues Layer 2 ARP requests on the local wire or wireless interface,
+    discovering all connected machines in 1-2 seconds even when firewalls block ICMP ping.
+    When interface is None or 'all', scans across all active physical interfaces (e.g. eth0 + wlan0).
+    """
+    if interface and interface != "all":
+        return _run_arp_scan_on_interface(network, interface)
+
+    target_ifaces: list[str] = []
+    try:
+        subnets_info = detect_local_subnets()
+        for item in subnets_info.get("interfaces", []):
+            if not item.get("is_virtual"):
+                iface_name = item.get("interface")
+                if iface_name and iface_name not in target_ifaces:
+                    if not network or item.get("network") == network:
+                        target_ifaces.append(iface_name)
+    except Exception:
+        pass
+
+    if not target_ifaces:
+        default_iface = get_default_interface()
+        if default_iface:
+            target_ifaces.append(default_iface)
+
+    by_mac: dict[str, dict] = {}
+    for iface in target_ifaces:
+        for dev in _run_arp_scan_on_interface(network, iface):
+            mac = dev["mac_address"]
+            if mac not in by_mac:
+                by_mac[mac] = dev
+            else:
+                if not by_mac[mac].get("vendor") and dev.get("vendor"):
+                    by_mac[mac]["vendor"] = dev["vendor"]
+
+    return list(by_mac.values())
+
+
 def detect_local_subnets() -> dict:
     """
-    Detect local IPv4 subnets across network interfaces.
-    Returns default network and detected interfaces.
+    Detect local IPv4 subnets across wired (LAN) and wireless (WLAN/Wi-Fi) network interfaces.
+    Returns default network and detected interfaces with medium metadata.
     """
     detected = []
     try:
@@ -184,6 +283,15 @@ def detect_local_subnets() -> dict:
                 iface = parts[1]
                 cidr = parts[3]
                 is_virtual = iface.startswith(("docker", "br-", "veth", "virbr"))
+                wireless = is_wireless_interface(iface)
+                medium = "virtual" if is_virtual else ("wireless" if wireless else "wired")
+                ssid = get_wireless_ssid(iface) if wireless else None
+                if wireless:
+                    label = f"Wi-Fi WLAN ({iface}{f' • {ssid}' if ssid else ''})"
+                elif is_virtual:
+                    label = f"Virtual ({iface})"
+                else:
+                    label = f"Wired LAN ({iface})"
                 try:
                     net = ipaddress.ip_interface(cidr).network
                     detected.append({
@@ -192,6 +300,10 @@ def detect_local_subnets() -> dict:
                         "cidr": cidr,
                         "network": str(net),
                         "is_virtual": is_virtual,
+                        "is_wireless": wireless,
+                        "medium": medium,
+                        "ssid": ssid,
+                        "label": label,
                     })
                 except Exception:
                     continue
@@ -275,10 +387,10 @@ def get_neighbor_devices():
     return devices
 
 
-def discover_devices(network: str):
+def discover_devices(network: str, interface: str | None = None):
     """
-    Discover LAN devices using Nmap ARP discovery and the
-    Linux neighbour table.
+    Discover LAN and WLAN (Wi-Fi) devices using Nmap ARP discovery,
+    arp-scan across wired/wireless interfaces, and the Linux neighbour table.
 
     Nmap provides vendor/hostname information where available.
     The Linux neighbour table acts as a fallback for devices
@@ -305,9 +417,18 @@ def discover_devices(network: str):
         )
 
     network = str(parsed_network)
+    specific_iface = (
+        interface.strip()
+        if interface and interface.strip() and interface.strip().lower() != "all"
+        else None
+    )
 
-    local_ip = get_local_ip()
-    local_mac = get_local_mac()
+    if specific_iface:
+        local_ip = get_local_ip(specific_iface)
+        local_mac = get_local_mac(specific_iface)
+    else:
+        local_ip = get_local_ip()
+        local_mac = get_local_mac()
 
     command = [
         "nmap",
@@ -315,10 +436,14 @@ def discover_devices(network: str):
         "-PR",
         "--max-retries",
         "3",
+    ]
+    if specific_iface and os.path.exists(f"/sys/class/net/{specific_iface}"):
+        command.extend(["--privileged", "-e", specific_iface])
+    command.extend([
         network,
         "-oX",
         "-",
-    ]
+    ])
 
     result = subprocess.run(
         command,
@@ -377,6 +502,12 @@ def discover_devices(network: str):
         discovered_by_mac[mac_address] = {
             "ip_address": ip_address,
             "mac_address": mac_address,
+            "interface": specific_iface,
+            "medium": (
+                "wireless"
+                if specific_iface and is_wireless_interface(specific_iface)
+                else ("wired" if specific_iface else None)
+            ),
             "hostname": hostname,
             "vendor": vendor,
             "device_type": classify_device(
@@ -391,7 +522,7 @@ def discover_devices(network: str):
     # ---------------------------------------------------------
 
     try:
-        arp_devices = get_arp_scan_devices(network=network)
+        arp_devices = get_arp_scan_devices(network=network, interface=specific_iface)
         for arp_dev in arp_devices:
             mac = arp_dev["mac_address"]
             if mac in discovered_by_mac:
@@ -400,6 +531,9 @@ def discover_devices(network: str):
                     existing["ip_address"] = arp_dev["ip_address"]
                 if not existing.get("vendor") and arp_dev.get("vendor"):
                     existing["vendor"] = arp_dev["vendor"]
+                if not existing.get("interface") and arp_dev.get("interface"):
+                    existing["interface"] = arp_dev["interface"]
+                    existing["medium"] = arp_dev.get("medium")
             else:
                 discovered_by_mac[mac] = arp_dev
     except Exception as exc:
@@ -412,6 +546,9 @@ def discover_devices(network: str):
     neighbor_devices = get_neighbor_devices()
 
     for neighbor in neighbor_devices:
+        if specific_iface and neighbor.get("interface") != specific_iface:
+            continue
+
         mac_address = neighbor["mac_address"]
 
         if mac_address in discovered_by_mac:
@@ -419,6 +556,9 @@ def discover_devices(network: str):
 
             if not existing.get("ip_address"):
                 existing["ip_address"] = neighbor["ip_address"]
+            if not existing.get("interface") and neighbor.get("interface"):
+                existing["interface"] = neighbor["interface"]
+                existing["medium"] = "wireless" if is_wireless_interface(neighbor["interface"]) else "wired"
 
             continue
 
@@ -426,11 +566,18 @@ def discover_devices(network: str):
         # rather than blindly accepting a stale ARP cache entry
         state = neighbor.get("state")
         ip_addr = neighbor.get("ip_address")
-        iface = neighbor.get("interface")
+        iface = specific_iface or neighbor.get("interface")
 
         if state not in ("REACHABLE", "PERMANENT"):
             is_active = False
             if ip_addr:
+                try:
+                    from .l2_quarantine import _currently_blocked_ips
+                    if ip_addr in _currently_blocked_ips and state in ("STALE", "DELAY", "PROBE"):
+                        is_active = True
+                except Exception:
+                    pass
+            if not is_active and ip_addr:
                 try:
                     probe_cmd = ["arping", "-c", "1", "-w", "1"]
                     if iface:
@@ -460,7 +607,23 @@ def discover_devices(network: str):
         else:
             neighbor["device_type"] = "unknown"
 
+        neighbor["interface"] = iface
+        neighbor["medium"] = "wireless" if is_wireless_interface(iface) else "wired"
         discovered_by_mac[mac_address] = neighbor
+
+    # Ensure the local interface IP/MAC on specific_iface is present when scanning a live interface
+    if specific_iface and local_ip and local_mac and os.path.exists(f"/sys/class/net/{specific_iface}"):
+        norm_local_mac = local_mac.upper()
+        if norm_local_mac not in discovered_by_mac:
+            discovered_by_mac[norm_local_mac] = {
+                "ip_address": local_ip,
+                "mac_address": norm_local_mac,
+                "interface": specific_iface,
+                "medium": "wireless" if is_wireless_interface(specific_iface) else "wired",
+                "hostname": socket.gethostname(),
+                "vendor": "Local Machine",
+                "device_type": "computer",
+            }
 
     return list(discovered_by_mac.values())
 
@@ -468,6 +631,7 @@ def discover_devices(network: str):
 def save_discovered_devices(
     devices: list[dict],
     db: Session,
+    scanned_interface: str | None = None,
 ):
     """
     Save discovered devices and update their state.
@@ -494,10 +658,17 @@ def save_discovered_devices(
     ).all()
 
     # ---------------------------------------------------------
-    # Mark missing devices offline
+    # Mark missing devices offline (scoped to scanned_interface if specified)
     # ---------------------------------------------------------
 
     for existing_device in existing_devices:
+        if (
+            scanned_interface
+            and existing_device.network_interface
+            and existing_device.network_interface != scanned_interface
+        ):
+            continue
+
         dev_mac = (
             existing_device.mac_address.replace(":", "").replace("-", "").upper()
             if existing_device.mac_address
@@ -633,6 +804,10 @@ def save_discovered_devices(
 
             if vendor:
                 existing_device.vendor = vendor
+
+            disc_iface = discovered.get("interface") or scanned_interface
+            if disc_iface:
+                existing_device.network_interface = disc_iface
 
             existing_type = existing_device.device_type
 
@@ -792,6 +967,7 @@ def save_discovered_devices(
                 hostname=hostname,
                 vendor=vendor,
                 device_type=device_type,
+                network_interface=discovered.get("interface") or scanned_interface,
                 classification_status="normal",
                 status="online",
                 approval_status="pending",

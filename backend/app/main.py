@@ -10,7 +10,7 @@ from .models.device import Device
 from .models.event import Event
 from .models.access_schedule import AccessSchedule
 from .models.endpoint_update import EndpointUpdate
-from .models.patch_job import PatchJob
+from .models.patch_job import PatchJob, UpdatePolicy
 from .models.user import PasswordResetOTP, User, UserSession
 from .models.firewall_config import FirewallConfig
 
@@ -32,7 +32,10 @@ from .services.auth_service import seed_default_users
 from .services.websocket_manager import manager
 from .services.schedule_enforcement import schedule_enforcement_loop
 from .services.endpoint_health_monitor import endpoint_health_monitor_loop
-from .services.patch_remediation_service import dispatch_due_scheduled_jobs
+from .services.patch_remediation_service import (
+    dispatch_due_scheduled_jobs,
+    evaluate_auto_off_hours_policy,
+)
 
 
 # ---------------------------------------------------------
@@ -171,10 +174,11 @@ async def event_broadcaster():
 
 
 async def scheduled_patch_loop():
-    """Evaluate scheduled patch remediation jobs every 10 seconds."""
+    """Evaluate scheduled patch remediation jobs and auto off-hours policy every 10 seconds."""
     while True:
         db = SessionLocal()
         try:
+            evaluate_auto_off_hours_policy(db)
             dispatch_due_scheduled_jobs(db)
         except Exception as err:
             db.rollback()

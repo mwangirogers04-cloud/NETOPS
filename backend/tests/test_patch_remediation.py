@@ -7,9 +7,10 @@ from sqlalchemy.pool import StaticPool
 
 from backend.app.database import Base, get_db
 from backend.app.main import app
+from backend.app.models.access_schedule import AccessSchedule
 from backend.app.models.device import Device
 from backend.app.models.endpoint_update import EndpointUpdate
-from backend.app.models.patch_job import PatchJob
+from backend.app.models.patch_job import PatchJob, UpdatePolicy
 from backend.app.services.patch_remediation_service import (
     create_patch_job,
     dispatch_due_scheduled_jobs,
@@ -501,6 +502,127 @@ def test_get_endpoint_updates_includes_all_online_devices(client, db_session):
     assert sophos_entry is not None
     assert sophos_entry["is_online"] is True
     assert sophos_entry["device_status"] == "online"
+    assert "working_hours" in sophos_entry
+
+
+def test_off_hours_scheduling_and_working_hours_conflict_guard(client, db_session):
+    from datetime import time as dt_time
+
+    # 1. Create a device with custom working hours 00:00 - 23:00 daily so current time (if before 23:00) or a midday time is inside working hours
+    dev = Device(
+        mac_address="AA:BB:CC:11:22:33",
+        ip_address="192.168.0.155",
+        hostname="WORK-HOURS-PC",
+        device_type="computer",
+        status="online",
+        approval_status="approved",
+    )
+    db_session.add(dev)
+    db_session.flush()
+
+    sched = AccessSchedule(
+        device_id=dev.id,
+        enabled=True,
+        start_time=dt_time(8, 0, 0),
+        end_time=dt_time(17, 0, 0),
+        days="daily",
+    )
+    db_session.add(sched)
+    db_session.commit()
+
+    # 2. Check working hours via API for 11:00 AM tomorrow (inside working hours)
+    tomorrow_11am = (datetime.now() + timedelta(days=1)).replace(hour=11, minute=0, second=0, microsecond=0)
+    check_res = client.post(
+        "/endpoint-updates/working-hours-check",
+        json={
+            "hostname": "WORK-HOURS-PC",
+            "device_id": dev.id,
+            "scheduled_at": tomorrow_11am.isoformat(),
+        },
+    )
+    assert check_res.status_code == 200
+    check_data = check_res.json()
+    assert check_data["working_hours"]["source"] == "device_access_schedule"
+    assert check_data["schedule_check"]["is_in_working_hours"] is True
+    assert "17:05" in check_data["schedule_check"]["suggested_off_hours_display"]
+
+    # 3. Attempting to schedule at 11:00 AM with respect_working_hours=True should be rejected (400)
+    reject_res = client.post(
+        "/endpoint-updates/jobs",
+        json={
+            "hostname": "WORK-HOURS-PC",
+            "device_id": dev.id,
+            "ip_address": "192.168.0.155",
+            "scheduled_at": tomorrow_11am.isoformat(),
+            "respect_working_hours": True,
+            "force_working_hours": False,
+        },
+    )
+    assert reject_res.status_code == 400
+    assert "working hours" in reject_res.json()["detail"].lower()
+
+    # 4. Scheduling with schedule_mode="off_hours" automatically schedules outside working hours (after 17:00)
+    off_res = client.post(
+        "/endpoint-updates/jobs",
+        json={
+            "hostname": "WORK-HOURS-PC",
+            "device_id": dev.id,
+            "ip_address": "192.168.0.155",
+            "schedule_mode": "off_hours",
+        },
+    )
+    assert off_res.status_code == 200
+    off_job = off_res.json()
+    assert off_job["status"] == "SCHEDULED"
+    assert off_job["scheduled_at"] is not None
+    assert "[OFF-WORKING HOURS WINDOW]" in off_job["log_output"]
+
+
+def test_update_policy_and_bulk_schedule_off_hours(client, db_session):
+    # 1. Get default policy
+    pol_res = client.get("/endpoint-updates/policy")
+    assert pol_res.status_code == 200
+    pol = pol_res.json()
+    assert pol["default_working_start"] == "08:00"
+    assert pol["default_working_end"] == "17:00"
+
+    # 2. Update policy
+    put_res = client.put(
+        "/endpoint-updates/policy",
+        json={
+            "default_working_start": "09:00",
+            "default_working_end": "18:00",
+            "default_working_days": "weekdays",
+            "auto_off_hours_enabled": False,
+            "block_working_hours_schedule": True,
+            "post_work_delay_minutes": 10,
+        },
+    )
+    assert put_res.status_code == 200
+    assert put_res.json()["default_working_start"] == "09:00"
+    assert put_res.json()["post_work_delay_minutes"] == 10
+
+    # 3. Report an endpoint needing updates
+    client.post(
+        "/endpoint-updates/",
+        json={
+            "hostname": "BULK-OFF-HOURS-PC",
+            "mac_address": "CC:DD:EE:FF:00:11",
+            "ip_address": "192.168.0.190",
+            "operating_system": "Linux",
+            "os_version": "Ubuntu 24.04",
+            "architecture": "x86_64",
+            "update_status": "updates_available",
+            "pending_updates": 12,
+        },
+    )
+
+    # 4. Bulk schedule all pending updates for off-hours
+    bulk_res = client.post("/endpoint-updates/schedule-off-hours-all")
+    assert bulk_res.status_code == 200
+    jobs = bulk_res.json()
+    assert any(j["hostname"] == "BULK-OFF-HOURS-PC" and j["status"] == "SCHEDULED" for j in jobs)
+
 
 
 

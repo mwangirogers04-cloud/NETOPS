@@ -1,9 +1,62 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..database import Base
+
+
+class UpdatePolicy(Base):
+    __tablename__ = "update_policies"
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        index=True,
+    )
+
+    default_working_start: Mapped[str] = mapped_column(
+        String(10),
+        default="08:00",
+        nullable=False,
+    )
+
+    default_working_end: Mapped[str] = mapped_column(
+        String(10),
+        default="17:00",
+        nullable=False,
+    )
+
+    default_working_days: Mapped[str] = mapped_column(
+        String(100),
+        default="weekdays",
+        nullable=False,
+    )
+
+    auto_off_hours_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+    )
+
+    block_working_hours_schedule: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+    )
+
+    post_work_delay_minutes: Mapped[int] = mapped_column(
+        Integer,
+        default=5,
+        nullable=False,
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
 
 
 class PatchJob(Base):

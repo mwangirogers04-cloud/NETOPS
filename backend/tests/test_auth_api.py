@@ -337,3 +337,77 @@ def test_super_admin_can_update_roles():
     assert patch_res.status_code == 200
     assert patch_res.json()["user"]["role"] == "admin"
 
+
+def test_duplicate_email_and_phone_registration_prompts():
+    # First register a new user via /auth/register
+    reg_res = client.post(
+        "/auth/register",
+        json={
+            "username": "first_user",
+            "email": "unique_user@example.com",
+            "phone_number": "+254712345678",
+            "password": "Password@123",
+        },
+    )
+    assert reg_res.status_code == 201
+    assert reg_res.json()["status"] == "registered"
+
+    # Attempt to register another account with the SAME email (case-insensitive)
+    dup_email_res = client.post(
+        "/auth/register",
+        json={
+            "username": "second_user",
+            "email": "UNIQUE_USER@example.com",
+            "phone_number": "+254799999999",
+            "password": "Password@123",
+        },
+    )
+    assert dup_email_res.status_code == 400
+    assert dup_email_res.json()["detail"] == "The email address already exists, please try another email address."
+
+    # Attempt to register another account with the SAME phone number (even in local 07... format)
+    dup_phone_res = client.post(
+        "/auth/register",
+        json={
+            "username": "third_user",
+            "email": "third_user@example.com",
+            "phone_number": "0712 345 678",
+            "password": "Password@123",
+        },
+    )
+    assert dup_phone_res.status_code == 400
+    assert dup_phone_res.json()["detail"] == "The phone number already exists, please try another number."
+
+    # Verify /auth/check-availability endpoint returns exact conflict prompts
+    avail_res = client.post(
+        "/auth/check-availability",
+        json={
+            "email": "unique_user@example.com",
+            "phone_number": "0712345678",
+        },
+    )
+    assert avail_res.status_code == 200
+    avail_data = avail_res.json()
+    assert avail_data["available"] is False
+    assert avail_data["conflicts"]["email"] == "The email address already exists, please try another email address."
+    assert avail_data["conflicts"]["phone_number"] == "The phone number already exists, please try another number."
+
+    # Verify admin /users/ create endpoint also enforces phone & email uniqueness
+    login_adm = client.post("/auth/login", json={"username": "admin", "password": "Admin@1234"})
+    headers = {"Authorization": f"Bearer {login_adm.json()['access_token']}"}
+
+    adm_dup_phone = client.post(
+        "/users/",
+        headers=headers,
+        json={
+            "username": "admin_created_dup",
+            "email": "fresh_email@example.com",
+            "phone_number": "+254712345678",
+            "password": "Password@123",
+            "role": "user",
+        },
+    )
+    assert adm_dup_phone.status_code == 400
+    assert adm_dup_phone.json()["detail"] == "The phone number already exists, please try another number."
+
+

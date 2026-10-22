@@ -27,6 +27,7 @@ def get_local_subnets():
 
 class DiscoveryRequest(BaseModel):
     network: str
+    interface: str | None = None
 
     @field_validator("network")
     @classmethod
@@ -42,25 +43,41 @@ def run_discovery_scan(
     db: Session = Depends(get_db),
 ):
     """
-    Discover LAN devices and save them to the NETOPS database.
+    Discover LAN / WLAN devices and save them to the NETOPS database.
 
     Example network:
         192.168.0.0/24
     """
 
     try:
-        discovered_devices = discover_devices(
-            request.network
+        clean_iface = (
+            request.interface.strip()
+            if request.interface and request.interface.strip() and request.interface.strip().lower() != "all"
+            else None
         )
-
-        saved_devices = save_discovered_devices(
-            discovered_devices,
-            db,
-        )
+        if clean_iface:
+            discovered_devices = discover_devices(
+                request.network,
+                interface=clean_iface,
+            )
+            saved_devices = save_discovered_devices(
+                discovered_devices,
+                db,
+                scanned_interface=clean_iface,
+            )
+        else:
+            discovered_devices = discover_devices(
+                request.network
+            )
+            saved_devices = save_discovered_devices(
+                discovered_devices,
+                db,
+            )
 
         return {
             "status": "completed",
             "network": request.network,
+            "interface": clean_iface or "all",
             "devices_discovered": len(
                 discovered_devices
             ),
@@ -75,6 +92,11 @@ def run_discovery_scan(
                     "hostname": device.hostname,
                     "vendor": device.vendor,
                     "device_type": device.device_type,
+                    "network_interface": (
+                        getattr(device, "network_interface", None)
+                        if isinstance(getattr(device, "network_interface", None), str)
+                        else clean_iface
+                    ),
                     "classification_status": (
                         device.classification_status
                     ),

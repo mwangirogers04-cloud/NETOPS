@@ -57,6 +57,11 @@ class Device(Base):
         nullable=True,
     )
 
+    network_interface: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+    )
+
     vlan_id: Mapped[int | None] = mapped_column(
         nullable=True,
     )

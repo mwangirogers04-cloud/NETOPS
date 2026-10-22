@@ -1,6 +1,7 @@
 from datetime import datetime
+from typing import Any
 
-from pydantic import BaseModel, ConfigDict, computed_field
+from pydantic import BaseModel, ConfigDict, computed_field, field_validator
 
 
 class DeviceCreate(BaseModel):
@@ -11,8 +12,14 @@ class DeviceCreate(BaseModel):
     device_type: str | None = None
     switch_name: str | None = None
     switch_port: str | None = None
+    network_interface: str | None = None
     vlan_id: int | None = None
     notes: str | None = None
+
+    @field_validator("network_interface", mode="before")
+    @classmethod
+    def _clean_network_interface(cls, v: Any) -> str | None:
+        return v if isinstance(v, str) else None
 
 
 class DeviceResponse(DeviceCreate):
@@ -42,6 +49,9 @@ class DeviceResponse(DeviceCreate):
     @computed_field
     @property
     def access_reason(self) -> str:
+        if self.enforcement_status == "isolated":
+            return "Device is explicitly isolated from the network (VLAN 90)"
+
         if self.approval_status == "pending":
             return "Pending administrator approval"
 

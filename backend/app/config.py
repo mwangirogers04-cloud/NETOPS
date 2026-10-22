@@ -34,12 +34,19 @@ class Settings(BaseSettings):
     jwt_access_token_expire_minutes: int = 1440
     frontend_base_url: str = "http://127.0.0.1:5173"
 
-    # Notification / Email
+    # Notification / Email (SMTP)
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_user: str = ""
     smtp_password: str = ""
     smtp_from_email: str = "noreply@netops.local"
+
+    # Notification / SMS Gateway (Africa's Talking, Twilio, or Custom Webhook)
+    sms_provider: str = ""  # "africastalking", "twilio", "webhook"
+    sms_api_key: str = ""
+    sms_username: str = ""  # Africa's Talking username or Twilio Account SID
+    sms_sender_id: str = ""  # Sender ID or Twilio From Phone Number
+    sms_webhook_url: str = ""
 
     model_config = SettingsConfigDict(
         env_file=".env",

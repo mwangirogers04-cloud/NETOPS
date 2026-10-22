@@ -7,10 +7,19 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models.user import User, UserSession
 from ..services.auth_service import (
+    check_user_conflicts,
     create_access_token,
     create_and_send_password_reset_otp,
+    generate_activation_link,
+    generate_activation_token,
     get_current_user,
+    get_notification_settings,
     hash_password,
+    require_admin,
+    save_notification_settings,
+    send_activation_email,
+    send_email_message,
+    send_sms_message,
     verify_and_consume_otp,
     verify_password,
 )
@@ -47,6 +56,43 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class CheckAvailabilityRequest(BaseModel):
+    username: str | None = None
+    email: str | None = None
+    phone_number: str | None = None
+    exclude_user_id: int | None = None
+
+
+class RegisterRequest(BaseModel):
+    username: str
+    email: EmailStr
+    phone_number: str
+    password: str
+
+    @field_validator("username")
+    @classmethod
+    def validate_username(cls, v: str) -> str:
+        clean = v.strip()
+        if len(clean) < 3:
+            raise ValueError("Username must be at least 3 characters")
+        return clean
+
+    @field_validator("phone_number")
+    @classmethod
+    def validate_phone(cls, v: str) -> str:
+        clean = v.strip()
+        if len(clean) < 7:
+            raise ValueError("Please provide a valid phone number")
+        return clean
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        if len(v) < 6:
+            raise ValueError("Password must be at least 6 characters")
+        return v
+
+
 class ActivateRequest(BaseModel):
     activation_token: str
 
@@ -79,6 +125,87 @@ class ResetPasswordRequest(BaseModel):
         if len(v) < 6:
             raise ValueError("Password must be at least 6 characters long")
         return v
+
+
+# -------------------------------------------------------------
+# CHECK EMAIL / PHONE / USERNAME AVAILABILITY & SELF-REGISTER
+# -------------------------------------------------------------
+
+@router.post("/check-availability")
+def check_account_availability(
+    req: CheckAvailabilityRequest,
+    db: Session = Depends(get_db),
+):
+    """Recheck whether an email address, phone number, or username already exists."""
+    return check_user_conflicts(
+        db=db,
+        username=req.username,
+        email=req.email,
+        phone_number=req.phone_number,
+        exclude_user_id=req.exclude_user_id,
+    )
+
+
+@router.post("/register", status_code=status.HTTP_201_CREATED)
+def register_account(
+    req: RegisterRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Register a new user account from the Login page after rechecking that
+    the email address, phone number, and username do not already exist.
+    """
+    clean_username = req.username.strip()
+    clean_email = str(req.email).strip().lower()
+    clean_phone = req.phone_number.strip()
+
+    conflicts = check_user_conflicts(
+        db=db,
+        username=clean_username,
+        email=clean_email,
+        phone_number=clean_phone,
+    )
+    if not conflicts["available"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=conflicts["detail"],
+        )
+
+    token = generate_activation_token()
+    login_link = generate_activation_link(token)
+
+    new_user = User(
+        username=clean_username,
+        email=clean_email,
+        phone_number=clean_phone,
+        hashed_password=hash_password(req.password),
+        role="user",
+        is_active=True,
+        is_verified=True,
+        activation_token=None,
+    )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+
+    send_activation_email(
+        email=new_user.email,
+        username=new_user.username,
+        login_link=login_link,
+    )
+
+    return {
+        "status": "registered",
+        "message": f"Account '{new_user.username}' registered successfully! You can now sign in.",
+        "user": {
+            "id": new_user.id,
+            "username": new_user.username,
+            "email": new_user.email,
+            "phone_number": new_user.phone_number,
+            "role": new_user.role,
+            "is_verified": new_user.is_verified,
+        },
+    }
 
 
 # -------------------------------------------------------------
@@ -343,15 +470,122 @@ def send_reset_otp(
         if req.channel == "email"
         else mask_string(user.phone_number, is_email=False)
     )
+    delivered = bool(getattr(otp_record, "delivered", False))
+    delivery_detail = getattr(otp_record, "delivery_detail", "")
+
+    if delivered:
+        msg = f"A 6-digit OTP has been sent via {req.channel.upper()} to {target_display}. It expires in 5 minutes."
+    else:
+        msg = (
+            f"6-digit OTP generated for {target_display} (valid for 5 minutes). "
+            f"Use the OTP code displayed below, or configure your {req.channel.upper()} gateway in Settings → Email & SMS OTP Gateways for external delivery."
+        )
 
     return {
         "status": "otp_sent",
         "channel": req.channel,
         "target": target_display,
+        "delivered": delivered,
+        "delivery_detail": delivery_detail,
         "expires_in_minutes": 5,
-        "message": f"A 6-digit OTP has been sent via {req.channel.upper()} to {target_display}. It expires in exactly 5 minutes.",
-        # For seamless local development/testing without real SMS gateway:
+        "message": msg,
         "dev_otp_preview": otp_code,
+    }
+
+
+# -------------------------------------------------------------
+# NOTIFICATION GATEWAY SETTINGS (ADMIN)
+# -------------------------------------------------------------
+
+class NotificationSettingsUpdate(BaseModel):
+    smtp_host: str | None = None
+    smtp_port: int | None = None
+    smtp_user: str | None = None
+    smtp_password: str | None = None
+    smtp_from_email: str | None = None
+    sms_provider: str | None = None
+    sms_api_key: str | None = None
+    sms_username: str | None = None
+    sms_sender_id: str | None = None
+    sms_webhook_url: str | None = None
+
+
+class NotificationTestRequest(BaseModel):
+    channel: str  # "email" or "sms"
+    recipient: str
+
+
+@router.get("/notification-settings")
+def read_notification_settings(current_user: User = Depends(require_admin)):
+    """Get current Email (SMTP) and SMS Gateway settings (masking secrets)."""
+    cfg = get_notification_settings()
+    return {
+        "smtp_host": cfg.get("smtp_host", ""),
+        "smtp_port": cfg.get("smtp_port", 587),
+        "smtp_user": cfg.get("smtp_user", ""),
+        "smtp_password": "••••••••" if cfg.get("smtp_password") else "",
+        "smtp_from_email": cfg.get("smtp_from_email", "noreply@netops.local"),
+        "smtp_configured": bool(cfg.get("smtp_host")),
+        "sms_provider": cfg.get("sms_provider", "africastalking"),
+        "sms_api_key": "••••••••" if cfg.get("sms_api_key") else "",
+        "sms_username": cfg.get("sms_username", ""),
+        "sms_sender_id": cfg.get("sms_sender_id", ""),
+        "sms_webhook_url": cfg.get("sms_webhook_url", ""),
+        "sms_configured": bool(cfg.get("sms_api_key") or cfg.get("sms_webhook_url")),
+    }
+
+
+@router.post("/notification-settings")
+def update_notification_settings(
+    req: NotificationSettingsUpdate,
+    current_user: User = Depends(require_admin),
+):
+    """Save Email (SMTP) and SMS Gateway settings."""
+    saved = save_notification_settings(req.model_dump())
+    return {
+        "status": "saved",
+        "message": "Email (SMTP) & SMS OTP Gateway settings saved successfully.",
+        "smtp_configured": bool(saved.get("smtp_host")),
+        "sms_configured": bool(saved.get("sms_api_key") or saved.get("sms_webhook_url")),
+    }
+
+
+@router.post("/notification-settings/test")
+def test_notification_gateway(
+    req: NotificationTestRequest,
+    current_user: User = Depends(require_admin),
+):
+    """Send a live test Email or SMS using the configured gateway."""
+    ch = req.channel.strip().lower()
+    recipient = req.recipient.strip()
+    if not recipient:
+        raise HTTPException(status_code=400, detail="Please enter a recipient email or phone number.")
+
+    if ch == "email":
+        ok, detail = send_email_message(
+            to_email=recipient,
+            subject="NETOPS SMTP Gateway Test",
+            html_body=(
+                "<div style='font-family:sans-serif;padding:20px;background:#0f172a;color:#f8fafc;border-radius:8px;'>"
+                "<h3 style='color:#38bdf8;'>✅ NETOPS Email Gateway Connected</h3>"
+                "<p>Your SMTP server is properly configured to deliver Password Reset OTPs and Account Activation links.</p>"
+                "</div>"
+            ),
+            plain_body="NETOPS Email Gateway Connected: Your SMTP server is properly configured.",
+        )
+    elif ch == "sms":
+        ok, detail = send_sms_message(
+            phone_number=recipient,
+            message_text="NETOPS SMS Gateway Test: Your SMS provider is properly configured to deliver 5-minute OTP codes.",
+        )
+    else:
+        raise HTTPException(status_code=400, detail="Channel must be 'email' or 'sms'.")
+
+    return {
+        "delivered": ok,
+        "channel": ch,
+        "recipient": recipient,
+        "detail": detail,
     }
 
 

@@ -12,6 +12,9 @@ from ..schemas.patch_job import (
     CreatePatchJobRequest,
     UpdateJobStatusRequest,
     PatchJobResponse,
+    UpdatePolicyUpdateRequest,
+    UpdatePolicyResponse,
+    WorkingHoursCheckRequest,
 )
 from ..services.event_service import create_event
 from ..services.network_patch_scanner import scan_lan_for_updates
@@ -22,6 +25,11 @@ from ..services.patch_remediation_service import (
     list_patch_jobs,
     is_local_machine,
     execute_patch_job_now,
+    get_or_create_update_policy,
+    get_device_working_hours_info,
+    check_datetime_against_working_hours,
+    schedule_all_pending_off_hours,
+    evaluate_auto_off_hours_policy,
 )
 
 router = APIRouter(
@@ -112,6 +120,34 @@ def report_endpoint_update(
 
 
 
+    # Preserve up_to_date status if a patch remediation job has already completed for this endpoint
+    effective_status = report.update_status
+    effective_pending = report.pending_updates
+    effective_security = report.security_updates
+
+    if effective_status == "updates_available" or (effective_pending and effective_pending > 0):
+        completed_jobs = db.scalars(
+            select(PatchJob)
+            .where(PatchJob.status == "COMPLETED")
+            .order_by(PatchJob.completed_at.desc())
+        ).all()
+        for cj in completed_jobs:
+            cj_mac = (
+                cj.mac_address.replace(":", "").replace("-", "").upper()
+                if cj.mac_address
+                else None
+            )
+            if (
+                (normalized_mac and cj_mac and cj_mac == normalized_mac)
+                or (report.ip_address and cj.ip_address and cj.ip_address == report.ip_address)
+                or (report.machine_id and cj.machine_id and cj.machine_id == report.machine_id)
+                or (report.hostname and cj.hostname and cj.hostname.lower() == report.hostname.lower())
+            ):
+                effective_status = "up_to_date"
+                effective_pending = 0
+                effective_security = 0
+                break
+
     endpoint_update = EndpointUpdate(
         hostname=report.hostname,
         mac_address=report.mac_address,
@@ -120,9 +156,9 @@ def report_endpoint_update(
         operating_system=report.operating_system,
         os_version=report.os_version,
         architecture=report.architecture,
-        update_status=report.update_status,
-        pending_updates=report.pending_updates,
-        security_updates=report.security_updates,
+        update_status=effective_status,
+        pending_updates=effective_pending,
+        security_updates=effective_security,
         last_checked=datetime.now(timezone.utc),
     )
 
@@ -269,6 +305,14 @@ def get_endpoint_updates(
         if is_online and update_status in ("stale", "unknown"):
             update_status = "updates_available" if (device and device.device_type == "computer") else "up_to_date"
 
+        wh_info = get_device_working_hours_info(
+            db=db,
+            device_id=device.id if device else None,
+            hostname=endpoint.hostname,
+            mac_address=endpoint.mac_address,
+            ip_address=endpoint.ip_address or (device.ip_address if device else None),
+        )
+
         enriched_results.append(
             {
                 "id": endpoint.id,
@@ -295,6 +339,7 @@ def get_endpoint_updates(
                     if device
                     else None
                 ),
+                "working_hours": wh_info,
             }
         )
 
@@ -317,6 +362,14 @@ def get_endpoint_updates(
         if (dev_mac and dev_mac in seen_macs_in_enriched) or (device.ip_address and device.ip_address in seen_ips_in_enriched):
             continue
 
+        wh_info = get_device_working_hours_info(
+            db=db,
+            device_id=device.id,
+            hostname=device.hostname,
+            mac_address=device.mac_address,
+            ip_address=device.ip_address,
+        )
+
         enriched_results.append({
             "id": f"dev-{device.id}",
             "hostname": device.hostname or f"HOST-{device.ip_address or device.id}",
@@ -338,9 +391,98 @@ def get_endpoint_updates(
             "approval_status": device.approval_status,
             "enforcement_status": device.enforcement_status,
             "internet_access_authorized": device.internet_access_authorized,
+            "working_hours": wh_info,
         })
 
     return enriched_results
+
+
+@router.get("/policy", response_model=UpdatePolicyResponse)
+def get_update_policy(
+    db: Session = Depends(get_db),
+):
+    """Get global off-working-hours update policy configuration."""
+    return get_or_create_update_policy(db)
+
+
+@router.put("/policy", response_model=UpdatePolicyResponse)
+def update_update_policy_endpoint(
+    payload: UpdatePolicyUpdateRequest,
+    db: Session = Depends(get_db),
+):
+    """Update global off-working-hours update policy and optionally evaluate pending off-hours jobs."""
+    policy = get_or_create_update_policy(db)
+    policy.default_working_start = payload.default_working_start.strip() or "08:00"
+    policy.default_working_end = payload.default_working_end.strip() or "17:00"
+    policy.default_working_days = payload.default_working_days.strip().lower() or "weekdays"
+    policy.auto_off_hours_enabled = payload.auto_off_hours_enabled
+    policy.block_working_hours_schedule = payload.block_working_hours_schedule
+    policy.post_work_delay_minutes = max(0, min(240, payload.post_work_delay_minutes))
+    policy.updated_at = datetime.now(timezone.utc)
+
+    db.commit()
+    db.refresh(policy)
+
+    if policy.auto_off_hours_enabled:
+        evaluate_auto_off_hours_policy(db)
+
+    return policy
+
+
+@router.post("/working-hours-check")
+def check_working_hours_for_endpoint(
+    payload: WorkingHoursCheckRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Check a machine's working hours (from its Access Schedule or global policy default)
+    and evaluate if a proposed scheduled_at time falls inside working hours.
+    """
+    wh_info = get_device_working_hours_info(
+        db=db,
+        device_id=payload.device_id,
+        hostname=payload.hostname,
+        mac_address=payload.mac_address,
+        ip_address=payload.ip_address,
+    )
+    conflict = None
+    if payload.scheduled_at:
+        conflict = check_datetime_against_working_hours(
+            db=db,
+            check_dt=payload.scheduled_at,
+            device_id=payload.device_id,
+            hostname=payload.hostname,
+            mac_address=payload.mac_address,
+            ip_address=payload.ip_address,
+        )
+    return {
+        "working_hours": wh_info,
+        "schedule_check": conflict,
+    }
+
+
+@router.post("/schedule-off-hours-all", response_model=list[PatchJobResponse])
+def schedule_all_pending_updates_off_hours(
+    db: Session = Depends(get_db),
+):
+    """
+    Schedule updates outside working hours for all endpoints that currently have pending updates.
+    Each machine is scheduled according to its own Access Schedule or the default working hours policy.
+    """
+    jobs = schedule_all_pending_off_hours(db=db, initiated_by="Admin Console (Bulk Off-Hours)")
+    results = []
+    for j in jobs:
+        resp = PatchJobResponse.model_validate(j)
+        resp.is_local = is_local_machine(j.hostname, j.ip_address, j.mac_address)
+        resp.working_hours_info = get_device_working_hours_info(
+            db=db,
+            device_id=j.device_id,
+            hostname=j.hostname,
+            mac_address=j.mac_address,
+            ip_address=j.ip_address,
+        )
+        results.append(resp)
+    return results
 
 
 class LanScanRequest(BaseModel):
@@ -373,9 +515,9 @@ def trigger_patch_job(
     db: Session = Depends(get_db),
 ):
     """
-    Queue an update deployment job for an endpoint.
-    If the target is the local host, starts native update execution immediately.
-    If remote, queues command for the machine's agent to execute on check-in.
+    Queue or schedule an update deployment job for an endpoint.
+    Supports schedule_mode='off_hours' to automatically schedule outside working hours,
+    and working-hours conflict protection when respect_working_hours=True.
     """
     try:
         job, is_local = create_patch_job(
@@ -388,10 +530,25 @@ def trigger_patch_job(
             action=payload.action,
             initiated_by=payload.initiated_by,
             scheduled_at=payload.scheduled_at,
+            schedule_mode=payload.schedule_mode,
+            respect_working_hours=payload.respect_working_hours,
+            force_working_hours=payload.force_working_hours,
         )
         resp = PatchJobResponse.model_validate(job)
         resp.is_local = is_local
+        resp.working_hours_info = get_device_working_hours_info(
+            db=db,
+            device_id=job.device_id,
+            hostname=job.hostname,
+            mac_address=job.mac_address,
+            ip_address=job.ip_address,
+        )
         return resp
+    except ValueError as val_err:
+        raise HTTPException(
+            status_code=400,
+            detail=str(val_err),
+        ) from val_err
     except Exception as exc:
         raise HTTPException(
             status_code=500,

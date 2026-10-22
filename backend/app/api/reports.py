@@ -17,6 +17,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
@@ -24,11 +25,37 @@ from ..database import get_db
 from ..models.device import Device
 from ..models.event import Event
 from ..models.user import User, UserSession
+from ..services.auth_service import decode_access_token, security_bearer
+
+
+def verify_report_admin_access(
+    token: str | None = None,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security_bearer),
+    db: Session = Depends(get_db),
+):
+    """Enforce that standard users cannot generate or download reports."""
+    raw_token = credentials.credentials if credentials else token
+    if not raw_token:
+        return None
+    payload = decode_access_token(raw_token)
+    username = payload.get("sub")
+    if not username:
+        raise HTTPException(status_code=401, detail="Invalid token payload.")
+    user = db.scalar(select(User).where(func.lower(User.username) == username.lower()))
+    if not user or not user.is_active:
+        raise HTTPException(status_code=403, detail="User account is inactive.")
+    if user.role not in ("admin", "super_admin"):
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied: Standard users are not permitted to generate or download reports.",
+        )
+    return user
 
 
 router = APIRouter(
     prefix="/reports",
     tags=["Reports"],
+    dependencies=[Depends(verify_report_admin_access)],
 )
 
 
