@@ -314,3 +314,130 @@ def test_combined_access_decision_scheduled_recognized_device(db_session):
         assert decision["decision"] == "allowed"
         assert decision["action"] == "allow"
         assert decision["schedule_allows_access"] is True
+
+
+def test_scheduled_device_remains_scheduled_with_access_until_cutoff_then_quarantines(db_session):
+    """
+    User scenario:
+    Right now (e.g. 20:51) an admin schedules a device for 20:55 to 21:00.
+    1. At 20:51: device is scheduled, NOT going to quarantine (internet access allowed).
+    2. At 20:56: within window, remains scheduled and allowed.
+    3. At 21:00: at cutoff boundary, remains scheduled and allowed.
+    4. At 21:01: window ends -> device moves to quarantine on VLAN 90.
+    5. Next day at 12:00: stays in quarantine.
+    6. Next day at 20:55: comes out of quarantine to VLAN 20 and has internet access.
+    7. Next day at 21:01: goes back to quarantine.
+    """
+    from backend.app.services.access_schedule import is_access_allowed
+
+    dev = Device(
+        mac_address="AA:BB:CC:DD:EE:77",
+        ip_address="192.168.0.77",
+        hostname="PC-SCHEDULE-TEST",
+        vendor="Dell",
+        device_type="computer",
+        approval_status="approved",
+        enforcement_status="allowed",
+        internet_access_authorized=True,
+        vlan_id=20,
+        status="online",
+    )
+    db_session.add(dev)
+    db_session.commit()
+    db_session.refresh(dev)
+
+    # Schedule created today at 20:51:00 for window 20:55:00 - 21:00:00
+    today = datetime(2026, 10, 23, 20, 51, 0)
+    schedule = AccessSchedule(
+        device_id=dev.id,
+        enabled=True,
+        days="daily",
+        start_time=time(20, 55, 0),
+        end_time=time(21, 0, 0),
+        created_at=today,
+        updated_at=today,
+    )
+    db_session.add(schedule)
+    db_session.commit()
+
+    # Step 1: Right now at 20:51 (when scheduled):
+    # Should be scheduled and allowed, NOT in quarantine!
+    allowed_at_2051 = is_access_allowed(
+        db_session,
+        dev.id,
+        current_time=time(20, 51, 0),
+        current_datetime=datetime(2026, 10, 23, 20, 51, 0),
+    )
+    assert allowed_at_2051 is True
+
+    # Step 2: At 20:56 (inside window):
+    allowed_at_2056 = is_access_allowed(
+        db_session,
+        dev.id,
+        current_time=time(20, 56, 0),
+        current_datetime=datetime(2026, 10, 23, 20, 56, 0),
+    )
+    assert allowed_at_2056 is True
+
+    # Step 3: At 21:01 (cutoff has passed):
+    # Now it goes to quarantine!
+    allowed_at_2101 = is_access_allowed(
+        db_session,
+        dev.id,
+        current_time=time(21, 1, 0),
+        current_datetime=datetime(2026, 10, 23, 21, 1, 0),
+    )
+    assert allowed_at_2101 is False
+
+    # Enforce access at 21:01: goes to quarantine VLAN 90
+    with (
+        patch("backend.app.services.network_enforcement.is_sophos_configured", return_value=False),
+        patch("backend.app.services.network_enforcement.quarantine_device_l2"),
+    ):
+        res = enforce_device_access(
+            dev,
+            db_session,
+            current_datetime=datetime(2026, 10, 23, 21, 1, 0),
+            force=True,
+        )
+        assert res["decision"] == "quarantine"
+        assert res["enforcement_status"] == "quarantined"
+        assert dev.vlan_id == 90
+        assert dev.internet_access_authorized is False
+
+    # Step 4: Next day at 12:00 PM:
+    # Stays in quarantine
+    allowed_next_day_noon = is_access_allowed(
+        db_session,
+        dev.id,
+        current_time=time(12, 0, 0),
+        current_datetime=datetime(2026, 10, 24, 12, 0, 0),
+    )
+    assert allowed_next_day_noon is False
+
+    # Step 5: Next day at 20:55 (start of next window):
+    # Comes out of quarantine to VLAN 20 and has internet access
+    allowed_next_day_2055 = is_access_allowed(
+        db_session,
+        dev.id,
+        current_time=time(20, 55, 0),
+        current_datetime=datetime(2026, 10, 24, 20, 55, 0),
+    )
+    assert allowed_next_day_2055 is True
+
+    with (
+        patch("backend.app.services.network_enforcement.is_sophos_configured", return_value=False),
+        patch("backend.app.services.network_enforcement.restore_device_l2"),
+    ):
+        res_next = enforce_device_access(
+            dev,
+            db_session,
+            current_datetime=datetime(2026, 10, 24, 20, 55, 0),
+            force=True,
+        )
+        assert res_next["decision"] == "allowed"
+        assert res_next["enforcement_status"] == "allowed"
+        assert dev.vlan_id == 20
+        assert dev.internet_access_authorized is True
+        assert dev.status == "online"
+

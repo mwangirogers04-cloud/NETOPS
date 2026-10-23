@@ -1,4 +1,4 @@
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -65,14 +65,33 @@ def is_access_allowed(
         end = schedule.end_time
         end = time(end.hour, end.minute, end.second)
 
-        # Normal schedule, e.g. 08:00:00 -> 17:00:00
+        # 1. Standard active window check
         if start <= end:
             if start <= current_time <= end:
                 return True
-
-        # Overnight schedule, e.g. 22:00:00 -> 06:00:00
         else:
             if current_time >= start or current_time <= end:
                 return True
+
+        # 2. When a device is scheduled, it remains scheduled with access until that
+        # scheduled access window ends for the first time.
+        # For example, if scheduled right now at 20:55 to 21:00, it should be scheduled and
+        # NOT go to quarantine until 21:01 reaches. At 21:01 it goes to quarantine until the
+        # next day at 20:55 when it comes out of quarantine.
+        sched_ref_time = getattr(schedule, "updated_at", None) or getattr(schedule, "created_at", None)
+        if sched_ref_time:
+            if sched_ref_time.tzinfo is not None:
+                sched_ref_time = sched_ref_time.replace(tzinfo=None)
+            curr_dt_naive = current_datetime.replace(tzinfo=None) if current_datetime.tzinfo else current_datetime
+
+            sched_date = sched_ref_time.date()
+            if start <= end:
+                first_cutoff = datetime.combine(sched_date, end)
+                if sched_ref_time <= first_cutoff and curr_dt_naive <= first_cutoff:
+                    return True
+            else:
+                first_cutoff = datetime.combine(sched_date + timedelta(days=1), end)
+                if sched_ref_time <= first_cutoff and curr_dt_naive <= first_cutoff:
+                    return True
 
     return False

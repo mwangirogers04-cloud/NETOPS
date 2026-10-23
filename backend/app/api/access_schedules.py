@@ -49,12 +49,15 @@ def create_access_schedule(
             detail="Device not found",
         )
 
+    now = datetime.now()
     new_schedule = AccessSchedule(
         device_id=schedule.device_id,
         enabled=schedule.enabled,
         start_time=schedule.start_time,
         end_time=schedule.end_time,
         days=schedule.days,
+        created_at=now,
+        updated_at=now,
     )
 
     db.add(new_schedule)
@@ -128,6 +131,7 @@ def update_access_schedule(
     schedule.start_time = schedule_data.start_time
     schedule.end_time = schedule_data.end_time
     schedule.days = schedule_data.days
+    schedule.updated_at = datetime.now()
 
     db.commit()
     db.refresh(schedule)
