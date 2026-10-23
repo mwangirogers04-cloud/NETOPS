@@ -15,7 +15,16 @@ export default function LoginPage({
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [activationNotice, setActivationNotice] = useState("");
-  const [inactivityAlert, setInactivityAlert] = useState(inactivityNotice);
+  const [inactivityAlert, setInactivityAlert] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem("netops_logout_notice");
+      if (saved) {
+        sessionStorage.removeItem("netops_logout_notice");
+        return saved;
+      }
+    } catch (_) {}
+    return inactivityNotice || "";
+  });
 
   useEffect(() => {
     if (inactivityNotice) {

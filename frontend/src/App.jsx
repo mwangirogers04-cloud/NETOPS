@@ -50,7 +50,16 @@ function App() {
   const INACTIVITY_TIMEOUT_MS = 180000; // 3 minutes of inactivity
   const INACTIVITY_WARNING_MS = 30000;  // 30 seconds warning countdown
 
-  const [inactivityNotice, setInactivityNotice] = useState("");
+  const [inactivityNotice, setInactivityNotice] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem("netops_logout_notice");
+      if (saved) {
+        sessionStorage.removeItem("netops_logout_notice");
+        return saved;
+      }
+    } catch (_) {}
+    return "";
+  });
   const [inactivitySecondsLeft, setInactivitySecondsLeft] = useState(null);
 
   const handleLoginSuccess = (user, token) => {
@@ -63,23 +72,39 @@ function App() {
     setActivePage("dashboard");
   };
 
-  const handleLogout = (reason = null) => {
+  const handleLogout = async (reason = null) => {
+    const notice = typeof reason === "string" ? reason : null;
     const token = localStorage.getItem("netops_token");
     if (token) {
-      fetch(`${API_URL}/auth/logout`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-      }).catch(() => {});
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 600);
+        await fetch(`${API_URL}/auth/logout`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+          keepalive: true,
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+      } catch (_) {}
     }
     localStorage.removeItem("netops_token");
     localStorage.removeItem("netops_user");
     localStorage.removeItem("netops_last_activity");
+    if (notice) {
+      try {
+        sessionStorage.setItem("netops_logout_notice", notice);
+      } catch (_) {}
+    }
     setCurrentUser(null);
     setActivePage("dashboard");
     setInactivitySecondsLeft(null);
-    if (reason) {
-      setInactivityNotice(reason);
-    }
+
+    // Refresh the system completely and return cleanly to the login page
+    try {
+      window.history.replaceState(null, "", window.location.pathname);
+    } catch (_) {}
+    window.location.reload();
   };
 
   // 3-Minute Inactivity Tracker: Auto-logout after 3 minutes without user interaction
@@ -145,7 +170,13 @@ function App() {
       fetch(`${API_URL}/auth/heartbeat`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
-      }).catch(() => {});
+      })
+        .then((res) => {
+          if (res.status === 401) {
+            handleLogout("You have been automatically logged out due to 3 minutes of inactivity.");
+          }
+        })
+        .catch(() => {});
     }, 30000);
     return () => clearInterval(interval);
   }, [currentUser]);
@@ -11892,7 +11923,7 @@ const EndpointUpdatesPage = () => {
                   </div>
                   <button
                     type="button"
-                    onClick={handleLogout}
+                    onClick={() => handleLogout()}
                     style={{ background: "transparent", border: "none", color: "#475569", fontSize: "12px", cursor: "pointer", padding: "4px 6px", borderRadius: "4px", marginLeft: "6px" }}
                     onMouseEnter={(e) => { e.currentTarget.style.color = "#f87171"; }}
                     onMouseLeave={(e) => { e.currentTarget.style.color = "#94a3b8"; }}
