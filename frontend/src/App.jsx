@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import LoginPage from "./components/LoginPage";
 import UsersPage from "./components/UsersPage";
 
@@ -824,7 +824,29 @@ const loadEvents = async () => {
     } catch (_) {}
   };
 
-  const handleIncomingLanEvent = (rawPayload) => {
+  // Tracks the latest device list and recent notifications so that
+  // approved devices never trigger (or keep) a "new device" popup.
+  const devicesRef = useRef([]);
+  const recentNotifiedRef = useRef({});
+
+  useEffect(() => {
+    devicesRef.current = devices;
+    // Auto-dismiss the popup as soon as its device is approved/rejected.
+    setNewDeviceAlert((current) => {
+      if (!current || !current.device_id) return current;
+      const dev = devices.find((d) => d.id === current.device_id);
+      if (dev && dev.approval_status !== "pending") return null;
+      return current;
+    });
+  }, [devices]);
+
+  useEffect(() => {
+    if (!newDeviceAlert) return;
+    const timer = setTimeout(() => setNewDeviceAlert(null), 20000);
+    return () => clearTimeout(timer);
+  }, [newDeviceAlert]);
+
+  const handleIncomingLanEvent = async (rawPayload) => {
     if (!rawPayload || rawPayload.type === "connection") return;
     const event = rawPayload.event || rawPayload;
     if (!event || !event.event_type) return;
@@ -847,12 +869,33 @@ const loadEvents = async () => {
       event.event_type === "device_detected" ||
       event.event_type === "device_online"
     ) {
+      loadDevices();
+
+      // Only notify while the device is still awaiting approval.
+      let stillPending = false;
+      try {
+        const res = await fetch(`${API_URL}/devices/`);
+        if (res.ok) {
+          const list = await res.json();
+          const dev = Array.isArray(list)
+            ? list.find((d) => d.id === event.device_id)
+            : null;
+          stillPending = Boolean(dev && dev.approval_status === "pending");
+        }
+      } catch (_) {}
+      if (!stillPending) return;
+
+      // Cooldown: do not re-pop for the same device within 60 seconds.
+      const now = Date.now();
+      const last = recentNotifiedRef.current[event.device_id] || 0;
+      if (now - last < 60000) return;
+      recentNotifiedRef.current[event.device_id] = now;
+
       setNewDeviceAlert(event);
       if (event.device_id) {
         setHighlightedDeviceId(event.device_id);
       }
       playLanNotificationChime();
-      loadDevices();
     } else if (event.event_type === "device_offline" || event.event_type === "ip_address_changed") {
       loadDevices();
     }
@@ -1142,6 +1185,11 @@ const loadEvents = async () => {
     // Save VLAN automation result
     if (action === "automate-vlan") {
       setAutomationResult(result);
+    }
+
+    if (action === "approve" || action === "reject") {
+      setNewDeviceAlert((cur) => (cur && cur.device_id === deviceId ? null : cur));
+      setHighlightedDeviceId(null);
     }
 
     // Refresh devices and events
