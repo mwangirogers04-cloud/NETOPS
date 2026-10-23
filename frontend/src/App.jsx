@@ -805,7 +805,7 @@ const loadEvents = async () => {
     }
 
     const confirmed = window.confirm(
-      `Reset the access schedule for device #${deviceId}?`
+      `Reset the access schedule for device #${deviceId}? This will remove the device from quarantine and restore internet access awaiting the next schedule.`
     );
 
     if (!confirmed) {
@@ -815,23 +815,27 @@ const loadEvents = async () => {
     setScheduleLoading(deviceId);
 
     try {
-      for (const schedule of schedules) {
-        const response = await fetch(
-          `${API_URL}/access-schedules/${schedule.id}`,
-          {
-            method: "DELETE",
-          }
-        );
+      const response = await fetch(
+        `${API_URL}/access-schedules/device/${deviceId}/reset`,
+        {
+          method: "POST",
+        }
+      );
 
-        if (!response.ok) {
-          throw new Error(
-            `Failed to delete schedule ${schedule.id}`
+      if (!response.ok) {
+        for (const schedule of schedules) {
+          await fetch(
+            `${API_URL}/access-schedules/${schedule.id}`,
+            {
+              method: "DELETE",
+            }
           );
         }
       }
 
       await loadAccessSchedules();
-      await deviceAction(deviceId, "enforce");
+      await loadDevices();
+      await loadEvents();
       setScheduleForm((current) => {
         if (current.device_id === deviceId) {
           return {

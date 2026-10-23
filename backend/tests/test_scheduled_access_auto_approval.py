@@ -441,3 +441,131 @@ def test_scheduled_device_remains_scheduled_with_access_until_cutoff_then_quaran
         assert dev.internet_access_authorized is True
         assert dev.status == "online"
 
+
+def test_reset_device_schedules_removes_device_from_quarantine_and_awaits_next_schedule(db_session):
+    """
+    Resetting all schedules for a device removes it from quarantine (restoring operational VLAN),
+    marks it approved, restores internet access authorization, and sets enforcement to allowed
+    awaiting any future schedule.
+    """
+    from backend.app.api.access_schedules import reset_device_schedules
+
+    dev = Device(
+        mac_address="AA:BB:CC:DD:EE:77",
+        ip_address="192.168.0.77",
+        hostname="ACCOUNTING-PC",
+        vendor="Dell Inc.",
+        device_type="computer",
+        approval_status="approved",
+        enforcement_status="quarantined",
+        internet_access_authorized=False,
+        vlan_id=90,
+        status="offline",
+    )
+    db_session.add(dev)
+    db_session.commit()
+    db_session.refresh(dev)
+
+    schedule = AccessSchedule(
+        device_id=dev.id,
+        enabled=True,
+        days="daily",
+        start_time=time(20, 55, 0),
+        end_time=time(21, 0, 0),
+    )
+    db_session.add(schedule)
+    db_session.commit()
+
+    with (
+        patch("backend.app.services.network_enforcement.is_sophos_configured", return_value=False),
+        patch("backend.app.services.network_enforcement.restore_device_l2") as mock_restore_l2,
+    ):
+        result = reset_device_schedules(dev.id, db=db_session)
+
+        assert result["message"] == "Access schedule reset successfully"
+        assert result["device_id"] == dev.id
+        assert result["deleted_count"] == 1
+        assert result["vlan_id"] == 20
+        assert result["enforcement_status"] == "allowed"
+        assert result["approval_status"] == "approved"
+
+        # Check device state in DB
+        db_session.refresh(dev)
+        assert dev.vlan_id == 20
+        assert dev.internet_access_authorized is True
+        assert dev.approval_status == "approved"
+        assert dev.status == "online"
+        assert dev.enforcement_status == "allowed"
+
+        # Check schedule was deleted
+        remaining_schedules = db_session.query(AccessSchedule).filter(AccessSchedule.device_id == dev.id).all()
+        assert len(remaining_schedules) == 0
+
+        # Check audit event was created
+        events = db_session.query(Event).filter(
+            Event.device_id == dev.id,
+            Event.event_type == "schedule_reset",
+        ).all()
+        assert len(events) == 1
+        assert "Removed from quarantine, restored to VLAN 20" in events[0].message
+        mock_restore_l2.assert_called_once()
+
+
+def test_delete_last_access_schedule_removes_device_from_quarantine(db_session):
+    """
+    Deleting the last schedule via delete_access_schedule endpoint removes the device from quarantine,
+    restoring operational VLAN and online status.
+    """
+    from backend.app.api.access_schedules import delete_access_schedule
+
+    dev = Device(
+        mac_address="AA:BB:CC:DD:EE:88",
+        ip_address="192.168.0.88",
+        hostname="RESEARCH-LAPTOP",
+        vendor="Lenovo",
+        device_type="computer",
+        approval_status="approved",
+        enforcement_status="quarantined",
+        internet_access_authorized=False,
+        vlan_id=90,
+        status="offline",
+    )
+    db_session.add(dev)
+    db_session.commit()
+    db_session.refresh(dev)
+
+    schedule = AccessSchedule(
+        device_id=dev.id,
+        enabled=True,
+        days="daily",
+        start_time=time(14, 0, 0),
+        end_time=time(16, 0, 0),
+    )
+    db_session.add(schedule)
+    db_session.commit()
+    db_session.refresh(schedule)
+
+    with (
+        patch("backend.app.services.network_enforcement.is_sophos_configured", return_value=False),
+        patch("backend.app.services.network_enforcement.restore_device_l2") as mock_restore_l2,
+    ):
+        result = delete_access_schedule(schedule.id, db=db_session)
+        assert result["message"] == "Access schedule deleted successfully"
+        assert result["schedule_id"] == schedule.id
+
+        db_session.refresh(dev)
+        assert dev.vlan_id == 20
+        assert dev.internet_access_authorized is True
+        assert dev.approval_status == "approved"
+        assert dev.status == "online"
+        assert dev.enforcement_status == "allowed"
+
+        events = db_session.query(Event).filter(
+            Event.device_id == dev.id,
+            Event.event_type == "schedule_reset",
+        ).all()
+        assert len(events) == 1
+        assert "Removed from quarantine, restored to VLAN 20" in events[0].message
+        mock_restore_l2.assert_called_once()
+
+
