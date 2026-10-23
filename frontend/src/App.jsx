@@ -142,6 +142,34 @@ function App() {
   const [deviceSearchQuery, setDeviceSearchQuery] = useState("");
   const [lanFilterStatus, setLanFilterStatus] = useState("all");
 
+  const [alertSoundEnabled, setAlertSoundEnabled] = useState(() => {
+    try {
+      const saved = localStorage.getItem("netops_alert_sound_enabled");
+      return saved === null ? true : saved === "true";
+    } catch (_) {
+      return true;
+    }
+  });
+  const alertSoundEnabledRef = useRef(alertSoundEnabled);
+
+  useEffect(() => {
+    alertSoundEnabledRef.current = alertSoundEnabled;
+  }, [alertSoundEnabled]);
+
+  const toggleAlertSound = () => {
+    setAlertSoundEnabled((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem("netops_alert_sound_enabled", String(next));
+      } catch (_) {}
+      alertSoundEnabledRef.current = next;
+      if (next) {
+        playLanNotificationChime(true);
+      }
+      return next;
+    });
+  };
+
   const openScheduleModal = (device) => {
     if (!isAdmin) {
       alert("Permission Denied: Standard users cannot configure access schedules. Only Administrators and Super Administrators can manage schedules.");
@@ -805,7 +833,8 @@ const loadEvents = async () => {
   // WEBSOCKET + REAL-TIME LAN CONNECTION NOTIFICATION
   // ------------------------------------------------------------
 
-  const playLanNotificationChime = () => {
+  const playLanNotificationChime = (force = false) => {
+    if (!force && !alertSoundEnabledRef.current) return;
     try {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       if (!AudioCtx) return;
@@ -11051,6 +11080,34 @@ const EndpointUpdatesPage = () => {
                 Live monitoring
               </div>
 
+              <button
+                type="button"
+                onClick={toggleAlertSound}
+                className="sound-toggle-btn"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "5px 12px",
+                  borderRadius: "20px",
+                  border: alertSoundEnabled ? "1px solid #10b981" : "1px solid #cbd5e1",
+                  background: alertSoundEnabled ? "#ecfdf5" : "#f1f5f9",
+                  color: alertSoundEnabled ? "#047857" : "#64748b",
+                  fontSize: "12px",
+                  fontWeight: "700",
+                  cursor: "pointer",
+                  transition: "all 0.15s ease",
+                  userSelect: "none",
+                }}
+                title={
+                  alertSoundEnabled
+                    ? "New device notification chime is ON. Click to mute chime if irritating."
+                    : "New device notification chime is MUTED. Click to turn chime ON."
+                }
+              >
+                {alertSoundEnabled ? "🔊 Sound ON" : "🔇 Sound OFF"}
+              </button>
+
               {currentUser && (
                 <div style={{ display: "flex", alignItems: "center", gap: "10px", background: "#f8fafc", border: "1px solid #cbd5e1", padding: "4px 12px 4px 6px", borderRadius: "24px" }}>
                   <div style={{ width: "26px", height: "26px", borderRadius: "50%", background: isSuperAdmin ? "linear-gradient(135deg, #d97706, #b45309)" : isAdmin ? "linear-gradient(135deg, #2563eb, #1d4ed8)" : "linear-gradient(135deg, #475569, #334155)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "11px", fontWeight: "800", textTransform: "uppercase" }}>
@@ -11095,14 +11152,40 @@ const EndpointUpdatesPage = () => {
                     ? "🔔 MACHINE CONNECTED TO LAN"
                     : "🆕 NEW MACHINE DETECTED ON LAN"}
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setNewDeviceAlert(null)}
-                  style={{ background: "none", border: "none", color: "#64748b", cursor: "pointer", fontSize: "16px", fontWeight: "700" }}
-                  title="Dismiss notification"
-                >
-                  ✕
-                </button>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <button
+                    type="button"
+                    onClick={toggleAlertSound}
+                    style={{
+                      background: alertSoundEnabled ? "#ecfdf5" : "#fef2f2",
+                      border: alertSoundEnabled ? "1px solid #a7f3d0" : "1px solid #fecaca",
+                      color: alertSoundEnabled ? "#065f46" : "#991b1b",
+                      padding: "2px 8px",
+                      borderRadius: "12px",
+                      fontSize: "11px",
+                      fontWeight: "700",
+                      cursor: "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "3px",
+                    }}
+                    title={
+                      alertSoundEnabled
+                        ? "Turn chime sound off if irritating when new machines connect"
+                        : "Turn chime sound back on"
+                    }
+                  >
+                    {alertSoundEnabled ? "🔊 Sound ON" : "🔇 Sound OFF"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewDeviceAlert(null)}
+                    style={{ background: "none", border: "none", color: "#64748b", cursor: "pointer", fontSize: "16px", fontWeight: "700" }}
+                    title="Dismiss notification"
+                  >
+                    ✕
+                  </button>
+                </div>
               </div>
 
               <div className="alert-title">
