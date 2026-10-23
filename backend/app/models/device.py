@@ -84,6 +84,12 @@ class Device(Base):
         nullable=False,
     )
 
+    ip_assignment: Mapped[str] = mapped_column(
+        String(20),
+        default="dhcp",
+        nullable=False,
+    )
+
 
     internet_access_authorized: Mapped[bool] = mapped_column(
         Boolean,

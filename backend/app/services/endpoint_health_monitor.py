@@ -8,6 +8,10 @@ from ..models.device import Device
 from ..models.endpoint_update import EndpointUpdate
 from ..models.event import Event
 from .event_service import create_event
+from .firewall.manager import get_active_firewall_driver
+from .sophos_enforcement import is_sophos_configured, sophos_allow_device
+from .l2_quarantine import restore_device_l2
+from .network_enforcement import enforce_device_access
 
 
 STALE_AFTER_MINUTES = 15
@@ -161,6 +165,7 @@ async def endpoint_health_monitor_loop():
                             network_interface=info["interface"],
                             status="online",
                             approval_status="pending",
+                            ip_assignment="dhcp",
                             classification_status="normal",
                             vlan_id=90,
                             enforcement_status="quarantined",
@@ -229,8 +234,63 @@ async def endpoint_health_monitor_loop():
                     if is_active:
                         live_info = live_by_mac.get(d_mac) if d_mac else None
                         if live_info:
-                            if live_info.get("ip_address") and d.ip_address != live_info["ip_address"]:
-                                d.ip_address = live_info["ip_address"]
+                            old_ip = d.ip_address
+                            new_ip = live_info.get("ip_address")
+                            if new_ip and old_ip and old_ip != new_ip:
+                                if getattr(d, "ip_assignment", "dhcp") == "static":
+                                    create_event(
+                                        db=db,
+                                        event_type="ip_address_conflict",
+                                        message=(
+                                            f"Static IP mismatch for {d.hostname or d.mac_address} ({d.mac_address}): "
+                                            f"Configured static IP was {old_ip}, but observed with {new_ip}. "
+                                            f"Manual review required."
+                                        ),
+                                        device_id=d.id,
+                                    )
+                                else:
+                                    # DHCP lease change: treat as a new machine accessing our internet
+                                    try:
+                                        active_fw = get_active_firewall_driver(db)
+                                        if active_fw.vendor != "sophos" and active_fw.is_configured() and old_ip:
+                                            active_fw.allow_device(old_ip)
+                                        elif is_sophos_configured() and old_ip:
+                                            sophos_allow_device(old_ip)
+                                        restore_device_l2(old_ip)
+                                    except Exception as exc:
+                                        print(f"[MONITOR] Error releasing old IP {old_ip}: {exc}")
+
+                                    d.ip_address = new_ip
+                                    d.approval_status = "pending"
+                                    d.internet_access_authorized = False
+                                    d.vlan_id = 90
+                                    d.enforcement_status = "quarantined"
+
+                                    try:
+                                        enforce_device_access(d, db, force=True)
+                                    except Exception as exc:
+                                        print(f"[MONITOR] Error enforcing quarantine on {new_ip}: {exc}")
+
+                                    create_event(
+                                        db=db,
+                                        event_type="ip_address_changed",
+                                        message=f"Device IP address changed from {old_ip} to {new_ip} ({d.mac_address})",
+                                        device_id=d.id,
+                                    )
+                                    create_event(
+                                        db=db,
+                                        event_type="new_device",
+                                        message=(
+                                            f"Machine connected with new DHCP IP ({live_info.get('interface') or d.network_interface or 'eth0'}): "
+                                            f"{d.hostname or d.mac_address} ({new_ip} / {d.mac_address}) "
+                                            f"[{d.vendor or 'LAN Device'}] — "
+                                            f"Previous IP was {old_ip}. Treated as new machine: Placed in VLAN 90 Quarantine. Awaiting administrator review & approval."
+                                        ),
+                                        device_id=d.id,
+                                    )
+                            elif new_ip and not old_ip:
+                                d.ip_address = new_ip
+
                             if live_info.get("interface"):
                                 d.network_interface = live_info["interface"]
                         if d.status != "online":

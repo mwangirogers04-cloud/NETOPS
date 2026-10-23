@@ -17,6 +17,7 @@ from .sophos_enforcement import (
     sophos_allow_device,
     sophos_block_device,
 )
+from .l2_quarantine import restore_device_l2
 from .network_enforcement import enforce_device_access
 
 from .device_classifier import classify_device
@@ -785,6 +786,11 @@ def save_discovered_devices(
                         print(
                             f"[DISCOVERY] Error releasing old IP {old_ip} on Sophos: {exc}"
                         )
+                if old_ip:
+                    try:
+                        restore_device_l2(old_ip)
+                    except Exception:
+                        pass
 
                 existing_device.ip_address = new_ip
                 create_event(
@@ -796,6 +802,35 @@ def save_discovered_devices(
                     ),
                     existing_device.id,
                 )
+
+                if getattr(existing_device, "ip_assignment", "dhcp") == "static":
+                    create_event(
+                        db,
+                        "ip_address_conflict",
+                        (
+                            f"Static IP mismatch for {existing_device.hostname or existing_device.mac_address} "
+                            f"({existing_device.mac_address}): Configured static IP was {old_ip}, but observed with {new_ip}. "
+                            f"Manual review required."
+                        ),
+                        existing_device.id,
+                    )
+                else:
+                    # DHCP device: Treat as a brand new machine accessing internet
+                    existing_device.approval_status = "pending"
+                    existing_device.internet_access_authorized = False
+                    existing_device.vlan_id = 90
+                    existing_device.enforcement_status = "quarantined"
+                    create_event(
+                        db,
+                        "new_device",
+                        (
+                            f"Machine connected with new DHCP IP ({existing_device.network_interface or scanned_interface or 'eth0'}): "
+                            f"{existing_device.hostname or 'LAN Device'} ({new_ip} / {existing_device.mac_address}) "
+                            f"[{existing_device.vendor or 'LAN Endpoint'}] — "
+                            f"Previous IP was {old_ip}. Treated as new machine: Placed in VLAN 90 Quarantine. Awaiting administrator review & approval."
+                        ),
+                        existing_device.id,
+                    )
             elif new_ip and not old_ip:
                 existing_device.ip_address = new_ip
 
@@ -821,11 +856,12 @@ def save_discovered_devices(
             ):
                 existing_device.device_type = detected_type
 
-                existing_device.vlan_id = (
-                    get_vlan_for_device_type(
-                        detected_type
+                if existing_device.approval_status != "pending":
+                    existing_device.vlan_id = (
+                        get_vlan_for_device_type(
+                            detected_type
+                        )
                     )
-                )
 
                 existing_device.classification_status = (
                     "reviewed"
@@ -901,11 +937,12 @@ def save_discovered_devices(
                 detected_type != "unknown"
                 and existing_type == detected_type
             ):
-                existing_device.vlan_id = (
-                    get_vlan_for_device_type(
-                        detected_type
+                if existing_device.approval_status != "pending":
+                    existing_device.vlan_id = (
+                        get_vlan_for_device_type(
+                            detected_type
+                        )
                     )
-                )
 
                 if (
                     existing_device.classification_status
@@ -971,6 +1008,7 @@ def save_discovered_devices(
                 classification_status="normal",
                 status="online",
                 approval_status="pending",
+                ip_assignment="dhcp",
                 vlan_id=get_vlan_for_device_type(
                     detected_type
                 ),

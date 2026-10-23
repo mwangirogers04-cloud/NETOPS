@@ -14,12 +14,18 @@ class DeviceCreate(BaseModel):
     switch_port: str | None = None
     network_interface: str | None = None
     vlan_id: int | None = None
+    ip_assignment: str = "dhcp"
     notes: str | None = None
 
     @field_validator("network_interface", mode="before")
     @classmethod
     def _clean_network_interface(cls, v: Any) -> str | None:
         return v if isinstance(v, str) else None
+
+    @field_validator("ip_assignment", mode="before")
+    @classmethod
+    def _clean_ip_assignment(cls, v: Any) -> str:
+        return v if isinstance(v, str) and v.strip() else "dhcp"
 
 
 class DeviceResponse(DeviceCreate):
@@ -62,9 +68,18 @@ class DeviceResponse(DeviceCreate):
             return "Classification mismatch requires manual review"
 
         known_types = {
+            "ip_phone",
+            "phone",
+            "voip",
             "computer",
             "cctv",
             "printer",
+            "server",
+            "servers",
+            "access_point",
+            "ap",
+            "wap",
+            "wifi_ap",
         }
 
         if (
@@ -91,3 +106,7 @@ class DeviceTypeUpdate(BaseModel):
 
 class DeviceVlanUpdate(BaseModel):
     vlan_id: int
+
+
+class DeviceIpAssignmentUpdate(BaseModel):
+    ip_assignment: str

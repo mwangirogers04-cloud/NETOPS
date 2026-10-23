@@ -145,13 +145,74 @@ def test_save_discovered_devices_ip_migration(db_session):
         # enforce_device_access should be called with force=True
         mock_enforce.assert_called_once_with(existing, db_session, force=True)
 
-        # ip_address_changed event should be logged
+        # ip_address_changed and new_device events should be logged
         evt = db_session.query(Event).filter(
             Event.device_id == existing.id,
             Event.event_type == "ip_address_changed",
         ).first()
         assert evt is not None
         assert "192.168.0.11 to 192.168.0.12" in evt.message
+
+        # Device is DHCP by default, so it is treated as a new machine (quarantined, pending approval)
+        assert saved[0].approval_status == "pending"
+        assert saved[0].internet_access_authorized is False
+        assert saved[0].vlan_id == 90
+        assert saved[0].enforcement_status == "quarantined"
+
+        new_dev_evt = db_session.query(Event).filter(
+            Event.device_id == existing.id,
+            Event.event_type == "new_device",
+        ).first()
+        assert new_dev_evt is not None
+        assert "Treated as new machine" in new_dev_evt.message
+
+
+def test_save_discovered_devices_static_ip_mismatch_creates_conflict_event(db_session):
+    from backend.app.models.device import Device
+    from backend.app.models.event import Event
+    from backend.app.services.discovery import save_discovered_devices
+
+    # Device configured with a static IP
+    static_dev = Device(
+        mac_address="F0:1F:AF:4C:6A:E9",
+        ip_address="192.168.0.11",
+        hostname="STATIC-SERVER",
+        vendor="Dell",
+        device_type="computer",
+        approval_status="approved",
+        status="online",
+        ip_assignment="static",
+        internet_access_authorized=True,
+    )
+    db_session.add(static_dev)
+    db_session.commit()
+
+    discovered = [
+        {
+            "mac_address": "F0:1F:AF:4C:6A:E9",
+            "ip_address": "192.168.0.12",
+            "hostname": "STATIC-SERVER",
+            "vendor": "Dell",
+            "device_type": "computer",
+        }
+    ]
+
+    with (
+        patch("backend.app.services.discovery.is_sophos_configured", return_value=False),
+        patch("backend.app.services.discovery.enforce_device_access"),
+    ):
+        saved = save_discovered_devices(discovered, db_session)
+
+        assert len(saved) == 1
+        assert saved[0].ip_address == "192.168.0.12"
+
+        # Static device should NOT be reset to pending approval, but emit ip_address_conflict
+        conflict_evt = db_session.query(Event).filter(
+            Event.device_id == static_dev.id,
+            Event.event_type == "ip_address_conflict",
+        ).first()
+        assert conflict_evt is not None
+        assert "Static IP mismatch" in conflict_evt.message
 
 
 def test_save_discovered_devices_marks_disconnected_device_offline(db_session):

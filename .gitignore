@@ -26,6 +26,8 @@ frontend/dist/
 *.save
 *.before-*
 *.orig
+*.db
+backend/notification_settings.json
 
 # Test & Temporary exports
 *.xlsx

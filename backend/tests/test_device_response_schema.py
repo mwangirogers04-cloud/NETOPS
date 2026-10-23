@@ -82,4 +82,11 @@ def test_device_response_defaults_update_fields_to_none():
     data = response.model_dump()
     assert data["update_status"] is None
     assert data["pending_updates"] is None
+    assert data["ip_assignment"] == "dhcp"
+
+
+def test_device_response_custom_ip_assignment():
+    response = make_response(ip_assignment="static")
+    data = response.model_dump()
+    assert data["ip_assignment"] == "static"
 

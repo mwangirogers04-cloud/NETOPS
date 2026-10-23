@@ -11,6 +11,7 @@ from ..schemas.device import (
     DeviceResponse,
     DeviceTypeUpdate,
     DeviceVlanUpdate,
+    DeviceIpAssignmentUpdate,
 )
 from ..services.vlan_policy import get_vlan_for_device_type
 from ..services.access_policy import (
@@ -38,6 +39,9 @@ def add_access_information(device: Device):
 
     Approval and Internet access are separate concepts.
     """
+
+    if not getattr(device, "ip_assignment", None):
+        device.ip_assignment = "dhcp"
 
     if device.enforcement_status == "isolated":
         device.access_decision = "isolated"
@@ -574,10 +578,20 @@ def set_device_type(
         .strip()
     )
 
+    if new_type in ("phone", "voip", "ipphone"):
+        new_type = "ip_phone"
+    elif new_type in ("ap", "wap", "wifi_ap", "accesspoint"):
+        new_type = "access_point"
+    elif new_type in ("servers",):
+        new_type = "server"
+
     allowed_types = {
+        "ip_phone",
         "computer",
         "cctv",
         "printer",
+        "server",
+        "access_point",
         "unknown",
     }
 
@@ -587,7 +601,7 @@ def set_device_type(
             detail=(
                 "Invalid device type. "
                 "Allowed values: "
-                "computer, cctv, printer, unknown"
+                "ip_phone, computer, cctv, printer, server, access_point, unknown"
             ),
         )
 
@@ -801,11 +815,11 @@ def set_device_vlan(
     old_vlan = device.vlan_id
     new_vlan = vlan_data.vlan_id
 
-    allowed_vlans = {20, 30, 40, 90}
+    allowed_vlans = {10, 20, 30, 40, 50, 60, 90}
     if new_vlan not in allowed_vlans:
         raise HTTPException(
             status_code=400,
-            detail="Invalid VLAN ID. Allowed VLANs: 20 (Computers), 30 (CCTV), 40 (Printers), 90 (Quarantine)",
+            detail="Invalid VLAN ID. Allowed VLANs: 10 (IP Phones), 20 (Computers), 30 (CCTV), 40 (Printers), 50 (Servers), 60 (Access Points), 90 (Quarantine)",
         )
 
     device.vlan_id = new_vlan
@@ -848,6 +862,55 @@ def set_device_vlan(
                 db,
                 force=True,
             )
+
+    db.commit()
+    db.refresh(device)
+
+    add_access_information(device)
+
+    return device
+
+
+# ------------------------------------------------------------
+# UPDATE DEVICE IP ASSIGNMENT (DHCP vs STATIC)
+# ------------------------------------------------------------
+
+@router.patch(
+    "/{device_id}/ip-assignment",
+    response_model=DeviceResponse,
+)
+def set_device_ip_assignment(
+    device_id: int,
+    assignment_data: DeviceIpAssignmentUpdate,
+    db: Session = Depends(get_db),
+):
+    device = db.get(Device, device_id)
+
+    if device is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Device not found",
+        )
+
+    val = assignment_data.ip_assignment.lower().strip()
+    if val not in ("dhcp", "static"):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid IP assignment. Allowed values: 'dhcp', 'static'",
+        )
+
+    old_val = getattr(device, "ip_assignment", "dhcp")
+    device.ip_assignment = val
+
+    create_event(
+        db,
+        "device_configuration",
+        (
+            f"Device {device.hostname or device.ip_address or device.mac_address} "
+            f"IP assignment type updated from {old_val.upper()} to {val.upper()}."
+        ),
+        device.id,
+    )
 
     db.commit()
     db.refresh(device)

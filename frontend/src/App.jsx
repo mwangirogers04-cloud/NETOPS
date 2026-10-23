@@ -1109,6 +1109,19 @@ const loadEvents = async () => {
     }
 
     // ----------------------------------------------------------
+    // UPDATE IP ASSIGNMENT (DHCP vs STATIC)
+    // ----------------------------------------------------------
+
+    else if (action === "ip-assignment") {
+      url += "/ip-assignment";
+      method = "PATCH";
+
+      body = JSON.stringify({
+        ip_assignment: value,
+      });
+    }
+
+    // ----------------------------------------------------------
     // ALLOW INTERNET ACCESS
     // ----------------------------------------------------------
 
@@ -1659,12 +1672,22 @@ const renderInlineScheduleRow = (device, colSpan = 10) => {
 const DevicesPage = () => {
   const getDeviceIcon = (type) => {
     switch (type) {
+      case "ip_phone":
+      case "phone":
+      case "voip":
+        return "📞";
       case "computer":
         return "💻";
       case "cctv":
         return "📹";
       case "printer":
         return "🖨️";
+      case "server":
+        return "🗄️";
+      case "access_point":
+      case "ap":
+      case "wifi_ap":
+        return "📡";
       default:
         return "⚠️";
     }
@@ -2308,6 +2331,20 @@ const DevicesPage = () => {
     if (deviceFilter === "rejected" && device.approval_status !== "rejected") return false;
     if (deviceFilter === "quarantined" && device.enforcement_status !== "quarantined") return false;
     if (deviceFilter === "isolated" && device.enforcement_status !== "isolated") return false;
+    if (deviceFilter === "ip_phone" && device.device_type !== "ip_phone") return false;
+    if (deviceFilter === "computer" && device.device_type !== "computer") return false;
+    if (deviceFilter === "cctv" && device.device_type !== "cctv") return false;
+    if (deviceFilter === "printer" && device.device_type !== "printer") return false;
+    if (deviceFilter === "server" && device.device_type !== "server") return false;
+    if (deviceFilter === "access_point" && !["access_point", "ap", "wifi_ap"].includes(device.device_type)) return false;
+    if (deviceFilter === "unknown" && ["ip_phone", "computer", "cctv", "printer", "server", "access_point", "ap", "wifi_ap"].includes(device.device_type)) return false;
+    if (deviceFilter === "vlan10" && Number(device.vlan_id) !== 10) return false;
+    if (deviceFilter === "vlan20" && Number(device.vlan_id) !== 20) return false;
+    if (deviceFilter === "vlan30" && Number(device.vlan_id) !== 30) return false;
+    if (deviceFilter === "vlan40" && Number(device.vlan_id) !== 40) return false;
+    if (deviceFilter === "vlan50" && Number(device.vlan_id) !== 50) return false;
+    if (deviceFilter === "vlan60" && Number(device.vlan_id) !== 60) return false;
+    if (deviceFilter === "vlan90" && Number(device.vlan_id) !== 90) return false;
 
     if (
       !deviceMatchesSearch(device, deviceSearchQuery, [
@@ -2407,6 +2444,10 @@ const DevicesPage = () => {
                           🚨 Unknown (Quarantine VLAN 90)
                         </option>
 
+                        <option value="ip_phone">
+                          📞 IP Phone (VLAN 10)
+                        </option>
+
                         <option value="computer">
                           💻 Computer (VLAN 20)
                         </option>
@@ -2417,6 +2458,14 @@ const DevicesPage = () => {
 
                         <option value="printer">
                           🖨️ Printer (VLAN 40)
+                        </option>
+
+                        <option value="server">
+                          🗄️ Server (VLAN 50)
+                        </option>
+
+                        <option value="access_point">
+                          📡 Access Point (VLAN 60)
                         </option>
                       </select>
                     </td>
@@ -2455,9 +2504,12 @@ const DevicesPage = () => {
                         }}
                         title="Change VLAN: VLAN 90 immediately disconnects internet"
                       >
+                        <option value="10">VLAN 10 - IP Phones</option>
                         <option value="20">VLAN 20 - Workstation</option>
                         <option value="30">VLAN 30 - CCTV</option>
                         <option value="40">VLAN 40 - Printers</option>
+                        <option value="50">VLAN 50 - Servers</option>
+                        <option value="60">VLAN 60 - Access Points</option>
                         <option value="90">🚨 VLAN 90 - Quarantine</option>
                       </select>
                     </td>
@@ -2885,9 +2937,16 @@ const LanScannerPage = () => {
 
   const getDeviceIcon = (type) => {
     switch (type) {
+      case "ip_phone":
+      case "phone":
+      case "voip": return "📞";
       case "computer": return "💻";
       case "cctv": return "📹";
       case "printer": return "🖨️";
+      case "server": return "🗄️";
+      case "access_point":
+      case "ap":
+      case "wifi_ap": return "📡";
       case "router": return "🌐";
       case "firewall": return "🛡️";
       default: return "🖥️";
@@ -3360,16 +3419,39 @@ const LanScannerPage = () => {
                       {/* CURRENT IP ADDRESS */}
                       <td>
                         <div>
-                          <span
-                            style={{
-                              fontSize: "14px",
-                              fontWeight: "700",
-                              fontFamily: "monospace",
-                              color: "#2563eb",
-                            }}
-                          >
-                            {device.ip_address || "No IP Assigned"}
-                          </span>
+                          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                            <span
+                              style={{
+                                fontSize: "14px",
+                                fontWeight: "700",
+                                fontFamily: "monospace",
+                                color: "#2563eb",
+                              }}
+                            >
+                              {device.ip_address || "No IP Assigned"}
+                            </span>
+                            <select
+                              value={device.ip_assignment || "dhcp"}
+                              onChange={(e) =>
+                                deviceAction(device.id, "ip-assignment", e.target.value)
+                              }
+                              disabled={!isAdmin || actionLoading === `ip-assignment-${device.id}`}
+                              title="IP Assignment mode: DHCP devices are re-quarantined as new machines on IP change; Static devices alert on mismatch"
+                              style={{
+                                fontSize: "10px",
+                                padding: "1px 5px",
+                                borderRadius: "4px",
+                                background: (device.ip_assignment || "dhcp") === "static" ? "rgba(99, 102, 241, 0.15)" : "#f1f5f9",
+                                color: (device.ip_assignment || "dhcp") === "static" ? "#4f46e5" : "#475569",
+                                border: (device.ip_assignment || "dhcp") === "static" ? "1px solid rgba(99, 102, 241, 0.4)" : "1px solid #cbd5e1",
+                                fontWeight: "700",
+                                cursor: "pointer",
+                              }}
+                            >
+                              <option value="dhcp">DHCP</option>
+                              <option value="static">STATIC</option>
+                            </select>
+                          </div>
                           {hasIpChange && (
                             <div
                               style={{
@@ -3423,9 +3505,12 @@ const LanScannerPage = () => {
                             cursor: "pointer",
                           }}
                         >
+                          <option value={10}>VLAN 10 (IP Phones)</option>
                           <option value={20}>VLAN 20 (Workstations)</option>
                           <option value={30}>VLAN 30 (CCTV)</option>
                           <option value={40}>VLAN 40 (Printers)</option>
+                          <option value={50}>VLAN 50 (Servers)</option>
+                          <option value={60}>VLAN 60 (Access Points)</option>
                           <option value={90}>VLAN 90 (Quarantine)</option>
                         </select>
                       </td>
@@ -3852,9 +3937,12 @@ const AccessPage = () => {
                         }}
                         title="Change VLAN: VLAN 90 immediately disconnects internet"
                       >
+                        <option value="10">VLAN 10</option>
                         <option value="20">VLAN 20</option>
                         <option value="30">VLAN 30</option>
                         <option value="40">VLAN 40</option>
+                        <option value="50">VLAN 50</option>
+                        <option value="60">VLAN 60</option>
                         <option value="90">🚨 VLAN 90 (Quarantine)</option>
                       </select>
                     </td>
@@ -4029,6 +4117,10 @@ const AccessPage = () => {
               ) === String(vlanFilter)
           );
 
+    const vlan10 = devices.filter(
+      (device) => device.vlan_id === 10
+    );
+
     const vlan20 = devices.filter(
       (device) => device.vlan_id === 20
     );
@@ -4039,6 +4131,14 @@ const AccessPage = () => {
 
     const vlan40 = devices.filter(
       (device) => device.vlan_id === 40
+    );
+
+    const vlan50 = devices.filter(
+      (device) => device.vlan_id === 50
+    );
+
+    const vlan60 = devices.filter(
+      (device) => device.vlan_id === 60
     );
 
     const vlan90 = devices.filter(
@@ -4061,6 +4161,19 @@ const AccessPage = () => {
         </div>
 
         <div className="vlan-card-grid">
+          <VLANCard
+            vlan="10"
+            name="IP Phones"
+            description="VoIP telephony and IP phone handsets"
+            devices={vlan10}
+            selected={
+              vlanFilter === "10"
+            }
+            onClick={() =>
+              setVlanFilter("10")
+            }
+          />
+
           <VLANCard
             vlan="20"
             name="Computers"
@@ -4097,6 +4210,32 @@ const AccessPage = () => {
             }
             onClick={() =>
               setVlanFilter("40")
+            }
+          />
+
+          <VLANCard
+            vlan="50"
+            name="Servers"
+            description="Core infrastructure and servers"
+            devices={vlan50}
+            selected={
+              vlanFilter === "50"
+            }
+            onClick={() =>
+              setVlanFilter("50")
+            }
+          />
+
+          <VLANCard
+            vlan="60"
+            name="Access Points"
+            description="Wireless access points and APs"
+            devices={vlan60}
+            selected={
+              vlanFilter === "60"
+            }
+            onClick={() =>
+              setVlanFilter("60")
             }
           />
 
@@ -4226,9 +4365,12 @@ const AccessPage = () => {
                             }}
                             title="Change VLAN. Selecting VLAN 90 immediately disconnects internet access."
                           >
+                            <option value="10">VLAN 10 (IP Phones)</option>
                             <option value="20">VLAN 20 (Computers)</option>
                             <option value="30">VLAN 30 (CCTV)</option>
                             <option value="40">VLAN 40 (Printers)</option>
+                            <option value="50">VLAN 50 (Servers)</option>
+                            <option value="60">VLAN 60 (Access Points)</option>
                             <option value="90">🚨 VLAN 90 (Quarantine)</option>
                           </select>
                         </td>
@@ -4314,6 +4456,13 @@ const AccessPage = () => {
           </div>
 
           <PolicyRow
+            vlan="10"
+            name="IP Phones"
+            description="VoIP telephony and IP phone handsets"
+            count={vlan10.length}
+          />
+
+          <PolicyRow
             vlan="20"
             name="Computers"
             description="Approved LAN computers and workstations"
@@ -4332,6 +4481,20 @@ const AccessPage = () => {
             name="Printers"
             description="Network printing devices"
             count={vlan40.length}
+          />
+
+          <PolicyRow
+            vlan="50"
+            name="Servers"
+            description="Core infrastructure and servers"
+            count={vlan50.length}
+          />
+
+          <PolicyRow
+            vlan="60"
+            name="Access Points"
+            description="Wireless access points and APs"
+            count={vlan60.length}
           />
 
           <PolicyRow
@@ -4482,6 +4645,10 @@ const AccessPage = () => {
   const [reportError, setReportError] = useState("");
 
   const ReportsPage = () => {
+  const ipPhoneDevices = devices.filter(
+    (device) => device.device_type === "ip_phone"
+  ).length;
+
   const computerDevices = devices.filter(
     (device) => device.device_type === "computer"
   ).length;
@@ -4494,15 +4661,26 @@ const AccessPage = () => {
     (device) => device.device_type === "printer"
   ).length;
 
+  const serverDevices = devices.filter(
+    (device) => device.device_type === "server"
+  ).length;
+
+  const apDevices = devices.filter(
+    (device) => device.device_type === "access_point" || device.device_type === "ap" || device.device_type === "wifi_ap"
+  ).length;
+
   const unknownDevices = devices.filter(
     (device) =>
-      !["computer", "cctv", "printer"].includes(
+      !["ip_phone", "computer", "cctv", "printer", "server", "access_point", "ap", "wifi_ap"].includes(
         device.device_type
       )
   ).length;
 
  const rejectedDevices = devices.filter(
     (device) => device.approval_status === "rejected"
+  ).length;
+const vlan10Devices = devices.filter(
+    (device) => Number(device.vlan_id) === 10
   ).length;
 const vlan20Devices = devices.filter(
     (device) => Number(device.vlan_id) === 20
@@ -4514,6 +4692,14 @@ const vlan20Devices = devices.filter(
 
   const vlan40Devices = devices.filter(
     (device) => Number(device.vlan_id) === 40
+  ).length;
+
+  const vlan50Devices = devices.filter(
+    (device) => Number(device.vlan_id) === 50
+  ).length;
+
+  const vlan60Devices = devices.filter(
+    (device) => Number(device.vlan_id) === 60
   ).length;
 
   const vlan90Devices = devices.filter(
@@ -4672,7 +4858,18 @@ return (
   <div className="panel-subtitle">
     Devices grouped by detected type.
   </div>
-</div>         
+</div>
+
+<ReportCard
+          title="IP Phones"
+          value={ipPhoneDevices}
+          description="Detected VoIP & IP phone devices."
+ onClick={() => {
+    setDeviceFilter("ip_phone");
+    setActivePage("devices");
+  }}
+        />
+
 <ReportCard
           title="Computers"
           value={computerDevices}
@@ -4704,6 +4901,26 @@ return (
         />
 
         <ReportCard
+          title="Servers"
+          value={serverDevices}
+          description="Detected server devices."
+ onClick={() => {
+    setDeviceFilter("server");
+    setActivePage("devices");
+  }}
+        />
+
+        <ReportCard
+          title="Access Points"
+          value={apDevices}
+          description="Detected wireless access points."
+ onClick={() => {
+    setDeviceFilter("access_point");
+    setActivePage("devices");
+  }}
+        />
+
+        <ReportCard
           title="Unknown"
           value={unknownDevices}
           description="Devices not yet classified."
@@ -4720,6 +4937,16 @@ return (
     Devices assigned to each network segment.
   </div>
 </div>
+
+<ReportCard
+          title="VLAN 10"
+          value={vlan10Devices}
+          description="Devices assigned to VLAN 10 (IP Phones)."
+ onClick={() => {
+    setDeviceFilter("vlan10");
+    setActivePage("devices");
+  }}
+        />
 
 <ReportCard
           title="VLAN 20"
@@ -4747,6 +4974,26 @@ return (
           description="Devices assigned to VLAN 40."
  onClick={() => {
     setDeviceFilter("vlan40");
+    setActivePage("devices");
+  }}
+        />
+
+        <ReportCard
+          title="VLAN 50"
+          value={vlan50Devices}
+          description="Devices assigned to VLAN 50 (Servers)."
+ onClick={() => {
+    setDeviceFilter("vlan50");
+    setActivePage("devices");
+  }}
+        />
+
+        <ReportCard
+          title="VLAN 60"
+          value={vlan60Devices}
+          description="Devices assigned to VLAN 60 (Access Points)."
+ onClick={() => {
+    setDeviceFilter("vlan60");
     setActivePage("devices");
   }}
         />
@@ -6564,6 +6811,10 @@ const Dashboard = () => {
       device.access_decision === "quarantine"
   ).length;
 
+  const ipPhoneDevices = devices.filter(
+    (device) => device.device_type === "ip_phone"
+  ).length;
+
   const computerDevices = devices.filter(
     (device) => device.device_type === "computer"
   ).length;
@@ -6574,6 +6825,14 @@ const Dashboard = () => {
 
   const printerDevices = devices.filter(
     (device) => device.device_type === "printer"
+  ).length;
+
+  const serverDevices = devices.filter(
+    (device) => device.device_type === "server"
+  ).length;
+
+  const apDevices = devices.filter(
+    (device) => device.device_type === "access_point" || device.device_type === "ap" || device.device_type === "wifi_ap"
   ).length;
 
   const unknownDevices = devices.filter(
@@ -7009,6 +7268,27 @@ const Dashboard = () => {
             className="summary-card"
             onClick={isAdmin ? () => {
               setActivePage("vlans");
+              setVlanFilter("10");
+            } : undefined}
+            style={{ cursor: isAdmin ? "pointer" : "default" }}
+          >
+            <div className="summary-card-title">
+              📞 IP Phones
+            </div>
+
+            <div className="summary-card-value">
+              {ipPhoneDevices}
+            </div>
+
+            <div className="summary-card-text">
+              VLAN 10
+            </div>
+          </div>
+
+          <div
+            className="summary-card"
+            onClick={isAdmin ? () => {
+              setActivePage("vlans");
               setVlanFilter("20");
             } : undefined}
             style={{ cursor: isAdmin ? "pointer" : "default" }}
@@ -7065,6 +7345,48 @@ const Dashboard = () => {
 
             <div className="summary-card-text">
               VLAN 40
+            </div>
+          </div>
+
+          <div
+            className="summary-card"
+            onClick={isAdmin ? () => {
+              setActivePage("vlans");
+              setVlanFilter("50");
+            } : undefined}
+            style={{ cursor: isAdmin ? "pointer" : "default" }}
+          >
+            <div className="summary-card-title">
+              🗄️ Servers
+            </div>
+
+            <div className="summary-card-value">
+              {serverDevices}
+            </div>
+
+            <div className="summary-card-text">
+              VLAN 50
+            </div>
+          </div>
+
+          <div
+            className="summary-card"
+            onClick={isAdmin ? () => {
+              setActivePage("vlans");
+              setVlanFilter("60");
+            } : undefined}
+            style={{ cursor: isAdmin ? "pointer" : "default" }}
+          >
+            <div className="summary-card-title">
+              📡 Access Points
+            </div>
+
+            <div className="summary-card-value">
+              {apDevices}
+            </div>
+
+            <div className="summary-card-text">
+              VLAN 60
             </div>
           </div>
 
@@ -9844,6 +10166,14 @@ const EndpointUpdatesPage = () => {
           white-space: nowrap;
         }
 
+        .type-badge.ip_phone,
+        .type-badge.phone,
+        .type-badge.voip {
+          color: #047857;
+          background: #d1fae5;
+          border: 1px solid #6ee7b7;
+        }
+
         .type-badge.computer {
           color: #1d4ed8;
           background: #dbeafe;
@@ -9860,6 +10190,20 @@ const EndpointUpdatesPage = () => {
           color: #0e7490;
           background: #cffafe;
           border: 1px solid #67e8f9;
+        }
+
+        .type-badge.server {
+          color: #4338ca;
+          background: #e0e7ff;
+          border: 1px solid #a5b4fc;
+        }
+
+        .type-badge.access_point,
+        .type-badge.ap,
+        .type-badge.wifi_ap {
+          color: #0f766e;
+          background: #ccfbf1;
+          border: 1px solid #5eead4;
         }
 
         .type-badge.unknown {
@@ -10792,7 +11136,7 @@ const EndpointUpdatesPage = () => {
                 <div style={{ fontWeight: "700", color: "#0f172a", marginBottom: "3px" }}>
                   Next Experimental Steps:
                 </div>
-                <div>1️⃣ <strong>Review & Approve</strong>: Classify type & assign VLAN (VLAN 20/30/40)</div>
+                <div>1️⃣ <strong>Review & Approve</strong>: Classify type & assign VLAN (VLAN 10/20/30/40/50/60)</div>
                 <div>2️⃣ <strong>Firewall Control</strong>: Allow Internet, Disconnect, or Quarantine</div>
                 <div>3️⃣ <strong>Schedule</strong>: Set inline working-hours Access Schedule</div>
                 <div>4️⃣ <strong>Updates</strong>: Scan & deploy OS patches in Endpoint Updates</div>

@@ -1,7 +1,10 @@
 KNOWN_DEVICE_TYPES = {
+    "ip_phone",
     "computer",
     "cctv",
     "printer",
+    "server",
+    "access_point",
 }
 
 
@@ -19,6 +22,15 @@ def normalize_device_type(
         return None
 
     normalized = device_type.lower().strip()
+
+    if normalized in ("phone", "voip", "ip_phone", "ipphone"):
+        return "ip_phone"
+
+    if normalized in ("server", "servers"):
+        return "server"
+
+    if normalized in ("access_point", "ap", "wap", "wifi_ap", "accesspoint"):
+        return "access_point"
 
     if normalized not in KNOWN_DEVICE_TYPES:
         return None

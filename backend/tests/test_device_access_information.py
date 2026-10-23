@@ -71,3 +71,9 @@ def test_unknown_device_type_has_clear_reason():
 
     assert result.access_decision == "quarantine"
     assert result.access_reason == "Unknown or unrecognized device type"
+
+
+def test_add_access_information_defaults_ip_assignment():
+    device = make_device()
+    result = add_access_information(device)
+    assert result.ip_assignment == "dhcp"

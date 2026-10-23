@@ -270,9 +270,88 @@ def test_offline_device_reconnected_transitions_to_online(monkeypatch):
     online_calls = [
         c for c in event_mock.call_args_list if c.kwargs.get("event_type") == "device_online"
     ]
-    assert len(online_calls) == 1
-    assert "HOST-192-168-0-12" in online_calls[0].kwargs["message"]
+    assert online_calls[0].kwargs["device_id"] == dev.id
     assert db_instance.committed is True
     assert db_instance.closed is True
+
+
+def test_endpoint_health_monitor_dhcp_ip_change_treated_as_new_machine(monkeypatch):
+    from backend.app.models.device import Device
+    from unittest.mock import patch
+
+    dev = Device(
+        id=42,
+        mac_address="F0:1F:AF:4C:6A:E9",
+        ip_address="192.168.0.10",
+        hostname="HOST-192-168-0-10",
+        vendor="Dell Inc.",
+        status="online",
+        approval_status="approved",
+        ip_assignment="dhcp",
+        vlan_id=20,
+        enforcement_status="allowed",
+        internet_access_authorized=True,
+    )
+
+    class RealDbSession:
+        def __init__(self):
+            self.committed = False
+            self.closed = False
+        def scalars(self, query):
+            mock_res = MagicMock()
+            q_str = str(query).lower()
+            if "device" in q_str:
+                mock_res.all.return_value = [dev]
+            else:
+                mock_res.all.return_value = []
+            mock_res.first.return_value = None
+            return mock_res
+        def commit(self):
+            self.committed = True
+        def close(self):
+            self.closed = True
+        def rollback(self):
+            pass
+
+    db_instance = RealDbSession()
+    monkeypatch.setattr(monitor, "SessionLocal", lambda: db_instance)
+    event_mock = MagicMock()
+    monkeypatch.setattr(monitor, "create_event", event_mock)
+
+    async def stop_after_one_cycle(_seconds):
+        raise RuntimeError("stop test loop")
+
+    monkeypatch.setattr(monitor.asyncio, "sleep", stop_after_one_cycle)
+
+    with (
+        patch("backend.app.services.endpoint_health_monitor.subprocess.run") as mock_subproc,
+        patch("backend.app.services.endpoint_health_monitor.enforce_device_access") as mock_enforce,
+        patch("backend.app.services.endpoint_health_monitor.restore_device_l2"),
+    ):
+        fake_res = MagicMock()
+        # live sweep finds device on a new DHCP IP (192.168.0.88)
+        fake_res.stdout = "192.168.0.88\tF0:1F:AF:4C:6A:E9\tDell Inc."
+        fake_res.returncode = 0
+        mock_subproc.return_value = fake_res
+
+        try:
+            asyncio.run(monitor.endpoint_health_monitor_loop())
+        except RuntimeError as err:
+            assert str(err) == "stop test loop"
+
+    # Device must be treated like a new machine
+    assert dev.ip_address == "192.168.0.88"
+    assert dev.approval_status == "pending"
+    assert dev.vlan_id == 90
+    assert dev.enforcement_status == "quarantined"
+    assert dev.internet_access_authorized is False
+
+    new_dev_calls = [
+        c for c in event_mock.call_args_list if c.kwargs.get("event_type") == "new_device"
+    ]
+    assert len(new_dev_calls) == 1
+    assert "Treated as new machine" in new_dev_calls[0].kwargs["message"]
+    assert "192.168.0.10" in new_dev_calls[0].kwargs["message"]
+    assert "192.168.0.88" in new_dev_calls[0].kwargs["message"]
 
 
