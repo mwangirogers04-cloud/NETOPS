@@ -13,6 +13,7 @@ from ..services.auth_service import (
     hash_password,
     require_admin,
     send_activation_email,
+    validate_password_complexity,
 )
 
 router = APIRouter(
@@ -331,6 +332,13 @@ def update_user(
 
     # Password
     if req.password is not None and req.password.strip():
+        try:
+            validate_password_complexity(req.password)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            )
         user.hashed_password = hash_password(req.password)
 
     # Active status

@@ -23,6 +23,7 @@ from ..services.auth_service import (
     send_activation_email,
     send_email_message,
     send_sms_message,
+    validate_password_complexity,
     verify_and_consume_otp,
     verify_password,
 )
@@ -148,13 +149,6 @@ class ResetPasswordRequest(BaseModel):
     otp_code: str
     new_password: str
 
-    @field_validator("new_password")
-    @classmethod
-    def validate_new_password(cls, v: str) -> str:
-        if len(v) < 6:
-            raise ValueError("Password must be at least 6 characters long")
-        return v
-
 
 class AdminDirectResetPasswordRequest(BaseModel):
     target_identifier: str
@@ -169,13 +163,6 @@ class AdminDirectResetPasswordRequest(BaseModel):
         if not clean:
             raise ValueError("Please provide the username, email, or phone number of the user to reset")
         return clean
-
-    @field_validator("new_password")
-    @classmethod
-    def validate_new_password(cls, v: str) -> str:
-        if len(v) < 6:
-            raise ValueError("New password must be at least 6 characters long")
-        return v
 
 
 # -------------------------------------------------------------
@@ -632,7 +619,15 @@ def reset_password(
     req: ResetPasswordRequest,
     db: Session = Depends(get_db),
 ):
-    """Validate 5-minute OTP and reset password."""
+    """Validate 5-minute OTP and reset password (enforcing 8+ chars, uppercase, lowercase, special char)."""
+    try:
+        validate_password_complexity(req.new_password)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+
     user = _find_user_by_identifier(db, req.identifier)
 
     if not user:
@@ -670,9 +665,11 @@ def admin_direct_reset_password(
     """
     Directly reset a user's password using Administrative ('admin') or
     Developer ('super_admin') rights without sending an OTP to phone or email.
-    Supports authorization via either:
-      1. Admin/Developer credentials (admin_identifier + admin_password) on the Login page, or
-      2. An active Admin/Developer JWT Bearer token.
+    Rules enforced:
+      1. Authorizer must have 'admin' or 'super_admin' rights.
+      2. An 'admin' CANNOT reset the password of the Developer ('super_admin').
+      3. New password must be >= 8 characters and include at least 1 uppercase letter,
+         1 lowercase letter, and 1 special character.
     """
     authorizer: User | None = None
 
@@ -724,11 +721,20 @@ def admin_direct_reset_password(
             detail=f"No user account found matching '{req.target_identifier.strip()}'. Please check the username, email, or phone number.",
         )
 
-    # Role hierarchy check: Only Developer (super_admin) can reset a Developer (super_admin) password
+    # Role hierarchy check: An Administrator (admin) CANNOT reset the Developer (super_admin) password
     if target_user.role == "super_admin" and authorizer.role != "super_admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only a Developer (Super Administrator) can reset the password for a Developer account.",
+            detail="Access denied: An Administrator cannot reset the password for the Developer (Super Administrator) account. Only a Developer can reset the Developer password.",
+        )
+
+    # Enforce password complexity: >= 8 chars, 1 uppercase, 1 lowercase, 1 special character
+    try:
+        validate_password_complexity(req.new_password)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
         )
 
     target_user.hashed_password = hash_password(req.new_password)

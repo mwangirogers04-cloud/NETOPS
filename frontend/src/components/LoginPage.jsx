@@ -97,6 +97,62 @@ export default function LoginPage({ API_URL, onLoginSuccess, initialActivationTo
     return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
   };
 
+  // Validate password complexity: min 8 chars, 1 uppercase, 1 lowercase, 1 special character
+  const getPasswordRuleStatus = (pwd = "") => ({
+    minLength: pwd.length >= 8,
+    hasUpper: /[A-Z]/.test(pwd),
+    hasLower: /[a-z]/.test(pwd),
+    hasSpecial: /[^A-Za-z0-9\s]/.test(pwd),
+  });
+
+  const validatePasswordComplexity = (pwd = "") => {
+    const rules = getPasswordRuleStatus(pwd);
+    if (!rules.minLength) {
+      return "Password must be at least 8 characters long and include at least one uppercase letter, one lowercase letter, and one special character.";
+    }
+    if (!rules.hasUpper) {
+      return "Password must contain at least one uppercase letter (A-Z).";
+    }
+    if (!rules.hasLower) {
+      return "Password must contain at least one lowercase letter (a-z).";
+    }
+    if (!rules.hasSpecial) {
+      return "Password must contain at least one special character (e.g. @, #, $, %, !, &, *).";
+    }
+    return null;
+  };
+
+  const renderPasswordChecklist = (pwd = "") => {
+    const r = getPasswordRuleStatus(pwd);
+    const itemStyle = (ok) => ({
+      display: "flex",
+      alignItems: "center",
+      gap: "6px",
+      fontSize: "11px",
+      fontWeight: ok ? "700" : "500",
+      color: ok ? "#059669" : "#64748b",
+    });
+    return (
+      <div
+        style={{
+          background: "#f8fafc",
+          border: "1px solid #cbd5e1",
+          borderRadius: "8px",
+          padding: "8px 10px",
+          marginTop: "6px",
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          gap: "4px 10px",
+        }}
+      >
+        <div style={itemStyle(r.minLength)}>{r.minLength ? "✓" : "○"} Min 8 characters</div>
+        <div style={itemStyle(r.hasUpper)}>{r.hasUpper ? "✓" : "○"} 1 Uppercase (A–Z)</div>
+        <div style={itemStyle(r.hasLower)}>{r.hasLower ? "✓" : "○"} 1 Lowercase (a–z)</div>
+        <div style={itemStyle(r.hasSpecial)}>{r.hasSpecial ? "✓" : "○"} 1 Special (@#$%!&*)</div>
+      </div>
+    );
+  };
+
   // Recheck Email / Phone / Username availability against existing accounts
   const recheckAvailability = async ({
     usernameVal = regUsername,
@@ -373,8 +429,9 @@ export default function LoginPage({ API_URL, onLoginSuccess, initialActivationTo
       setErrorMessage("Please enter the 6-digit OTP code.");
       return;
     }
-    if (newPassword.length < 6) {
-      setErrorMessage("New password must be at least 6 characters long.");
+    const complexityErr = validatePasswordComplexity(newPassword);
+    if (complexityErr) {
+      setErrorMessage(complexityErr);
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -400,7 +457,13 @@ export default function LoginPage({ API_URL, onLoginSuccess, initialActivationTo
       });
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.detail || "Failed to reset password.");
+        const msg =
+          typeof data.detail === "string"
+            ? data.detail
+            : Array.isArray(data.detail)
+            ? data.detail.map((d) => d.msg || JSON.stringify(d)).join(", ")
+            : "Failed to reset password.";
+        throw new Error(msg);
       }
       setMode("signin");
       setForgotStep(1);
@@ -429,8 +492,9 @@ export default function LoginPage({ API_URL, onLoginSuccess, initialActivationTo
       setErrorMessage("Please enter your Administrator or Developer username/email and password to authorize the reset.");
       return;
     }
-    if (!adminNewPassword || adminNewPassword.length < 6) {
-      setErrorMessage("New password must be at least 6 characters long.");
+    const complexityErr = validatePasswordComplexity(adminNewPassword);
+    if (complexityErr) {
+      setErrorMessage(complexityErr);
       return;
     }
     if (adminNewPassword !== adminConfirmPassword) {
@@ -452,11 +516,13 @@ export default function LoginPage({ API_URL, onLoginSuccess, initialActivationTo
       });
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(
+        const msg =
           typeof data.detail === "string"
             ? data.detail
-            : "Failed to reset user password with Admin/Developer credentials."
-        );
+            : Array.isArray(data.detail)
+            ? data.detail.map((d) => d.msg || JSON.stringify(d)).join(", ")
+            : "Failed to reset user password with Admin/Developer credentials.";
+        throw new Error(msg);
       }
 
       const resetUsername = data.username || targetIdent;
@@ -1238,8 +1304,11 @@ export default function LoginPage({ API_URL, onLoginSuccess, initialActivationTo
                     marginBottom: "16px",
                   }}
                 >
-                  <div style={{ fontSize: "11px", fontWeight: "800", color: "#1d4ed8", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "10px" }}>
+                  <div style={{ fontSize: "11px", fontWeight: "800", color: "#1d4ed8", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "6px" }}>
                     🔐 Authorize with Admin / Developer Credentials
+                  </div>
+                  <div style={{ fontSize: "11px", color: "#b45309", background: "#fef3c7", border: "1px solid #fde68a", borderRadius: "6px", padding: "6px 8px", marginBottom: "10px", fontWeight: "600" }}>
+                    ⚠️ Note: An Administrator cannot reset the password for the Developer (Super Admin) account.
                   </div>
 
                   <div className="form-group" style={{ marginBottom: "12px" }}>
@@ -1286,12 +1355,12 @@ export default function LoginPage({ API_URL, onLoginSuccess, initialActivationTo
                 </div>
 
                 <div className="form-group">
-                  <label className="form-label">New Password for User (min 6 characters) *</label>
+                  <label className="form-label">New Password for User (min 8 chars, A-Z, a-z, special) *</label>
                   <div className="input-wrapper">
                     <input
                       type={showAdminNewPassword ? "text" : "password"}
                       className="login-input"
-                      placeholder="Enter new password for the user"
+                      placeholder="e.g. SecurePass@123"
                       value={adminNewPassword}
                       onChange={(e) => setAdminNewPassword(e.target.value)}
                       disabled={loading}
@@ -1306,6 +1375,7 @@ export default function LoginPage({ API_URL, onLoginSuccess, initialActivationTo
                       {showAdminNewPassword ? "👁️‍🗨️" : "👁️"}
                     </button>
                   </div>
+                  {renderPasswordChecklist(adminNewPassword)}
                 </div>
 
                 <div className="form-group">
@@ -1560,12 +1630,12 @@ export default function LoginPage({ API_URL, onLoginSuccess, initialActivationTo
                 </div>
 
                 <div className="form-group">
-                  <label className="form-label">New Password (min 6 characters)</label>
+                  <label className="form-label">New Password (min 8 chars, A-Z, a-z, special)</label>
                   <div className="input-wrapper">
                     <input
                       type={showNewPassword ? "text" : "password"}
                       className="login-input"
-                      placeholder="Enter new secure password"
+                      placeholder="e.g. SecurePass@123"
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
                       disabled={loading || otpSecondsLeft <= 0}
@@ -1578,6 +1648,7 @@ export default function LoginPage({ API_URL, onLoginSuccess, initialActivationTo
                       {showNewPassword ? "👁️‍🗨️" : "👁️"}
                     </button>
                   </div>
+                  {renderPasswordChecklist(newPassword)}
                 </div>
 
                 <div className="form-group">

@@ -131,8 +131,35 @@ def check_user_conflicts(
 
 
 # -------------------------------------------------------------
-# PASSWORD HASHING
+# PASSWORD COMPLEXITY & HASHING
 # -------------------------------------------------------------
+
+def validate_password_complexity(password: str) -> str:
+    """
+    Validate that a password meets complexity requirements:
+      - Minimum 8 characters
+      - At least one uppercase letter (A-Z)
+      - At least one lowercase letter (a-z)
+      - At least one special character (non-alphanumeric)
+    """
+    if not password or len(password) < 8:
+        raise ValueError(
+            "Password must be at least 8 characters long and include at least one uppercase letter, one lowercase letter, and one special character."
+        )
+    if not any(ch.isupper() for ch in password):
+        raise ValueError(
+            "Password must contain at least one uppercase letter (A-Z)."
+        )
+    if not any(ch.islower() for ch in password):
+        raise ValueError(
+            "Password must contain at least one lowercase letter (a-z)."
+        )
+    if not any(not ch.isalnum() and not ch.isspace() for ch in password):
+        raise ValueError(
+            "Password must contain at least one special character (e.g. @, #, $, %, !, &, *)."
+        )
+    return password
+
 
 def hash_password(password: str) -> str:
     """Hash password using bcrypt."""

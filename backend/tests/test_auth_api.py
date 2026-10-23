@@ -470,7 +470,26 @@ def test_admin_and_developer_direct_password_reset_without_otp():
         },
     )
     assert adm_vs_dev.status_code == 403
-    assert "only a developer" in adm_vs_dev.json()["detail"].lower()
+    assert "administrator cannot reset the password for the developer" in adm_vs_dev.json()["detail"].lower()
+
+    # 3b. Password complexity checks on reset (< 8 chars, missing uppercase, missing lowercase, missing special char)
+    for weak_pwd, expected_sub in [
+        ("Ab@1", "at least 8 characters"),
+        ("lowercaseonly@123", "uppercase letter"),
+        ("UPPERCASEONLY@123", "lowercase letter"),
+        ("NoSpecialChar123", "special character"),
+    ]:
+        weak_res = client.post(
+            "/auth/forgot-password/admin-reset",
+            json={
+                "target_identifier": "staff_member",
+                "admin_identifier": "admin",
+                "admin_password": "Admin@1234",
+                "new_password": weak_pwd,
+            },
+        )
+        assert weak_res.status_code == 400
+        assert expected_sub in weak_res.json()["detail"].lower()
 
     # 4. Developer (super_admin) can directly reset any account (even by phone number)
     dev_reset_res = client.post(

@@ -1166,8 +1166,24 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
               onSubmit={async (e) => {
                 e.preventDefault();
                 setResetError("");
-                if (!resetNewPassword || resetNewPassword.length < 6) {
-                  setResetError("New password must be at least 6 characters long.");
+                if (resetTargetUser.role === "super_admin" && !isSuperAdmin) {
+                  setResetError("Access denied: An Administrator cannot reset the password for the Developer (Super Administrator) account.");
+                  return;
+                }
+                if (!resetNewPassword || resetNewPassword.length < 8) {
+                  setResetError("Password must be at least 8 characters long and include at least one uppercase letter, one lowercase letter, and one special character.");
+                  return;
+                }
+                if (!/[A-Z]/.test(resetNewPassword)) {
+                  setResetError("Password must contain at least one uppercase letter (A-Z).");
+                  return;
+                }
+                if (!/[a-z]/.test(resetNewPassword)) {
+                  setResetError("Password must contain at least one lowercase letter (a-z).");
+                  return;
+                }
+                if (!/[^A-Za-z0-9\s]/.test(resetNewPassword)) {
+                  setResetError("Password must contain at least one special character (e.g. @, #, $, %, !, &, *).");
                   return;
                 }
                 if (resetNewPassword !== resetConfirmPassword) {
@@ -1233,13 +1249,13 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
 
               <div className="form-group" style={{ marginBottom: "14px" }}>
                 <label className="form-label" style={{ fontSize: "11px", fontWeight: "700", color: "#334155", display: "block", marginBottom: "4px" }}>
-                  New Password (min 6 characters) *
+                  New Password (min 8 chars, 1 uppercase, 1 lowercase, 1 special) *
                 </label>
                 <div style={{ position: "relative" }}>
                   <input
                     type={showResetPasswordText ? "text" : "password"}
                     className="login-input"
-                    placeholder="Enter new password for user"
+                    placeholder="e.g. SecurePass@123"
                     value={resetNewPassword}
                     onChange={(e) => setResetNewPassword(e.target.value)}
                     disabled={resetLoading}
@@ -1253,6 +1269,32 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                   >
                     {showResetPasswordText ? "👁️‍🗨️" : "👁️"}
                   </button>
+                </div>
+                <div
+                  style={{
+                    background: "#f8fafc",
+                    border: "1px solid #cbd5e1",
+                    borderRadius: "8px",
+                    padding: "8px 10px",
+                    marginTop: "6px",
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: "4px 10px",
+                    fontSize: "11px",
+                  }}
+                >
+                  <div style={{ color: resetNewPassword.length >= 8 ? "#059669" : "#64748b", fontWeight: resetNewPassword.length >= 8 ? "700" : "500" }}>
+                    {resetNewPassword.length >= 8 ? "✓" : "○"} Min 8 characters
+                  </div>
+                  <div style={{ color: /[A-Z]/.test(resetNewPassword) ? "#059669" : "#64748b", fontWeight: /[A-Z]/.test(resetNewPassword) ? "700" : "500" }}>
+                    {/[A-Z]/.test(resetNewPassword) ? "✓" : "○"} 1 Uppercase (A–Z)
+                  </div>
+                  <div style={{ color: /[a-z]/.test(resetNewPassword) ? "#059669" : "#64748b", fontWeight: /[a-z]/.test(resetNewPassword) ? "700" : "500" }}>
+                    {/[a-z]/.test(resetNewPassword) ? "✓" : "○"} 1 Lowercase (a–z)
+                  </div>
+                  <div style={{ color: /[^A-Za-z0-9\s]/.test(resetNewPassword) ? "#059669" : "#64748b", fontWeight: /[^A-Za-z0-9\s]/.test(resetNewPassword) ? "700" : "500" }}>
+                    {/[^A-Za-z0-9\s]/.test(resetNewPassword) ? "✓" : "○"} 1 Special (@#$%!&*)
+                  </div>
                 </div>
               </div>
 
