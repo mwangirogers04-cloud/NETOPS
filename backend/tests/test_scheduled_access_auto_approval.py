@@ -134,8 +134,17 @@ def test_device_outside_schedule_window_remains_quarantined(db_session):
         assert res["decision"] == "quarantine"
         assert res["enforcement_status"] == "quarantined"
         assert dev.internet_access_authorized is False
+        assert dev.vlan_id == 90
         # Retains approval status so next window opens seamlessly
         assert dev.approval_status == "approved"
+
+        db_session.commit()
+        quar_evts = db_session.query(Event).filter(
+            Event.device_id == dev.id,
+            Event.event_type == "scheduled_access_quarantined",
+        ).all()
+        assert len(quar_evts) == 1
+        assert "automatically moved to quarantine on VLAN 90" in quar_evts[0].message
 
 
 def test_quarantined_device_auto_returns_online_when_schedule_window_opens(db_session):

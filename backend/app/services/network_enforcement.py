@@ -114,9 +114,10 @@ def enforce_device_access(
                     decision = "quarantine"
                     device.internet_access_authorized = False
             else:
-                # Active schedule currently outside allowed hours -> quarantine
+                # Active schedule currently outside allowed hours -> quarantine on VLAN 90
                 decision = "quarantine"
                 device.internet_access_authorized = False
+                device.vlan_id = 90
 
         elif device.approval_status in {"pending", "rejected"}:
             decision = "quarantine"
@@ -290,6 +291,36 @@ def enforce_device_access(
                 db,
                 "scheduled_access_allowed",
                 auto_sched_message,
+                device.id,
+                actor="System (Schedule)",
+            )
+
+    # If a device automatically transitioned to quarantine per active schedule,
+    # record an audit event for scheduled auto-quarantine
+    if (
+        has_active_schedule
+        and not schedule_allows_access
+        and old_enforcement_status == "allowed"
+    ):
+        latest_auto_quar_event = db.scalar(
+            select(Event)
+            .where(
+                Event.device_id == device.id,
+                Event.event_type == "scheduled_access_quarantined",
+            )
+            .order_by(Event.id.desc())
+            .limit(1)
+        )
+        auto_quar_message = (
+            f"Scheduled access expired: Machine "
+            f"{device.hostname or device.ip_address} ({device.mac_address}) "
+            f"automatically moved to quarantine on VLAN 90 per active schedule."
+        )
+        if latest_auto_quar_event is None or latest_auto_quar_event.message != auto_quar_message:
+            create_event(
+                db,
+                "scheduled_access_quarantined",
+                auto_quar_message,
                 device.id,
                 actor="System (Schedule)",
             )

@@ -838,11 +838,12 @@ const loadEvents = async () => {
 
   useEffect(() => {
     if (!currentUser) return;
-    const hasActiveJob = patchJobs.some((j) => j.status === "PENDING" || j.status === "IN_PROGRESS");
-    if (!hasActiveJob) return;
 
     const timer = setInterval(() => {
-      loadPatchJobs();
+      const hasActiveJob = patchJobs.some((j) => j.status === "PENDING" || j.status === "IN_PROGRESS");
+      if (hasActiveJob) {
+        loadPatchJobs();
+      }
       loadDevices();
     }, 4000);
 
@@ -993,7 +994,13 @@ const loadEvents = async () => {
         setHighlightedDeviceId(event.device_id);
       }
       playLanNotificationChime();
-    } else if (event.event_type === "device_offline" || event.event_type === "ip_address_changed") {
+    } else if (
+      event.event_type === "device_offline" ||
+      event.event_type === "ip_address_changed" ||
+      event.event_type === "access_enforcement" ||
+      event.event_type === "scheduled_access_allowed" ||
+      event.event_type === "scheduled_access_quarantined"
+    ) {
       loadDevices();
     }
   };
@@ -3087,7 +3094,7 @@ const DevicesPage = () => {
                       {device.enforcement_status ===
                       "allowed" ? (
                         <span className="status-badge allowed">
-                          Allowed
+                          {isDeviceScheduledForAccess(device) ? "🟢 Allowed (Scheduled)" : "Allowed"}
                         </span>
                       ) : device.enforcement_status ===
                         "isolated" ? (
@@ -3104,7 +3111,7 @@ const DevicesPage = () => {
                         </span>
                       ) : (
                         <span className="status-badge blocked">
-                          Quarantined
+                          {isDeviceScheduledForAccess(device) ? "🕒 Quarantined (Scheduled)" : "Quarantined"}
                         </span>
                       )}
                     </td>
@@ -3369,6 +3376,7 @@ const LanScannerPage = () => {
     if (lanFilterStatus === "ip-changed" && !ipChangedDeviceIds.has(device.id)) return false;
     if (lanFilterStatus === "allowed" && (device.enforcement_status !== "allowed" || device.status !== "online")) return false;
     if (lanFilterStatus === "quarantined" && (device.enforcement_status === "allowed" || device.status !== "online")) return false;
+    if (lanFilterStatus === "scheduled" && !isDeviceScheduled(device)) return false;
     if (lanFilterStatus === "pending" && device.approval_status !== "pending") return false;
 
     // Search query
@@ -3679,6 +3687,19 @@ const LanScannerPage = () => {
             </button>
             <button
               type="button"
+              className={lanFilterStatus === "scheduled" ? "primary-button small" : "secondary-button small"}
+              style={
+                lanFilterStatus === "scheduled"
+                  ? { background: "#4f46e5", color: "#fff", borderColor: "#4338ca", fontWeight: "700" }
+                  : { borderColor: "#6366f1", color: "#4f46e5", fontWeight: "600" }
+              }
+              onClick={() => setLanFilterStatus("scheduled")}
+              title="Filter online LAN devices with active schedules"
+            >
+              🕒 Scheduled ({interfaceDevices.filter(isDeviceScheduled).length})
+            </button>
+            <button
+              type="button"
               className={lanFilterStatus === "registered" ? "primary-button small" : "secondary-button small"}
               onClick={() => setLanFilterStatus("registered")}
             >
@@ -3969,7 +3990,7 @@ const LanScannerPage = () => {
                                 fontSize: "12px",
                               }}
                             >
-                              <span className="status-dot online" /> Allowed
+                              <span className="status-dot online" /> {isDeviceScheduledForAccess(device) ? "🟢 Allowed (Scheduled)" : "Allowed"}
                             </span>
                           ) : (
                             <span
@@ -3982,7 +4003,7 @@ const LanScannerPage = () => {
                                 fontSize: "12px",
                               }}
                             >
-                              <span className="status-dot offline" /> Quarantined
+                              <span className="status-dot offline" /> {isDeviceScheduledForAccess(device) ? "🕒 Quarantined (Scheduled)" : "Quarantined"}
                             </span>
                           )}
 
@@ -4421,13 +4442,13 @@ const AccessPage = () => {
                       "allowed" ? (
 
                         <span className="status-badge allowed">
-                          Internet Allowed
+                          {isDeviceScheduledForAccess(device) ? "🟢 Internet Allowed (Scheduled)" : "Internet Allowed"}
                         </span>
 
                       ) : (
 
                         <span className="status-badge blocked">
-                          ⚠️ Quarantined
+                          {isDeviceScheduledForAccess(device) ? "🕒 Quarantined (Scheduled)" : "⚠️ Quarantined"}
                         </span>
 
                       )}
