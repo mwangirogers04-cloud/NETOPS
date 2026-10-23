@@ -498,6 +498,33 @@ function App() {
     return parts.reduce((acc, octet) => (acc << 8) + (parseInt(octet, 10) || 0), 0) >>> 0;
   };
 
+  // Smart search: a complete IPv4 address or full MAC address is matched
+  // EXACTLY (so 192.168.0.15 will not also return 192.168.0.150).
+  // Anything else falls back to partial text matching.
+  const deviceMatchesSearch = (device, rawQuery, extraFields = []) => {
+    const q = (rawQuery || "").trim().toLowerCase();
+    if (!q) return true;
+
+    const ip = (device.ip_address || "").toLowerCase();
+    const mac = (device.mac_address || "").toLowerCase();
+
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(q)) {
+      return ip === q;
+    }
+    if (/^([0-9a-f]{2}[:-]){5}[0-9a-f]{2}$/.test(q)) {
+      return mac === q.replace(/-/g, ":");
+    }
+
+    const fields = [
+      ip,
+      mac,
+      device.hostname,
+      device.vendor,
+      ...extraFields,
+    ];
+    return fields.some((f) => (f || "").toString().toLowerCase().includes(q));
+  };
+
   const matchesSelectedInterface = (device) => {
     if (!selectedInterface || selectedInterface === "all") return true;
     const devIface = device.network_interface || "eth0";
@@ -2191,18 +2218,14 @@ const DevicesPage = () => {
     if (deviceFilter === "quarantined" && device.enforcement_status !== "quarantined") return false;
     if (deviceFilter === "isolated" && device.enforcement_status !== "isolated") return false;
 
-    if (deviceSearchQuery.trim()) {
-      const q = deviceSearchQuery.trim().toLowerCase();
-      const matchHost = (device.hostname || "").toLowerCase().includes(q);
-      const matchIp = (device.ip_address || "").toLowerCase().includes(q);
-      const matchMac = (device.mac_address || "").toLowerCase().includes(q);
-      const matchVendor = (device.vendor || "").toLowerCase().includes(q);
-      const matchType = (device.device_type || "").toLowerCase().includes(q);
-      const matchVlan = `vlan ${device.vlan_id || ""}`.toLowerCase().includes(q);
-      const matchIface = (device.network_interface || "").toLowerCase().includes(q);
-      if (!matchHost && !matchIp && !matchMac && !matchVendor && !matchType && !matchVlan && !matchIface) {
-        return false;
-      }
+    if (
+      !deviceMatchesSearch(device, deviceSearchQuery, [
+        device.device_type,
+        `vlan ${device.vlan_id || ""}`,
+        device.network_interface,
+      ])
+    ) {
+      return false;
     }
 
     return true;
@@ -2763,16 +2786,7 @@ const LanScannerPage = () => {
     if (lanFilterStatus === "pending" && device.approval_status !== "pending") return false;
 
     // Search query
-    if (lanSearchQuery.trim()) {
-      const q = lanSearchQuery.toLowerCase();
-      const ip = (device.ip_address || "").toLowerCase();
-      const mac = (device.mac_address || "").toLowerCase();
-      const host = (device.hostname || "").toLowerCase();
-      const vendor = (device.vendor || "").toLowerCase();
-      return ip.includes(q) || mac.includes(q) || host.includes(q) || vendor.includes(q);
-    }
-
-    return true;
+    return deviceMatchesSearch(device, lanSearchQuery);
   });
 
   const getDeviceIcon = (type) => {
