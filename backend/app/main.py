@@ -127,6 +127,18 @@ async def event_broadcaster():
     """
 
     last_event_id = 0
+    try:
+        init_db = SessionLocal()
+        try:
+            latest_ev = init_db.scalars(
+                select(Event).order_by(Event.id.desc()).limit(1)
+            ).first()
+            if latest_ev:
+                last_event_id = latest_ev.id
+        finally:
+            init_db.close()
+    except Exception:
+        last_event_id = 0
 
     while True:
         try:
@@ -140,18 +152,20 @@ async def event_broadcaster():
                 ).all()
 
                 for event in events:
+                    event_payload = {
+                        "id": event.id,
+                        "event_type": event.event_type,
+                        "message": event.message,
+                        "device_id": event.device_id,
+                        "created_at": (
+                            event.created_at.isoformat()
+                        ),
+                    }
                     await manager.broadcast(
                         {
                             "type": "event",
-                            "event": {
-                                "id": event.id,
-                                "event_type": event.event_type,
-                                "message": event.message,
-                                "device_id": event.device_id,
-                                "created_at": (
-                                    event.created_at.isoformat()
-                                ),
-                            },
+                            **event_payload,
+                            "event": event_payload,
                         }
                     )
 

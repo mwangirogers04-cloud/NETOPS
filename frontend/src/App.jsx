@@ -139,6 +139,7 @@ function App() {
   const [detectedInterfaces, setDetectedInterfaces] = useState([]);
   const [selectedInterface, setSelectedInterface] = useState("all");
   const [lanSearchQuery, setLanSearchQuery] = useState("");
+  const [deviceSearchQuery, setDeviceSearchQuery] = useState("");
   const [lanFilterStatus, setLanFilterStatus] = useState("all");
 
   const openScheduleModal = (device) => {
@@ -774,8 +775,93 @@ const loadEvents = async () => {
   }, [currentUser, eventTypeFilter, eventLimit, eventOffset]);
 
   // ------------------------------------------------------------
-  // WEBSOCKET
+  // WEBSOCKET + REAL-TIME LAN CONNECTION NOTIFICATION
   // ------------------------------------------------------------
+
+  const playLanNotificationChime = () => {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
+      osc.frequency.setValueAtTime(880, ctx.currentTime + 0.12); // A5
+      gain.gain.setValueAtTime(0.15, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.45);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.45);
+    } catch (_) {}
+  };
+
+  const handleIncomingLanEvent = (rawPayload) => {
+    if (!rawPayload || rawPayload.type === "connection") return;
+    const event = rawPayload.event || rawPayload;
+    if (!event || !event.event_type) return;
+
+    setEvents((previous) => {
+      const exists = previous.some(
+        (item) => item.id && event.id && item.id === event.id
+      );
+      if (exists) return previous;
+      return [event, ...previous];
+    });
+
+    if (event.event_type.startsWith("patch_job_")) {
+      loadPatchJobs();
+      loadDevices();
+    }
+
+    if (
+      event.event_type === "new_device" ||
+      event.event_type === "device_detected" ||
+      event.event_type === "device_online"
+    ) {
+      setNewDeviceAlert(event);
+      if (event.device_id) {
+        setHighlightedDeviceId(event.device_id);
+      }
+      playLanNotificationChime();
+      loadDevices();
+    } else if (event.event_type === "device_offline" || event.event_type === "ip_address_changed") {
+      loadDevices();
+    }
+  };
+
+  useEffect(() => {
+    if (!currentUser) return;
+    let highestSeenId = null;
+
+    const pollLatestEvents = async () => {
+      try {
+        const res = await fetch(`${API_URL}/events/?limit=10&offset=0`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!Array.isArray(data) || data.length === 0) return;
+
+        if (highestSeenId === null) {
+          highestSeenId = Math.max(...data.map((e) => e.id || 0));
+          return;
+        }
+
+        const freshEvents = data
+          .filter((e) => e.id && e.id > highestSeenId)
+          .sort((a, b) => a.id - b.id);
+
+        if (freshEvents.length > 0) {
+          highestSeenId = Math.max(...freshEvents.map((e) => e.id));
+          freshEvents.forEach((ev) => handleIncomingLanEvent(ev));
+        }
+      } catch (_) {}
+    };
+
+    pollLatestEvents();
+    const interval = setInterval(pollLatestEvents, 4000);
+    return () => clearInterval(interval);
+  }, [currentUser]);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -793,39 +879,8 @@ const loadEvents = async () => {
 
         socket.onmessage = (message) => {
           try {
-            const event = JSON.parse(message.data);
-
-            setEvents((previous) => {
-              const exists = previous.some(
-                (item) =>
-                  item.id &&
-                  event.id &&
-                  item.id === event.id
-              );
-
-              if (exists) {
-                return previous;
-              }
-
-              return [event, ...previous];
-            });
-
-            if (event.event_type && event.event_type.startsWith("patch_job_")) {
-              loadPatchJobs();
-              loadDevices();
-            }
-
-            if (event.event_type === "new_device") {
-              setNewDeviceAlert(event);
-              setHighlightedDeviceId(event.device_id);
-
-              loadDevices();
-
-              setTimeout(() => {
-                setNewDeviceAlert(null);
-                setHighlightedDeviceId(null);
-              }, 8000);
-            }
+            const payload = JSON.parse(message.data);
+            handleIncomingLanEvent(payload);
           } catch (error) {
             console.error(
               "WebSocket event error:",
@@ -843,7 +898,7 @@ const loadEvents = async () => {
 
           reconnectTimer = setTimeout(
             connect,
-            5000
+            3000
           );
         };
       } catch (error) {
@@ -854,7 +909,7 @@ const loadEvents = async () => {
 
         reconnectTimer = setTimeout(
           connect,
-          5000
+          3000
         );
       }
     };
@@ -868,7 +923,7 @@ const loadEvents = async () => {
         socket.close();
       }
     };
-  }, []);
+  }, [currentUser]);
 
   // ------------------------------------------------------------
   // DEVICE ACTION
@@ -994,6 +1049,15 @@ const loadEvents = async () => {
 
     else if (action === "unisolate") {
       url += "/unisolate";
+      method = "POST";
+    }
+
+    // ----------------------------------------------------------
+    // RESET DEVICE FOR LAN CONNECTION EXPERIMENT
+    // ----------------------------------------------------------
+
+    else if (action === "reset-experiment") {
+      url += "/reset-experiment";
       method = "POST";
     }
 
@@ -2045,6 +2109,47 @@ const DevicesPage = () => {
           >
             🔒 Isolated ({isolatedDevices})
           </button>
+
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", flex: "1", minWidth: "260px", maxWidth: "360px", marginLeft: "auto" }}>
+            <div style={{ position: "relative", width: "100%" }}>
+              <input
+                type="text"
+                placeholder={`🔍 Search ${deviceFilter === "online" ? "Online" : deviceFilter === "all" ? "All" : deviceFilter} devices (IP, MAC, hostname, vendor, VLAN)...`}
+                value={deviceSearchQuery}
+                onChange={(e) => setDeviceSearchQuery(e.target.value)}
+                style={{
+                  width: "100%",
+                  padding: "7px 28px 7px 12px",
+                  background: "#ffffff",
+                  border: "1px solid #cbd5e1",
+                  borderRadius: "6px",
+                  color: "#0f172a",
+                  fontSize: "12px",
+                }}
+              />
+              {deviceSearchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setDeviceSearchQuery("")}
+                  title="Clear search"
+                  style={{
+                    position: "absolute",
+                    right: "6px",
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    background: "none",
+                    border: "none",
+                    color: "#64748b",
+                    cursor: "pointer",
+                    fontSize: "13px",
+                    fontWeight: "700",
+                  }}
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          </div>
         </div>
         <div className="table-container">
           <table className="data-table">
@@ -2075,45 +2180,31 @@ const DevicesPage = () => {
               ) : (
                 scopedDevices
   .filter((device) => {
-    if (deviceFilter === "all") return true;
+    if (deviceFilter === "online" && device.status !== "online") return false;
+    if (deviceFilter === "offline" && device.status !== "offline") return false;
+    if (deviceFilter === "needs_updates" && device.update_status !== "updates_available") return false;
+    if (deviceFilter === "queued" && !Boolean(getActiveJobForDevice(device))) return false;
+    if (deviceFilter === "up_to_date" && device.update_status !== "up_to_date") return false;
+    if (deviceFilter === "unmonitored" && device.update_status && device.update_status !== "unmonitored") return false;
+    if (deviceFilter === "pending" && device.approval_status !== "pending") return false;
+    if (deviceFilter === "rejected" && device.approval_status !== "rejected") return false;
+    if (deviceFilter === "quarantined" && device.enforcement_status !== "quarantined") return false;
+    if (deviceFilter === "isolated" && device.enforcement_status !== "isolated") return false;
 
-    if (deviceFilter === "online") {
-      return device.status === "online";
+    if (deviceSearchQuery.trim()) {
+      const q = deviceSearchQuery.trim().toLowerCase();
+      const matchHost = (device.hostname || "").toLowerCase().includes(q);
+      const matchIp = (device.ip_address || "").toLowerCase().includes(q);
+      const matchMac = (device.mac_address || "").toLowerCase().includes(q);
+      const matchVendor = (device.vendor || "").toLowerCase().includes(q);
+      const matchType = (device.device_type || "").toLowerCase().includes(q);
+      const matchVlan = `vlan ${device.vlan_id || ""}`.toLowerCase().includes(q);
+      const matchIface = (device.network_interface || "").toLowerCase().includes(q);
+      if (!matchHost && !matchIp && !matchMac && !matchVendor && !matchType && !matchVlan && !matchIface) {
+        return false;
+      }
     }
 
-    if (deviceFilter === "offline") {
-      return device.status === "offline";
-    }
-
-    if (deviceFilter === "needs_updates") {
-      return device.update_status === "updates_available";
-    }
-
-    if (deviceFilter === "queued") {
-      return Boolean(getActiveJobForDevice(device));
-    }
-
-    if (deviceFilter === "up_to_date") {
-      return device.update_status === "up_to_date";
-    }
-
-    if (deviceFilter === "unmonitored") {
-      return !device.update_status || device.update_status === "unmonitored";
-    }
-
-    if (deviceFilter === "pending") {
-      return device.approval_status === "pending";
-    }
-
-if (deviceFilter === "rejected") {
-  return device.approval_status === "rejected";
-}    
-if (deviceFilter === "quarantined") {
-  return device.enforcement_status === "quarantined";
-}
-if (deviceFilter === "isolated") {
-  return device.enforcement_status === "isolated";
-}
     return true;
   })
   .map((device) => (
@@ -3389,6 +3480,23 @@ const LanScannerPage = () => {
                               Approve
                             </button>
                           )}
+
+                          {/* RESET FOR EXPERIMENT */}
+                          <button
+                            className="secondary-button small"
+                            type="button"
+                            onClick={() =>
+                              deviceAction(device.id, "reset-experiment")
+                            }
+                            disabled={
+                              actionLoading === `reset-experiment-${device.id}`
+                            }
+                            title="Reset this machine to unapproved Quarantine state and trigger the LAN Connection Notification to start the experiment from Step 1"
+                          >
+                            {actionLoading === `reset-experiment-${device.id}`
+                              ? "Resetting..."
+                              : "🧪 Reset Experiment"}
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -10520,36 +10628,86 @@ const EndpointUpdatesPage = () => {
         </main>
 
         {newDeviceAlert && (
-          <div className="new-device-alert">
+          <div className="new-device-alert" style={{ maxWidth: "440px", zIndex: 9999 }}>
             <div className="alert-top" />
 
             <div className="alert-body">
-              <div className="alert-label">
-                NEW DEVICE DETECTED
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div className="alert-label">
+                  {newDeviceAlert.event_type === "device_online"
+                    ? "🔔 MACHINE CONNECTED TO LAN"
+                    : "🆕 NEW MACHINE DETECTED ON LAN"}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setNewDeviceAlert(null)}
+                  style={{ background: "none", border: "none", color: "#64748b", cursor: "pointer", fontSize: "16px", fontWeight: "700" }}
+                  title="Dismiss notification"
+                >
+                  ✕
+                </button>
               </div>
 
               <div className="alert-title">
-                Network device requires review
+                {newDeviceAlert.event_type === "device_online"
+                  ? "Machine is active on your LAN"
+                  : "Network device requires administrator review"}
               </div>
 
-              <div className="alert-message">
+              <div className="alert-message" style={{ marginBottom: "10px" }}>
                 {newDeviceAlert.message ||
-                  "A new device was discovered on the LAN."}
+                  "A machine just connected to the same LAN."}
               </div>
 
-              <button
-                className="primary-button small"
+              <div
                 style={{
-                  marginTop: "11px",
-                }}
-                onClick={() => {
-                  setDeviceFilter("pending");
-                  setActivePage("devices");
-                  setNewDeviceAlert(null);
+                  background: "#f8fafc",
+                  border: "1px solid #cbd5e1",
+                  borderRadius: "8px",
+                  padding: "8px 10px",
+                  fontSize: "11px",
+                  color: "#334155",
+                  marginBottom: "10px",
+                  lineHeight: "1.5",
                 }}
               >
-                Review Device
-              </button>
+                <div style={{ fontWeight: "700", color: "#0f172a", marginBottom: "3px" }}>
+                  Next Experimental Steps:
+                </div>
+                <div>1️⃣ <strong>Review & Approve</strong>: Classify type & assign VLAN (VLAN 20/30/40)</div>
+                <div>2️⃣ <strong>Firewall Control</strong>: Allow Internet, Disconnect, or Quarantine</div>
+                <div>3️⃣ <strong>Schedule</strong>: Set inline working-hours Access Schedule</div>
+                <div>4️⃣ <strong>Updates</strong>: Scan & deploy OS patches in Endpoint Updates</div>
+              </div>
+
+              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                <button
+                  className="primary-button small"
+                  onClick={() => {
+                    if (newDeviceAlert.device_id) {
+                      setHighlightedDeviceId(newDeviceAlert.device_id);
+                    }
+                    setDeviceFilter("all");
+                    setActivePage("devices");
+                    setNewDeviceAlert(null);
+                  }}
+                >
+                  1️⃣ Review & Approve Device
+                </button>
+                <button
+                  className="secondary-button small"
+                  onClick={() => {
+                    if (newDeviceAlert.device_id) {
+                      setHighlightedDeviceId(newDeviceAlert.device_id);
+                    }
+                    setLanFilterStatus("all");
+                    setActivePage("lan-control");
+                    setNewDeviceAlert(null);
+                  }}
+                >
+                  2️⃣ Open LAN / WLAN0 Control
+                </button>
+              </div>
             </div>
           </div>
         )}

@@ -986,3 +986,64 @@ def unisolate_device(
     return device
 
 
+# ------------------------------------------------------------
+# RESET / RE-TEST DEVICE FOR LAN CONNECTION EXPERIMENT
+# ------------------------------------------------------------
+
+@router.post(
+    "/{device_id}/reset-experiment",
+    response_model=DeviceResponse,
+)
+def reset_device_for_experiment(
+    device_id: int,
+    db: Session = Depends(get_db),
+):
+    """
+    Reset a device back to its initial newly-connected LAN state
+    (approval_status='pending', vlan_id=90, enforcement_status='quarantined',
+    internet_access_authorized=False) and emit a real-time new_device LAN
+    connection notification event so the administrator can step through
+    the full onboarding & enforcement experiment from Step 1.
+    """
+    device = db.get(Device, device_id)
+
+    if device is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Device not found",
+        )
+
+    device.approval_status = "pending"
+    device.classification_status = "normal"
+    device.vlan_id = 90
+    device.enforcement_status = "quarantined"
+    device.internet_access_authorized = False
+
+    try:
+        enforce_device_access(device, db, force=True)
+    except Exception:
+        pass
+
+    create_event(
+        db,
+        "new_device",
+        (
+            f"Machine connected to LAN ({device.network_interface or 'eth0'}): "
+            f"{device.hostname or 'Experimental Machine'} "
+            f"({device.ip_address or 'No IP'} / {device.mac_address}) "
+            f"[{device.vendor or 'LAN Endpoint'}] — "
+            f"Placed in VLAN 90 Quarantine. Awaiting administrator review & approval."
+        ),
+        device.id,
+    )
+
+    db.commit()
+    db.refresh(device)
+
+    attach_update_information([device], db)
+    add_access_information(device)
+
+    return device
+
+
+

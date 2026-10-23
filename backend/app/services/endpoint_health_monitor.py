@@ -11,7 +11,7 @@ from .event_service import create_event
 
 
 STALE_AFTER_MINUTES = 15
-CHECK_INTERVAL_SECONDS = 10
+CHECK_INTERVAL_SECONDS = 4
 
 
 def get_endpoint_key(report):
@@ -101,11 +101,12 @@ async def endpoint_health_monitor_loop():
                 # Live production: sweep LAN to detect all active machines across subnets
                 active_ips = set()
                 active_macs = set()
+                live_by_mac = {}
 
                 for iface in ("eth0", "wlan0"):
                     try:
                         res = subprocess.run(
-                            ["arp-scan", "--interface", iface, "--localnet", "--retry=1", "--timeout=500"],
+                            ["arp-scan", "--interface", iface, "--localnet", "--retry=1", "--timeout=400"],
                             capture_output=True,
                             text=True,
                             check=False,
@@ -113,9 +114,19 @@ async def endpoint_health_monitor_loop():
                         )
                         for line in res.stdout.splitlines():
                             parts = line.strip().split()
-                            if len(parts) >= 2 and ":" in parts[1]:
-                                active_ips.add(parts[0].strip())
-                                active_macs.add(parts[1].strip().replace(":", "").replace("-", "").upper())
+                            if len(parts) >= 2 and ":" in parts[1] and len(parts[1].strip()) == 17:
+                                ip_str = parts[0].strip()
+                                mac_raw = parts[1].strip().upper()
+                                mac_norm = mac_raw.replace(":", "").replace("-", "").upper()
+                                vendor_str = " ".join(parts[2:]).strip() if len(parts) >= 3 else None
+                                active_ips.add(ip_str)
+                                active_macs.add(mac_norm)
+                                live_by_mac[mac_norm] = {
+                                    "ip_address": ip_str,
+                                    "mac_address": mac_raw,
+                                    "vendor": vendor_str,
+                                    "interface": iface,
+                                }
                     except Exception:
                         pass
 
@@ -123,7 +134,7 @@ async def endpoint_health_monitor_loop():
                     res = subprocess.run(["ip", "neigh", "show"], capture_output=True, text=True, check=False, timeout=3)
                     for line in res.stdout.splitlines():
                         parts = line.strip().split()
-                        if "REACHABLE" in parts or "DELAY" in parts or "STALE" in parts:
+                        if "REACHABLE" in parts or "DELAY" in parts:
                             if len(parts) >= 1:
                                 active_ips.add(parts[0].strip())
                             if "lladdr" in parts:
@@ -133,10 +144,48 @@ async def endpoint_health_monitor_loop():
                 except Exception:
                     pass
 
+                existing_macs = set()
+                for d in device_query:
+                    if isinstance(d, Device) and d.mac_address:
+                        existing_macs.add(d.mac_address.replace(":", "").replace("-", "").upper())
+
+                # Auto-register any brand-new machine that just connected to eth0 or wlan0
+                for mac_norm, info in live_by_mac.items():
+                    if mac_norm not in existing_macs:
+                        new_dev = Device(
+                            mac_address=info["mac_address"],
+                            ip_address=info["ip_address"],
+                            hostname=f"LAN-HOST-{info['ip_address'].replace('.', '-')}",
+                            vendor=info["vendor"],
+                            device_type="computer",
+                            network_interface=info["interface"],
+                            status="online",
+                            approval_status="pending",
+                            classification_status="normal",
+                            vlan_id=90,
+                            enforcement_status="quarantined",
+                            internet_access_authorized=False,
+                        )
+                        db.add(new_dev)
+                        db.flush()
+                        existing_macs.add(mac_norm)
+                        device_query.append(new_dev)
+                        create_event(
+                            db=db,
+                            event_type="new_device",
+                            message=(
+                                f"New machine connected to LAN ({info['interface']}): "
+                                f"{info['ip_address']} ({info['mac_address']}) "
+                                f"[{info['vendor'] or 'Unknown Vendor'}] — "
+                                f"Placed in VLAN 90 Quarantine. Awaiting administrator review & approval."
+                            ),
+                            device_id=new_dev.id,
+                        )
+
                 for d in device_query:
                     if not isinstance(d, Device):
                         continue
-                    if not d.ip_address:
+                    if not d.ip_address and not d.mac_address:
                         if d.status == "online":
                             online_devices.append(d)
                         continue
@@ -146,9 +195,9 @@ async def endpoint_health_monitor_loop():
                         continue
 
                     d_mac = d.mac_address.replace(":", "").replace("-", "").upper() if d.mac_address else None
-                    is_active = (d.ip_address in active_ips) or (d_mac and d_mac in active_macs)
+                    is_active = (d.ip_address and d.ip_address in active_ips) or (d_mac and d_mac in active_macs)
 
-                    if not is_active and d.status == "online":
+                    if not is_active and d.status == "online" and d.ip_address:
                         # If device was online, perform fallback individual probe before marking offline
                         for iface in ("eth0", "wlan0"):
                             try:
@@ -178,14 +227,27 @@ async def endpoint_health_monitor_loop():
                                 pass
 
                     if is_active:
+                        live_info = live_by_mac.get(d_mac) if d_mac else None
+                        if live_info:
+                            if live_info.get("ip_address") and d.ip_address != live_info["ip_address"]:
+                                d.ip_address = live_info["ip_address"]
+                            if live_info.get("interface"):
+                                d.network_interface = live_info["interface"]
                         if d.status != "online":
                             d.status = "online"
+                            ev_type = "new_device" if d.approval_status == "pending" else "device_online"
                             create_event(
                                 db=db,
-                                event_type="device_online",
+                                event_type=ev_type,
                                 message=(
-                                    f"Device {d.hostname or d.ip_address} ({d.mac_address}) "
-                                    f"returned online / connected to the LAN."
+                                    f"Machine connected to LAN ({d.network_interface or 'eth0'}): "
+                                    f"{d.hostname or d.ip_address} ({d.ip_address or 'LAN'} / {d.mac_address}) "
+                                    f"[{d.vendor or 'LAN Device'}] — "
+                                    + (
+                                        f"Placed in VLAN {d.vlan_id or 90} Quarantine, awaiting administrator review."
+                                        if d.approval_status == "pending"
+                                        else f"Online on VLAN {d.vlan_id or 20} ({d.enforcement_status})."
+                                    )
                                 ),
                                 device_id=d.id,
                             )
