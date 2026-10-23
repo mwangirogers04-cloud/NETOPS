@@ -846,6 +846,30 @@ const loadEvents = async () => {
     return () => clearTimeout(timer);
   }, [newDeviceAlert]);
 
+  // Jump straight to a specific machine (used by the new-device popup).
+  const goToDevice = (target, page = "devices") => {
+    if (!target) return;
+    const dev = devicesRef.current.find((d) => d.id === target.device_id) || null;
+    const searchValue = dev?.ip_address || dev?.mac_address || "";
+
+    setDeviceFilter("all");
+    setSelectedInterface("all");
+    setLanFilterStatus("all");
+    setDeviceSearchQuery(searchValue);
+    setLanSearchQuery(searchValue);
+    setHighlightedDeviceId(target.device_id || null);
+    setActivePage(page);
+    setNewDeviceAlert(null);
+
+    [250, 700, 1400].forEach((delay) =>
+      setTimeout(() => {
+        const row = document.getElementById(`device-row-${target.device_id}`);
+        if (row) row.scrollIntoView({ behavior: "smooth", block: "center" });
+      }, delay)
+    );
+    setTimeout(() => setHighlightedDeviceId(null), 15000);
+  };
+
   const handleIncomingLanEvent = async (rawPayload) => {
     if (!rawPayload || rawPayload.type === "connection") return;
     const event = rawPayload.event || rawPayload;
@@ -2280,7 +2304,10 @@ const DevicesPage = () => {
   })
   .map((device) => (
                   <React.Fragment key={device.id}>
-                  <tr>
+                  <tr
+                    id={`device-row-${device.id}`}
+                    style={highlightedDeviceId === device.id ? { background: "rgba(59, 130, 246, 0.18)", outline: "2px solid #3b82f6" } : {}}
+                  >
                     <td>
                       <div className="device-primary">
                         <span
@@ -3207,6 +3234,7 @@ const LanScannerPage = () => {
                   return (
                     <React.Fragment key={device.id}>
                     <tr
+                      id={`device-row-${device.id}`}
                       style={
                         highlightedDeviceId === device.id || hasIpChange
                             ? { background: "rgba(59, 130, 246, 0.08)" }
@@ -10716,7 +10744,12 @@ const EndpointUpdatesPage = () => {
                   : "Network device requires administrator review"}
               </div>
 
-              <div className="alert-message" style={{ marginBottom: "10px" }}>
+              <div
+                className="alert-message"
+                style={{ marginBottom: "10px", cursor: "pointer", textDecoration: "underline dotted" }}
+                onClick={() => goToDevice(newDeviceAlert, "devices")}
+                title="Click to go to this machine"
+              >
                 {newDeviceAlert.message ||
                   "A machine just connected to the same LAN."}
               </div>
@@ -10745,29 +10778,15 @@ const EndpointUpdatesPage = () => {
               <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
                 <button
                   className="primary-button small"
-                  onClick={() => {
-                    if (newDeviceAlert.device_id) {
-                      setHighlightedDeviceId(newDeviceAlert.device_id);
-                    }
-                    setDeviceFilter("all");
-                    setActivePage("devices");
-                    setNewDeviceAlert(null);
-                  }}
+                  onClick={() => goToDevice(newDeviceAlert, "devices")}
                 >
-                  1️⃣ Review & Approve Device
+                  1️⃣ Go to this Machine & Approve
                 </button>
                 <button
                   className="secondary-button small"
-                  onClick={() => {
-                    if (newDeviceAlert.device_id) {
-                      setHighlightedDeviceId(newDeviceAlert.device_id);
-                    }
-                    setLanFilterStatus("all");
-                    setActivePage("lan-control");
-                    setNewDeviceAlert(null);
-                  }}
+                  onClick={() => goToDevice(newDeviceAlert, "lan-scanner")}
                 >
-                  2️⃣ Open LAN / WLAN0 Control
+                  2️⃣ Open in LAN / WLAN0 Control
                 </button>
               </div>
             </div>
