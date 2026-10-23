@@ -25,6 +25,12 @@ class Event(Base):
         nullable=True,
     )
 
+    actor: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        default=None,
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=datetime.utcnow,

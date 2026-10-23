@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models.user import User
 from .auth import clear_failed_login_attempts
+from ..services.event_service import create_event
 from ..services.auth_service import (
     check_user_conflicts,
     generate_activation_link,
@@ -111,6 +112,7 @@ class UserResponse(BaseModel):
     is_active: bool
     is_verified: bool
     created_at: datetime
+    created_by: str | None = None
     activation_link: str | None = None
 
 
@@ -148,6 +150,7 @@ def list_users(
                 is_active=u.is_active,
                 is_verified=u.is_verified,
                 created_at=u.created_at,
+                created_by=u.created_by,
                 activation_link=link,
             )
         )
@@ -217,10 +220,24 @@ def create_user(
         is_active=True,
         is_verified=False,
         activation_token=token,
+        created_by=current_user.username,
     )
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
+
+    # Log user creation audit event
+    create_event(
+        db=db,
+        event_type="user_created",
+        message=(
+            f"New user '{new_user.username}' (role: {new_user.role}) created by "
+            f"{current_user.role} '{current_user.username}'. Activation link dispatched to {new_user.email}."
+        ),
+        device_id=None,
+        actor=current_user.username,
+    )
+    db.commit()
 
     # Dispatch email activation link
     send_activation_email(
@@ -241,6 +258,7 @@ def create_user(
             "phone_number": new_user.phone_number,
             "role": new_user.role,
             "is_verified": new_user.is_verified,
+            "created_by": new_user.created_by,
         },
     }
 
@@ -331,6 +349,11 @@ def update_user(
     if req.phone_number is not None:
         user.phone_number = req.phone_number.strip()
 
+    # Track status changes for audit logging
+    previous_is_active = user.is_active
+    password_changed = False
+    active_changed = False
+
     # Password
     if req.password is not None and req.password.strip():
         try:
@@ -341,9 +364,10 @@ def update_user(
                 detail=str(exc),
             )
         user.hashed_password = hash_password(req.password)
+        password_changed = True
 
     # Active status
-    if req.is_active is not None:
+    if req.is_active is not None and req.is_active != previous_is_active:
         # Prevent deactivating the only super_admin
         if user.role == "super_admin" and not req.is_active:
             super_active_count = db.scalar(
@@ -358,6 +382,7 @@ def update_user(
                     detail="Cannot deactivate the only active Super Administrator.",
                 )
         user.is_active = req.is_active
+        active_changed = True
 
     # Verified status
     if req.is_verified is not None:
@@ -367,6 +392,29 @@ def update_user(
 
     db.commit()
     db.refresh(user)
+
+    # Log audit events for security operations
+    if active_changed:
+        action_type = "user_deactivated" if not user.is_active else "user_activated"
+        desc = "deactivated" if not user.is_active else "reactivated"
+        create_event(
+            db=db,
+            event_type=action_type,
+            message=f"User account '{user.username}' {desc} by {current_user.role} '{current_user.username}'.",
+            device_id=None,
+            actor=current_user.username,
+        )
+        db.commit()
+
+    if password_changed:
+        create_event(
+            db=db,
+            event_type="password_reset",
+            message=f"Password for user '{user.username}' updated/reset by {current_user.role} '{current_user.username}'.",
+            device_id=None,
+            actor=current_user.username,
+        )
+        db.commit()
 
     if req.password is not None or (req.is_active is not None and req.is_active):
         clear_failed_login_attempts(user.username)

@@ -52,6 +52,11 @@ class User(Base):
         String(255),
         nullable=True,
     )
+    created_by: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        default=None,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=lambda: datetime.now(timezone.utc).replace(tzinfo=None),

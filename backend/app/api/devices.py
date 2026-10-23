@@ -8,6 +8,7 @@ from ..models.endpoint_update import EndpointUpdate
 from ..models.access_schedule import AccessSchedule
 from ..models.patch_job import PatchJob
 from ..models.event import Event
+from ..models.user import User
 from ..schemas.device import (
     DeviceCreate,
     DeviceResponse,
@@ -24,6 +25,7 @@ from ..services.access_policy import (
 from ..services.network_enforcement import enforce_device_access
 from ..services.vlan_automation import automate_vlan_assignment
 from ..services.event_service import create_event
+from ..services.auth_service import get_optional_current_user
 
 
 router = APIRouter(
@@ -265,6 +267,7 @@ def create_device(
 def approve_device(
     device_id: int,
     db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
 ):
     device = db.get(Device, device_id)
 
@@ -290,11 +293,14 @@ def approve_device(
     # explicitly clicks "Allow Internet".
     device.enforcement_status = "quarantined"
 
+    actor_username = current_user.username if current_user else "administrator"
+    actor_label = f"{current_user.role} '{current_user.username}'" if current_user else "administrator"
+
     create_event(
         db,
         "device_approved",
         (
-            f"Device approved by administrator: "
+            f"Device approved by {actor_label}: "
             f"{device.hostname or 'Unknown Device'} "
             f"({device.ip_address or 'No IP'}) "
             f"MAC {device.mac_address}. "
@@ -302,6 +308,7 @@ def approve_device(
             f"explicit authorization."
         ),
         device.id,
+        actor=actor_username,
     )
 
     # --------------------------------------------------------
@@ -332,6 +339,7 @@ def approve_device(
 def reject_device(
     device_id: int,
     db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
 ):
     device = db.get(Device, device_id)
 
@@ -362,17 +370,21 @@ def reject_device(
         force=True,
     )
 
+    actor_username = current_user.username if current_user else "administrator"
+    actor_label = f"{current_user.role} '{current_user.username}'" if current_user else "administrator"
+
     create_event(
         db,
         "device_rejected",
         (
-            f"Device rejected by administrator: "
+            f"Device rejected by {actor_label}: "
             f"{device.hostname or 'Unknown Device'} "
             f"({device.ip_address or 'No IP'}) "
             f"MAC {device.mac_address}. "
             f"Device placed in VLAN 90 quarantine and internet disconnected."
         ),
         device.id,
+        actor=actor_username,
     )
 
     db.commit()
@@ -1153,6 +1165,7 @@ def _purge_device_records(db: Session, device: Device):
 def delete_device_permanently(
     device_id: int,
     db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
 ):
     """
     Permanently delete a device from the database and remove all its
@@ -1173,15 +1186,19 @@ def delete_device_permanently(
 
     _purge_device_records(db, device)
 
+    actor_username = current_user.username if current_user else "administrator"
+    actor_label = f"{current_user.role} '{current_user.username}'" if current_user else "administrator"
+
     # Log permanent deletion event
     create_event(
         db,
         "device_permanently_deleted",
         (
-            f"Machine permanently deleted from inventory: {hostname} ({ip_address} / {mac_address}). "
+            f"Machine permanently deleted from inventory by {actor_label}: {hostname} ({ip_address} / {mac_address}). "
             f"All telemetry, schedules, and history cleared. Future connections will be treated as a brand new device."
         ),
         None,
+        actor=actor_username,
     )
     db.commit()
 
@@ -1197,6 +1214,7 @@ def delete_device_permanently(
 def bulk_delete_devices_permanently(
     req: BulkDeleteRequest,
     db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
 ):
     """
     Bulk permanently delete multiple devices by their IDs.
@@ -1218,15 +1236,19 @@ def bulk_delete_devices_permanently(
         _purge_device_records(db, device)
         deleted_count += 1
 
+    actor_username = current_user.username if current_user else "administrator"
+    actor_label = f"{current_user.role} '{current_user.username}'" if current_user else "administrator"
+
     create_event(
         db,
         "devices_bulk_deleted",
         (
-            f"Permanently deleted {deleted_count} machine(s) from inventory: "
+            f"Permanently deleted {deleted_count} machine(s) from inventory by {actor_label}: "
             f"{', '.join(deleted_names[:8])}{'...' if len(deleted_names) > 8 else ''}. "
             f"All state cleared. Future connections will be treated as new devices."
         ),
         None,
+        actor=actor_username,
     )
     db.commit()
 

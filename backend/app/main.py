@@ -2,7 +2,7 @@ import asyncio
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from .config import settings
 from .database import Base, engine, SessionLocal
@@ -43,6 +43,14 @@ from .services.patch_remediation_service import (
 # ---------------------------------------------------------
 
 Base.metadata.create_all(bind=engine)
+
+# Ensure newly introduced audit columns exist in database
+try:
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE events ADD COLUMN IF NOT EXISTS actor VARCHAR(100);"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS created_by VARCHAR(100);"))
+except Exception:
+    pass
 
 
 # ---------------------------------------------------------

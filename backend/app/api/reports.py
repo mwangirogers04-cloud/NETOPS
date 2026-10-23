@@ -75,6 +75,21 @@ def format_seconds(seconds: int | float | None) -> str:
     return " ".join(parts)
 
 
+def _extract_actor(event: Event) -> str:
+    """Extract actor username from Event.actor or parse from message."""
+    if getattr(event, "actor", None):
+        return event.actor
+    msg = getattr(event, "message", "") or ""
+    if " by " in msg:
+        part = msg.split(" by ", 1)[1]
+        if "'" in part:
+            return part.split("'")[1]
+        token = part.split(":")[0].split(" ")[0].strip()
+        if token:
+            return token
+    return "system"
+
+
 # -------------------------------------------------------------
 # SMART EXCEL STYLING CONSTANTS & HELPERS
 # -------------------------------------------------------------
@@ -412,6 +427,33 @@ def generate_report(
             int(round(total_duration_sec / len(sessions))) if sessions else 0
         )
 
+        # 3. Administrative & Security Audit Trail
+        audit_event_types = {
+            "user_created",
+            "user_deactivated",
+            "user_activated",
+            "password_reset",
+            "device_approved",
+            "device_rejected",
+            "device_permanently_deleted",
+            "devices_bulk_deleted",
+        }
+        try:
+            audit_events = db.scalars(
+                select(Event)
+                .where(
+                    Event.created_at >= start,
+                    Event.created_at < end,
+                    Event.event_type.in_(audit_event_types),
+                )
+                .order_by(Event.created_at.desc())
+            ).all()
+        except Exception:
+            audit_events = []
+
+        users_deactivated_count = sum(1 for e in audit_events if e.event_type == "user_deactivated")
+        password_resets_count = sum(1 for e in audit_events if e.event_type == "password_reset")
+
         return {
             "report_type": "user_activity",
             "period": period,
@@ -421,6 +463,9 @@ def generate_report(
             "summary": {
                 "total_users": len(all_users),
                 "users_created_in_period": len(users_created),
+                "users_deactivated_in_period": users_deactivated_count,
+                "password_resets_in_period": password_resets_count,
+                "audit_actions_in_period": len(audit_events),
                 "total_sessions": len(sessions),
                 "active_sessions": sum(1 for s in sessions if s.is_active),
                 "total_duration_seconds": total_duration_sec,
@@ -437,11 +482,23 @@ def generate_report(
                     "role": user.role,
                     "is_active": user.is_active,
                     "is_verified": user.is_verified,
+                    "created_by": getattr(user, "created_by", None) or "Administrator",
                     "created_at": (
                         user.created_at.isoformat() if user.created_at else None
                     ),
                 }
                 for user in users_created
+            ],
+            "audit_events": [
+                {
+                    "id": ev.id,
+                    "event_type": ev.event_type,
+                    "message": ev.message,
+                    "device_id": ev.device_id,
+                    "actor": ev.actor or _extract_actor(ev),
+                    "created_at": ev.created_at.isoformat() if ev.created_at else None,
+                }
+                for ev in audit_events
             ],
             "sessions": [
                 {
@@ -620,6 +677,8 @@ def generate_report(
             in {
                 "device_approved",
                 "device_rejected",
+                "device_permanently_deleted",
+                "devices_bulk_deleted",
             }
         ]
 
@@ -721,6 +780,7 @@ def generate_report(
                 "event_type": event.event_type,
                 "message": event.message,
                 "device_id": event.device_id,
+                "actor": event.actor or _extract_actor(event),
                 "created_at": (
                     event.created_at.isoformat()
                 ),
@@ -835,6 +895,7 @@ def export_report_excel(
             "Created At",
             "Verification Status",
             "Account Status",
+            "Created By",
         ]
 
         user_rows = []
@@ -848,6 +909,7 @@ def export_report_excel(
                 u.get("created_at") or "",
                 "Verified" if u.get("is_verified") else "Pending",
                 "Active" if u.get("is_active") else "Inactive",
+                u.get("created_by") or "Administrator",
             ])
 
         if not user_rows:
@@ -860,13 +922,14 @@ def export_report_excel(
                 "-",
                 "-",
                 "-",
+                "-",
             ])
 
         populate_smart_excel_sheet(
             ws_users,
             headers=user_headers,
             rows=user_rows,
-            center_columns={1, 5, 7, 8},
+            center_columns={1, 5, 7, 8, 9},
         )
 
         # Sheet 3: Report Summary & Metrics
@@ -881,6 +944,8 @@ def export_report_excel(
             ["Report Generated At", report.get("generated_at", "")],
             ["Total Registered Users", summary.get("total_users", 0)],
             ["Users Created in Period", summary.get("users_created_in_period", 0)],
+            ["Users Deactivated in Period", summary.get("users_deactivated_in_period", 0)],
+            ["Password Resets in Period", summary.get("password_resets_in_period", 0)],
             ["Total Access Logins", summary.get("total_sessions", 0)],
             ["Active Sessions Now", summary.get("active_sessions", 0)],
             ["Total Access Duration", summary.get("total_duration_formatted", "0s")],
@@ -984,6 +1049,7 @@ def export_report_excel(
             "Message",
             "Device ID",
             "Timestamp",
+            "Performed By",
         ]
 
         event_rows = []
@@ -994,6 +1060,7 @@ def export_report_excel(
                 e.get("message") or "",
                 e.get("device_id") or "N/A",
                 e.get("created_at"),
+                e.get("actor") or "system",
             ])
 
         if not event_rows:
@@ -1009,7 +1076,7 @@ def export_report_excel(
             ws_events,
             headers=event_headers,
             rows=event_rows,
-            center_columns={1, 2, 4},
+            center_columns={1, 2, 4, 6},
         )
 
         # Sheet 2: Summary & Breakdown
@@ -1356,6 +1423,8 @@ def export_report_pdf(
             ["Metric", "Value"],
             ["Total Registered Users", str(summary["total_users"])],
             ["Users Created in Period", str(summary["users_created_in_period"])],
+            ["Users Deactivated in Period", str(summary.get("users_deactivated_in_period", 0))],
+            ["Password Resets in Period", str(summary.get("password_resets_in_period", 0))],
             ["Total Access Sessions", str(summary["total_sessions"])],
             ["Active Sessions", str(summary["active_sessions"])],
             ["Total Access Duration", str(summary["total_duration_formatted"])],
@@ -1418,7 +1487,7 @@ def export_report_pdf(
                     "Email",
                     "Role",
                     "Created At",
-                    "Verified",
+                    "Created By",
                     "Status",
                 ]
             ]
@@ -1431,7 +1500,7 @@ def export_report_pdf(
                         str(user["email"] or ""),
                         str(user["role"] or ""),
                         str(user["created_at"] or "")[:19].replace("T", " "),
-                        "Yes" if user["is_verified"] else "No",
+                        str(user.get("created_by") or "Admin"),
                         "Active" if user["is_active"] else "Inactive",
                     ]
                 )
@@ -1440,13 +1509,13 @@ def export_report_pdf(
                 user_table_data,
                 repeatRows=1,
                 colWidths=[
-                    30,
+                    25,
+                    75,
+                    125,
+                    55,
+                    100,
                     80,
-                    135,
-                    60,
-                    110,
-                    60,
-                    60,
+                    55,
                 ],
             )
 
@@ -1591,6 +1660,49 @@ def export_report_pdf(
                 )
             )
 
+        if report.get("audit_events"):
+            story.append(Spacer(1, 15))
+            story.append(
+                Paragraph(
+                    "Administrative & Security Audit Trail",
+                    styles["Heading2"],
+                )
+            )
+            audit_table_data = [
+                [
+                    "Action",
+                    "Performed By",
+                    "Details / Event Message",
+                    "Timestamp",
+                ]
+            ]
+            for ev in report["audit_events"]:
+                msg = str(ev.get("message") or "")
+                audit_table_data.append(
+                    [
+                        str(ev.get("event_type") or ""),
+                        str(ev.get("actor") or "system"),
+                        Paragraph(xml_escape(msg), styles["BodyText"]),
+                        str(ev.get("created_at") or "")[:19].replace("T", " "),
+                    ]
+                )
+            audit_table = Table(
+                audit_table_data,
+                repeatRows=1,
+                colWidths=[100, 80, 240, 95],
+            )
+            audit_table.setStyle(
+                TableStyle(
+                    [
+                        ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+                        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                        ("FONTSIZE", (0, 0), (-1, -1), 7),
+                        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ]
+                )
+            )
+            story.append(audit_table)
+
     # -------------------------------------------------
     # EVENT REPORT PDF
     # -------------------------------------------------
@@ -1675,6 +1787,7 @@ def export_report_pdf(
             [
                 "ID",
                 "Type",
+                "Performed By",
                 "Message",
                 "Device",
                 "Created At",
@@ -1694,6 +1807,7 @@ def export_report_pdf(
                         event["event_type"]
                         or ""
                     ),
+                    str(event.get("actor") or "system"),
                     Paragraph(
                         xml_escape(message),
                         styles["BodyText"],
@@ -1705,7 +1819,7 @@ def export_report_pdf(
                     str(
                         event["created_at"]
                         or ""
-                    ),
+                    )[:19].replace("T", " "),
                 ]
             )
 
@@ -1713,11 +1827,12 @@ def export_report_pdf(
             event_data,
             repeatRows=1,
             colWidths=[
-                30,
-                80,
-                220,
-                50,
-                100,
+                25,
+                75,
+                65,
+                195,
+                40,
+                90,
             ],
         )
 

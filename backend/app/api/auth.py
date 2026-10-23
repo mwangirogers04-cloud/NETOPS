@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models.user import User, UserSession
+from ..services.event_service import create_event
 from ..services.auth_service import (
     check_user_conflicts,
     create_access_token,
@@ -719,6 +720,15 @@ def reset_password(
     user.is_verified = True  # Verified via OTP
     db.commit()
 
+    create_event(
+        db=db,
+        event_type="password_reset",
+        message=f"Password for user '{user.username}' reset via OTP verification by user '{user.username}'.",
+        device_id=None,
+        actor=user.username,
+    )
+    db.commit()
+
     clear_failed_login_attempts(user.username)
     clear_failed_login_attempts(user.email)
 
@@ -819,14 +829,24 @@ def admin_direct_reset_password(
     target_user.is_verified = True
     db.commit()
 
-    clear_failed_login_attempts(target_user.username)
-    clear_failed_login_attempts(target_user.email)
-
     role_label = (
         "Developer (Super Admin)"
         if authorizer.role == "super_admin"
         else "Administrator"
     )
+
+    create_event(
+        db=db,
+        event_type="password_reset",
+        message=f"Password for user '{target_user.username}' directly reset by {role_label} '{authorizer.username}'.",
+        device_id=None,
+        actor=authorizer.username,
+    )
+    db.commit()
+
+    clear_failed_login_attempts(target_user.username)
+    clear_failed_login_attempts(target_user.email)
+
     return {
         "status": "password_reset_success",
         "username": target_user.username,

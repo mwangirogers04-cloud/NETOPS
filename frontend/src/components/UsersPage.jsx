@@ -708,6 +708,11 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                         <div style={{ fontSize: "12px", color: "#334155" }}>
                           {u.created_at ? new Date(u.created_at).toLocaleDateString() : "—"}
                         </div>
+                        {u.created_by && (
+                          <div style={{ fontSize: "11px", color: "#2563eb", fontWeight: 600 }}>
+                            by {u.created_by}
+                          </div>
+                        )}
                       </td>
 
                       <td style={{ textAlign: "right" }}>

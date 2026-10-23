@@ -5829,6 +5829,38 @@ return (
                     }}
                   >
                     <div style={{ fontSize: "12px", color: "#475569", textTransform: "uppercase", fontWeight: 600 }}>
+                      Users Deactivated
+                    </div>
+                    <div style={{ fontSize: "24px", fontWeight: 800, color: "#dc2626", marginTop: "6px" }}>
+                      {reportData.summary?.users_deactivated_in_period ?? 0}
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      background: "#ffffff",
+                      border: "1px solid #cbd5e1",
+                      borderRadius: "10px",
+                      padding: "16px",
+                    }}
+                  >
+                    <div style={{ fontSize: "12px", color: "#475569", textTransform: "uppercase", fontWeight: 600 }}>
+                      Password Resets
+                    </div>
+                    <div style={{ fontSize: "24px", fontWeight: 800, color: "#0284c7", marginTop: "6px" }}>
+                      {reportData.summary?.password_resets_in_period ?? 0}
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      background: "#ffffff",
+                      border: "1px solid #cbd5e1",
+                      borderRadius: "10px",
+                      padding: "16px",
+                    }}
+                  >
+                    <div style={{ fontSize: "12px", color: "#475569", textTransform: "uppercase", fontWeight: 600 }}>
                       Total Access Duration
                     </div>
                     <div style={{ fontSize: "20px", fontWeight: 800, color: "#0284c7", marginTop: "6px" }}>
@@ -5879,6 +5911,7 @@ return (
                             <th>PHONE</th>
                             <th>ROLE</th>
                             <th>CREATED AT</th>
+                            <th>CREATED BY</th>
                             <th>VERIFIED</th>
                             <th>STATUS</th>
                           </tr>
@@ -5943,6 +5976,11 @@ return (
                                 </span>
                               </td>
                               <td>{u.created_at ? u.created_at.replace("T", " ").slice(0, 19) : "—"}</td>
+                              <td>
+                                <span style={{ fontWeight: 600, color: "#2563eb", fontSize: "12px" }}>
+                                  {u.created_by || "Administrator"}
+                                </span>
+                              </td>
                               <td>
                                 <span
                                   style={{
@@ -6153,6 +6191,101 @@ return (
                     </div>
                   )}
                 </div>
+
+                {/* Section 3: Administrative & Security Audit Trail (Who Performed What) */}
+                <div style={{ marginTop: "28px" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px" }}>
+                    <div>
+                      <div className="panel-title" style={{ fontSize: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
+                        <span>🛡️</span> Administrative & Security Audit Trail
+                      </div>
+                      <div className="panel-subtitle">
+                        Who created users, deactivated accounts, reset passwords, or modified device statuses
+                      </div>
+                    </div>
+                    <span style={{ fontSize: "12px", color: "#475569" }}>
+                      {reportData.audit_events?.length || 0} action{reportData.audit_events?.length === 1 ? "" : "s"}
+                    </span>
+                  </div>
+
+                  {reportData.audit_events && reportData.audit_events.length > 0 ? (
+                    <div className="table-container">
+                      <table className="data-table">
+                        <thead>
+                          <tr>
+                            <th>ACTION</th>
+                            <th>PERFORMED BY</th>
+                            <th>DETAILS / MESSAGE</th>
+                            <th>TIMESTAMP</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {reportData.audit_events.map((ev) => (
+                            <tr key={ev.id}>
+                              <td>
+                                <span
+                                  style={{
+                                    display: "inline-block",
+                                    padding: "3px 8px",
+                                    borderRadius: "6px",
+                                    fontSize: "11px",
+                                    fontWeight: 700,
+                                    textTransform: "uppercase",
+                                    background:
+                                      ev.event_type.includes("deactivated") || ev.event_type.includes("reject") || ev.event_type.includes("deleted")
+                                        ? "rgba(239, 68, 68, 0.15)"
+                                        : ev.event_type.includes("reset")
+                                        ? "rgba(245, 158, 11, 0.15)"
+                                        : "rgba(16, 185, 129, 0.15)",
+                                    color:
+                                      ev.event_type.includes("deactivated") || ev.event_type.includes("reject") || ev.event_type.includes("deleted")
+                                        ? "#dc2626"
+                                        : ev.event_type.includes("reset")
+                                        ? "#d97706"
+                                        : "#059669",
+                                    border: `1px solid ${
+                                      ev.event_type.includes("deactivated") || ev.event_type.includes("reject") || ev.event_type.includes("deleted")
+                                        ? "rgba(239, 68, 68, 0.3)"
+                                        : ev.event_type.includes("reset")
+                                        ? "rgba(245, 158, 11, 0.3)"
+                                        : "rgba(16, 185, 129, 0.3)"
+                                    }`,
+                                  }}
+                                >
+                                  {ev.event_type.replace(/_/g, " ")}
+                                </span>
+                              </td>
+                              <td>
+                                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                                  <span style={{ fontSize: "14px" }}>👤</span>
+                                  <strong style={{ color: "#2563eb" }}>{ev.actor || "Administrator"}</strong>
+                                </div>
+                              </td>
+                              <td style={{ fontSize: "13px", color: "#334155" }}>
+                                {ev.message}
+                              </td>
+                              <td>{ev.created_at ? ev.created_at.replace("T", " ").slice(0, 19) : "—"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div
+                      style={{
+                        padding: "20px",
+                        textAlign: "center",
+                        background: "#ffffff",
+                        border: "1px dashed #cbd5e1",
+                        borderRadius: "10px",
+                        color: "#64748b",
+                        fontSize: "13px",
+                      }}
+                    >
+                      No administrative security actions were recorded during this selected period.
+                    </div>
+                  )}
+                </div>
               </div>
             ) : (
               <>
@@ -6195,6 +6328,82 @@ return (
                       </div>
                     </div>
                   )}
+
+                {reportData.events && reportData.events.length > 0 && (
+                  <div style={{ marginTop: "24px" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px" }}>
+                      <div className="panel-title" style={{ fontSize: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
+                        <span>📋</span> Activity & Event Log ({reportData.events.length} event{reportData.events.length === 1 ? "" : "s"})
+                      </div>
+                    </div>
+                    <div className="table-container">
+                      <table className="data-table">
+                        <thead>
+                          <tr>
+                            <th>EVENT TYPE</th>
+                            <th>PERFORMED BY</th>
+                            <th>DETAILS / MESSAGE</th>
+                            <th>DEVICE ID</th>
+                            <th>TIMESTAMP</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {reportData.events.map((ev) => (
+                            <tr key={ev.id}>
+                              <td>
+                                <span
+                                  style={{
+                                    display: "inline-block",
+                                    padding: "3px 8px",
+                                    borderRadius: "6px",
+                                    fontSize: "11px",
+                                    fontWeight: 700,
+                                    textTransform: "uppercase",
+                                    background:
+                                      ev.event_type.includes("reject") || ev.event_type.includes("quarantine") || ev.event_type.includes("delete")
+                                        ? "rgba(239, 68, 68, 0.15)"
+                                        : ev.event_type.includes("approve") || ev.event_type.includes("allow")
+                                        ? "rgba(16, 185, 129, 0.15)"
+                                        : "rgba(148, 163, 184, 0.15)",
+                                    color:
+                                      ev.event_type.includes("reject") || ev.event_type.includes("quarantine") || ev.event_type.includes("delete")
+                                        ? "#dc2626"
+                                        : ev.event_type.includes("approve") || ev.event_type.includes("allow")
+                                        ? "#059669"
+                                        : "#334155",
+                                    border: `1px solid ${
+                                      ev.event_type.includes("reject") || ev.event_type.includes("quarantine") || ev.event_type.includes("delete")
+                                        ? "rgba(239, 68, 68, 0.3)"
+                                        : ev.event_type.includes("approve") || ev.event_type.includes("allow")
+                                        ? "rgba(16, 185, 129, 0.3)"
+                                        : "rgba(148, 163, 184, 0.3)"
+                                    }`,
+                                  }}
+                                >
+                                  {ev.event_type.replace(/_/g, " ")}
+                                </span>
+                              </td>
+                              <td>
+                                <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                                  <strong style={{ color: "#2563eb", fontSize: "12px" }}>
+                                    {ev.actor || "System"}
+                                  </strong>
+                                </div>
+                              </td>
+                              <td style={{ fontSize: "13px", color: "#334155", maxWidth: "420px", wordBreak: "break-word" }}>
+                                {ev.message}
+                              </td>
+                              <td>
+                                {ev.device_id ? <code>#{ev.device_id}</code> : <span style={{ color: "#94a3b8" }}>—</span>}
+                              </td>
+                              <td>{ev.created_at ? ev.created_at.replace("T", " ").slice(0, 19) : "—"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
               </>
             )}
           </div>

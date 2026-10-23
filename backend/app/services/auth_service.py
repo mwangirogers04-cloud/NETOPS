@@ -261,6 +261,28 @@ def get_current_user(
     return user
 
 
+def get_optional_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(security_bearer),
+    db: Session = Depends(get_db),
+) -> User | None:
+    """Dependency: Extract user from Bearer JWT token if present, otherwise None."""
+    if not credentials or not credentials.credentials:
+        return None
+    try:
+        payload = decode_access_token(credentials.credentials)
+        username = payload.get("sub")
+        if not username:
+            return None
+        user = db.scalar(
+            select(User).where(func.lower(User.username) == username.lower())
+        )
+        if user and not user.is_active:
+            return None
+        return user
+    except Exception:
+        return None
+
+
 def require_admin(current_user: User = Depends(get_current_user)) -> User:
     """Dependency: Requires Admin or Super Admin role."""
     if current_user.role not in ("admin", "super_admin"):
