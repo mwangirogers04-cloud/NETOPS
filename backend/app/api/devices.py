@@ -1,17 +1,20 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models.device import Device
 from ..models.endpoint_update import EndpointUpdate
 from ..models.access_schedule import AccessSchedule
+from ..models.patch_job import PatchJob
+from ..models.event import Event
 from ..schemas.device import (
     DeviceCreate,
     DeviceResponse,
     DeviceTypeUpdate,
     DeviceVlanUpdate,
     DeviceIpAssignmentUpdate,
+    BulkDeleteRequest,
 )
 from ..services.vlan_policy import get_vlan_for_device_type
 from ..services.access_policy import (
@@ -1107,6 +1110,131 @@ def reset_device_for_experiment(
     add_access_information(device)
 
     return device
+
+
+# ------------------------------------------------------------
+# PERMANENTLY DELETE DEVICE
+# ------------------------------------------------------------
+
+def _purge_device_records(db: Session, device: Device):
+    """Purge all foreign key dependencies and state related to a device."""
+    device_id = device.id
+    mac = device.mac_address
+    hostname = device.hostname
+
+    # 1. Access schedules
+    db.execute(delete(AccessSchedule).where(AccessSchedule.device_id == device_id))
+
+    # 2. Patch remediation jobs
+    db.execute(
+        delete(PatchJob).where(
+            or_(
+                PatchJob.device_id == device_id,
+                PatchJob.mac_address == mac,
+            )
+        )
+    )
+
+    # 3. Endpoint update telemetry reports
+    if mac:
+        conditions = [EndpointUpdate.mac_address == mac]
+        if hostname:
+            conditions.append(EndpointUpdate.hostname == hostname)
+        db.execute(delete(EndpointUpdate).where(or_(*conditions)))
+
+    # 4. Device events
+    db.execute(delete(Event).where(Event.device_id == device_id))
+
+    # 5. Device record itself
+    db.delete(device)
+
+
+@router.delete("/{device_id}", status_code=200)
+def delete_device_permanently(
+    device_id: int,
+    db: Session = Depends(get_db),
+):
+    """
+    Permanently delete a device from the database and remove all its
+    associated access schedules, patch remediation jobs, endpoint telemetry,
+    and historical event logs.
+    If the device connects again, it will be treated as a brand new machine.
+    """
+    device = db.get(Device, device_id)
+    if not device:
+        raise HTTPException(
+            status_code=404,
+            detail="Device not found",
+        )
+
+    mac_address = device.mac_address
+    hostname = device.hostname or "Unknown Host"
+    ip_address = device.ip_address or "No IP"
+
+    _purge_device_records(db, device)
+
+    # Log permanent deletion event
+    create_event(
+        db,
+        "device_permanently_deleted",
+        (
+            f"Machine permanently deleted from inventory: {hostname} ({ip_address} / {mac_address}). "
+            f"All telemetry, schedules, and history cleared. Future connections will be treated as a brand new device."
+        ),
+        None,
+    )
+    db.commit()
+
+    return {
+        "status": "deleted",
+        "message": f"Device '{hostname}' ({mac_address}) permanently deleted. It will be treated as a new machine upon reconnecting.",
+        "device_id": device_id,
+        "mac_address": mac_address,
+    }
+
+
+@router.post("/bulk-delete", status_code=200)
+def bulk_delete_devices_permanently(
+    req: BulkDeleteRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Bulk permanently delete multiple devices by their IDs.
+    All telemetry, schedules, and jobs are removed. Reconnections will be treated as new machines.
+    """
+    if not req.device_ids:
+        raise HTTPException(status_code=400, detail="No device IDs provided for deletion.")
+
+    devices = db.scalars(select(Device).where(Device.id.in_(req.device_ids))).all()
+    if not devices:
+        return {"status": "ok", "deleted_count": 0, "message": "No matching devices found."}
+
+    deleted_count = 0
+    deleted_names = []
+
+    for device in devices:
+        name = device.hostname or device.mac_address
+        deleted_names.append(name)
+        _purge_device_records(db, device)
+        deleted_count += 1
+
+    create_event(
+        db,
+        "devices_bulk_deleted",
+        (
+            f"Permanently deleted {deleted_count} machine(s) from inventory: "
+            f"{', '.join(deleted_names[:8])}{'...' if len(deleted_names) > 8 else ''}. "
+            f"All state cleared. Future connections will be treated as new devices."
+        ),
+        None,
+    )
+    db.commit()
+
+    return {
+        "status": "bulk_deleted",
+        "deleted_count": deleted_count,
+        "message": f"Successfully deleted {deleted_count} machine(s). Any reconnecting machine will be treated as a new device.",
+    }
 
 
 

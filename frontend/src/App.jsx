@@ -127,6 +127,8 @@ function App() {
     enabled: true,
   });
   const [deviceFilter, setDeviceFilter] = useState("all");
+  const [selectedDeviceIds, setSelectedDeviceIds] = useState(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [vlanFilter, setVlanFilter] = useState("all");
   const [eventTypeFilter, setEventTypeFilter] = useState("all");
   const [eventLimit, setEventLimit] = useState(50);
@@ -1239,6 +1241,14 @@ const loadEvents = async () => {
       method = "POST";
     }
 
+    // ----------------------------------------------------------
+    // PERMANENTLY DELETE DEVICE
+    // ----------------------------------------------------------
+
+    else if (action === "delete") {
+      method = "DELETE";
+    }
+
     else {
       throw new Error(
         `Unsupported action: ${action}`
@@ -1247,9 +1257,9 @@ const loadEvents = async () => {
 
     const options = {
       method,
-      headers: {
+      headers: getAuthHeaders({
         "Content-Type": "application/json",
-      },
+      }),
     };
 
     if (body !== null) {
@@ -1300,6 +1310,23 @@ const loadEvents = async () => {
       setHighlightedDeviceId(null);
     }
 
+    if (action === "delete") {
+      setNewDeviceAlert((cur) => (cur && cur.device_id === deviceId ? null : cur));
+      setHighlightedDeviceId(null);
+      setSelectedDeviceIds((prev) => {
+        const next = new Set(prev);
+        next.delete(deviceId);
+        return next;
+      });
+      await Promise.allSettled([
+        loadDevices(),
+        loadEvents(),
+        loadAccessSchedules(),
+        loadPatchJobs(),
+      ]);
+      return;
+    }
+
     // Refresh devices and events
     await loadDevices();
     await loadEvents();
@@ -1321,6 +1348,70 @@ const loadEvents = async () => {
     setActionLoading(null);
   }
 };
+
+  const deleteDevicePermanently = async (device) => {
+    if (!isAdmin) {
+      alert("Permission Denied: Only Administrators and Developers can permanently delete devices.");
+      return;
+    }
+    const name = device.hostname || device.mac_address || "this machine";
+    const confirmed = window.confirm(
+      `⚠️ PERMANENTLY DELETE MACHINE?\n\n` +
+      `Machine: ${name}\n` +
+      `MAC Address: ${device.mac_address}\n` +
+      `IP Address: ${device.ip_address || "—"}\n` +
+      `VLAN: ${device.vlan_id || "90"}\n\n` +
+      `This will completely erase the device from inventory, removing all access schedules, patch jobs, telemetry, and event history.\n\n` +
+      `If this machine connects to the network again, it will be detected and treated as a BRAND NEW machine.\n\n` +
+      `Are you sure you want to permanently delete this device?`
+    );
+    if (!confirmed) return;
+    await deviceAction(device.id, "delete");
+  };
+
+  const deleteBulkDevices = async (idsToDelete = null) => {
+    if (!isAdmin) {
+      alert("Permission Denied: Only Administrators and Developers can delete devices.");
+      return;
+    }
+    const ids = idsToDelete || Array.from(selectedDeviceIds);
+    if (!ids || ids.length === 0) {
+      alert("No devices selected for deletion.");
+      return;
+    }
+    const confirmed = window.confirm(
+      `⚠️ PERMANENTLY DELETE ${ids.length} MACHINE(S)?\n\n` +
+      `All selected devices, along with their schedules, patch remediation jobs, and telemetry history, will be permanently purged from the database.\n\n` +
+      `Any machine that reconnects to the network later will be detected and treated as a BRAND NEW machine.\n\n` +
+      `Are you sure you want to proceed with permanent deletion?`
+    );
+    if (!confirmed) return;
+
+    try {
+      setBulkDeleting(true);
+      const res = await fetch(`${API_URL}/devices/bulk-delete`, {
+        method: "POST",
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ device_ids: ids }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `HTTP ${res.status}`);
+      }
+      setSelectedDeviceIds(new Set());
+      await Promise.allSettled([
+        loadDevices(),
+        loadEvents(),
+        loadAccessSchedules(),
+        loadPatchJobs(),
+      ]);
+    } catch (err) {
+      console.error("Bulk deletion failed:", err);
+      alert("Failed to delete devices: " + err.message);
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
 // ------------------------------------------------------------
 // TIME SCHEDULE HELPERS
 // ------------------------------------------------------------
@@ -2211,9 +2302,42 @@ const DevicesPage = () => {
             </div>
           </div>
 
-          <div className="settings-status">
-            <span className="status-dot online" />
-            {totalDevices} Devices
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+            {isAdmin && (
+              <button
+                type="button"
+                className="secondary-button small"
+                style={{
+                  borderColor: "#ef4444",
+                  color: "#dc2626",
+                  background: "#fef2f2",
+                  fontSize: "11px",
+                  fontWeight: "700",
+                  padding: "5px 12px",
+                }}
+                onClick={() => {
+                  const simOrOffline = scopedDevices.filter(
+                    (d) =>
+                      d.status === "offline" ||
+                      (d.hostname && d.hostname.toUpperCase().startsWith("SIM-")) ||
+                      (d.notes && d.notes.includes("SIMULATION"))
+                  );
+                  if (simOrOffline.length === 0) {
+                    alert("No test simulation or offline machines found to clean up.");
+                    return;
+                  }
+                  deleteBulkDevices(simOrOffline.map((d) => d.id));
+                }}
+                disabled={bulkDeleting}
+                title="Permanently delete test machines created during simulations"
+              >
+                🧹 Clean Up Simulation Machines
+              </button>
+            )}
+            <div className="settings-status">
+              <span className="status-dot online" />
+              {totalDevices} Devices
+            </div>
           </div>
         </div>
         
@@ -2417,113 +2541,207 @@ const DevicesPage = () => {
             </button>
           </div>
         )}
-        <div className="table-container">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>DEVICE</th>
-                <th>CONNECTION</th>
-                <th>TYPE</th>
-                <th>VLAN</th>
-                <th>UPDATE STATUS</th>
-                <th>APPROVAL</th>
-                <th>INTERNET</th>
-                <th>ENFORCEMENT</th>
-                <th>SCHEDULE</th>
-                <th>ACTIONS</th>
-              </tr>
-            </thead>
+        {(() => {
+          const inventoryFilteredDevices = scopedDevices.filter((device) => {
+            if (deviceFilter === "online" && device.status !== "online") return false;
+            if (deviceFilter === "offline" && device.status !== "offline") return false;
+            if (deviceFilter === "needs_updates" && device.update_status !== "updates_available") return false;
+            if (deviceFilter === "queued" && !Boolean(getActiveJobForDevice(device))) return false;
+            if (deviceFilter === "up_to_date" && device.update_status !== "up_to_date") return false;
+            if (deviceFilter === "unmonitored" && device.update_status && device.update_status !== "unmonitored") return false;
+            if (deviceFilter === "pending" && device.approval_status !== "pending") return false;
+            if (deviceFilter === "rejected" && device.approval_status !== "rejected") return false;
+            if (deviceFilter === "quarantined" && device.enforcement_status !== "quarantined") return false;
+            if (deviceFilter === "isolated" && device.enforcement_status !== "isolated") return false;
+            if (deviceFilter === "scheduled" && !isDeviceScheduled(device)) return false;
+            if (deviceFilter === "scheduled_updates" && !isDeviceScheduledForUpdates(device)) return false;
+            if (deviceFilter === "scheduled_access" && !isDeviceScheduledForAccess(device)) return false;
+            if (deviceFilter === "ip_phone" && device.device_type !== "ip_phone") return false;
+            if (deviceFilter === "computer" && device.device_type !== "computer") return false;
+            if (deviceFilter === "cctv" && device.device_type !== "cctv") return false;
+            if (deviceFilter === "printer" && device.device_type !== "printer") return false;
+            if (deviceFilter === "server" && device.device_type !== "server") return false;
+            if (deviceFilter === "access_point" && !["access_point", "ap", "wifi_ap"].includes(device.device_type)) return false;
+            if (deviceFilter === "unknown" && ["ip_phone", "computer", "cctv", "printer", "server", "access_point", "ap", "wifi_ap"].includes(device.device_type)) return false;
+            if (deviceFilter === "vlan10" && Number(device.vlan_id) !== 10) return false;
+            if (deviceFilter === "vlan20" && Number(device.vlan_id) !== 20) return false;
+            if (deviceFilter === "vlan30" && Number(device.vlan_id) !== 30) return false;
+            if (deviceFilter === "vlan40" && Number(device.vlan_id) !== 40) return false;
+            if (deviceFilter === "vlan50" && Number(device.vlan_id) !== 50) return false;
+            if (deviceFilter === "vlan60" && Number(device.vlan_id) !== 60) return false;
+            if (deviceFilter === "vlan90" && Number(device.vlan_id) !== 90) return false;
 
-            <tbody>
-              {(() => {
-                const inventoryFilteredDevices = scopedDevices.filter((device) => {
-                  if (deviceFilter === "online" && device.status !== "online") return false;
-                  if (deviceFilter === "offline" && device.status !== "offline") return false;
-                  if (deviceFilter === "needs_updates" && device.update_status !== "updates_available") return false;
-                  if (deviceFilter === "queued" && !Boolean(getActiveJobForDevice(device))) return false;
-                  if (deviceFilter === "up_to_date" && device.update_status !== "up_to_date") return false;
-                  if (deviceFilter === "unmonitored" && device.update_status && device.update_status !== "unmonitored") return false;
-                  if (deviceFilter === "pending" && device.approval_status !== "pending") return false;
-                  if (deviceFilter === "rejected" && device.approval_status !== "rejected") return false;
-                  if (deviceFilter === "quarantined" && device.enforcement_status !== "quarantined") return false;
-                  if (deviceFilter === "isolated" && device.enforcement_status !== "isolated") return false;
-                  if (deviceFilter === "scheduled" && !isDeviceScheduled(device)) return false;
-                  if (deviceFilter === "scheduled_updates" && !isDeviceScheduledForUpdates(device)) return false;
-                  if (deviceFilter === "scheduled_access" && !isDeviceScheduledForAccess(device)) return false;
-                  if (deviceFilter === "ip_phone" && device.device_type !== "ip_phone") return false;
-                  if (deviceFilter === "computer" && device.device_type !== "computer") return false;
-                  if (deviceFilter === "cctv" && device.device_type !== "cctv") return false;
-                  if (deviceFilter === "printer" && device.device_type !== "printer") return false;
-                  if (deviceFilter === "server" && device.device_type !== "server") return false;
-                  if (deviceFilter === "access_point" && !["access_point", "ap", "wifi_ap"].includes(device.device_type)) return false;
-                  if (deviceFilter === "unknown" && ["ip_phone", "computer", "cctv", "printer", "server", "access_point", "ap", "wifi_ap"].includes(device.device_type)) return false;
-                  if (deviceFilter === "vlan10" && Number(device.vlan_id) !== 10) return false;
-                  if (deviceFilter === "vlan20" && Number(device.vlan_id) !== 20) return false;
-                  if (deviceFilter === "vlan30" && Number(device.vlan_id) !== 30) return false;
-                  if (deviceFilter === "vlan40" && Number(device.vlan_id) !== 40) return false;
-                  if (deviceFilter === "vlan50" && Number(device.vlan_id) !== 50) return false;
-                  if (deviceFilter === "vlan60" && Number(device.vlan_id) !== 60) return false;
-                  if (deviceFilter === "vlan90" && Number(device.vlan_id) !== 90) return false;
+            if (
+              !deviceMatchesSearch(device, deviceSearchQuery, [
+                device.device_type,
+                `vlan ${device.vlan_id || ""}`,
+                device.network_interface,
+              ])
+            ) {
+              return false;
+            }
 
-                  if (
-                    !deviceMatchesSearch(device, deviceSearchQuery, [
-                      device.device_type,
-                      `vlan ${device.vlan_id || ""}`,
-                      device.network_interface,
-                    ])
-                  ) {
-                    return false;
-                  }
+            return true;
+          });
 
-                  return true;
-                });
+          const isAllVisibleSelected =
+            inventoryFilteredDevices.length > 0 &&
+            inventoryFilteredDevices.every((d) => selectedDeviceIds.has(d.id));
 
-                if (scopedDevices.length === 0) {
-                  return (
-                    <tr>
-                      <td colSpan="10">
-                        <div className="empty-state">
-                          No devices detected on {selectedInterface === "all" ? "LAN/WLAN0" : selectedInterface.toUpperCase()}.
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                }
-
-                if (inventoryFilteredDevices.length === 0) {
-                  return (
-                    <tr>
-                      <td colSpan="10">
-                        <div className="empty-state" style={{ padding: "32px 16px", textAlign: "center" }}>
-                          {deviceFilter.startsWith("scheduled") ? (
-                            <>
-                              <div style={{ fontSize: "28px", marginBottom: "8px" }}>🕒</div>
-                              <div style={{ fontWeight: "700", fontSize: "14px", color: "#334155" }}>
-                                No Scheduled Devices Found
-                              </div>
-                              <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
-                                {deviceFilter === "scheduled_updates"
-                                  ? "No LAN devices currently have scheduled update or patch remediation jobs."
-                                  : deviceFilter === "scheduled_access"
-                                  ? "No LAN devices currently have active network access schedules."
-                                  : "No LAN devices currently have scheduled updates or network access schedules. You can schedule updates from Endpoint Updates or configure access schedules using '⏱️ Set Schedule'."}
-                              </div>
-                            </>
-                          ) : (
-                            `No devices found matching filter "${deviceFilter}".`
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                }
-
-                return inventoryFilteredDevices.map((device) => (
-                  <React.Fragment key={device.id}>
-                  <tr
-                    id={`device-row-${device.id}`}
-                    style={highlightedDeviceId === device.id ? { background: "rgba(59, 130, 246, 0.18)", outline: "2px solid #3b82f6" } : {}}
+          return (
+            <>
+              {isAdmin && selectedDeviceIds.size > 0 && (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: "10px 16px",
+                    background: "#fef2f2",
+                    border: "1px solid #fecaca",
+                    borderRadius: "8px",
+                    marginBottom: "14px",
+                    boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                    <span style={{ fontWeight: "700", color: "#991b1b", fontSize: "13px" }}>
+                      Selected: {selectedDeviceIds.size} device(s)
+                    </span>
+                    <button
+                      type="button"
+                      className="secondary-button small"
+                      style={{ fontSize: "11px", padding: "2px 8px" }}
+                      onClick={() => setSelectedDeviceIds(new Set())}
+                    >
+                      Clear Selection
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    className="secondary-button small"
+                    style={{
+                      background: "#dc2626",
+                      color: "#ffffff",
+                      borderColor: "#b91c1c",
+                      fontWeight: "700",
+                      padding: "6px 14px",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "5px",
+                    }}
+                    disabled={bulkDeleting}
+                    onClick={() => deleteBulkDevices()}
+                    title="Permanently delete all selected devices and their associated records"
                   >
+                    {bulkDeleting ? "Deleting..." : `🗑️ Delete Selected (${selectedDeviceIds.size}) Permanently`}
+                  </button>
+                </div>
+              )}
+
+              <div className="table-container">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      {isAdmin && (
+                        <th style={{ width: "36px", textAlign: "center" }}>
+                          <input
+                            type="checkbox"
+                            checked={isAllVisibleSelected}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedDeviceIds((prev) => {
+                                  const next = new Set(prev);
+                                  inventoryFilteredDevices.forEach((d) => next.add(d.id));
+                                  return next;
+                                });
+                              } else {
+                                setSelectedDeviceIds((prev) => {
+                                  const next = new Set(prev);
+                                  inventoryFilteredDevices.forEach((d) => next.delete(d.id));
+                                  return next;
+                                });
+                              }
+                            }}
+                            title="Select or deselect all visible devices"
+                            style={{ cursor: "pointer", width: "16px", height: "16px" }}
+                          />
+                        </th>
+                      )}
+                      <th>DEVICE</th>
+                      <th>CONNECTION</th>
+                      <th>TYPE</th>
+                      <th>VLAN</th>
+                      <th>UPDATE STATUS</th>
+                      <th>APPROVAL</th>
+                      <th>INTERNET</th>
+                      <th>ENFORCEMENT</th>
+                      <th>SCHEDULE</th>
+                      <th>ACTIONS</th>
+                    </tr>
+                  </thead>
+
+                  <tbody>
+                    {scopedDevices.length === 0 ? (
+                      <tr>
+                        <td colSpan={isAdmin ? 11 : 10}>
+                          <div className="empty-state">
+                            No devices detected on {selectedInterface === "all" ? "LAN/WLAN0" : selectedInterface.toUpperCase()}.
+                          </div>
+                        </td>
+                      </tr>
+                    ) : inventoryFilteredDevices.length === 0 ? (
+                      <tr>
+                        <td colSpan={isAdmin ? 11 : 10}>
+                          <div className="empty-state" style={{ padding: "32px 16px", textAlign: "center" }}>
+                            {deviceFilter.startsWith("scheduled") ? (
+                              <>
+                                <div style={{ fontSize: "28px", marginBottom: "8px" }}>🕒</div>
+                                <div style={{ fontWeight: "700", fontSize: "14px", color: "#334155" }}>
+                                  No Scheduled Devices Found
+                                </div>
+                                <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
+                                  {deviceFilter === "scheduled_updates"
+                                    ? "No LAN devices currently have scheduled update or patch remediation jobs."
+                                    : deviceFilter === "scheduled_access"
+                                    ? "No LAN devices currently have active network access schedules."
+                                    : "No LAN devices currently have scheduled updates or network access schedules. You can schedule updates from Endpoint Updates or configure access schedules using '⏱️ Set Schedule'."}
+                                </div>
+                              </>
+                            ) : (
+                              `No devices found matching filter "${deviceFilter}".`
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ) : (
+                      inventoryFilteredDevices.map((device) => (
+                        <React.Fragment key={device.id}>
+                          <tr
+                            id={`device-row-${device.id}`}
+                            style={highlightedDeviceId === device.id ? { background: "rgba(59, 130, 246, 0.18)", outline: "2px solid #3b82f6" } : {}}
+                          >
+                            {isAdmin && (
+                              <td style={{ textAlign: "center" }}>
+                                <input
+                                  type="checkbox"
+                                  checked={selectedDeviceIds.has(device.id)}
+                                  onChange={(e) => {
+                                    const checked = e.target.checked;
+                                    setSelectedDeviceIds((prev) => {
+                                      const next = new Set(prev);
+                                      if (checked) {
+                                        next.add(device.id);
+                                      } else {
+                                        next.delete(device.id);
+                                      }
+                                      return next;
+                                    });
+                                  }}
+                                  style={{ cursor: "pointer", width: "16px", height: "16px" }}
+                                />
+                              </td>
+                            )}
                     <td>
                       <div className="device-primary">
                         <span
@@ -3096,19 +3314,40 @@ const DevicesPage = () => {
                               : "🔒 Isolate"}
                           </button>
                         )}
+
+                        {isAdmin && (
+                          <button
+                            type="button"
+                            className="secondary-button small"
+                            style={{
+                              borderColor: "#ef4444",
+                              color: "#dc2626",
+                              background: "rgba(239, 68, 68, 0.1)",
+                              fontWeight: "700",
+                            }}
+                            disabled={actionLoading === `delete-${device.id}`}
+                            onClick={() => deleteDevicePermanently(device)}
+                            title="Permanently delete device, purging all history. If it connects again, it is treated as a brand new machine."
+                          >
+                            {actionLoading === `delete-${device.id}` ? "..." : "🗑️ Delete"}
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
-                  {renderInlineScheduleRow(device, 10)}
+                  {renderInlineScheduleRow(device, isAdmin ? 11 : 10)}
                   </React.Fragment>
-                ));
-              })()}
+                ))
+              )}
             </tbody>
           </table>
         </div>
-      </div>
-    </div>
-  );
+      </>
+    );
+  })()}
+</div>
+</div>
+);
 };
 
 // ------------------------------------------------------------

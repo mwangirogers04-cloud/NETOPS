@@ -110,3 +110,7 @@ class DeviceVlanUpdate(BaseModel):
 
 class DeviceIpAssignmentUpdate(BaseModel):
     ip_assignment: str
+
+
+class BulkDeleteRequest(BaseModel):
+    device_ids: list[int]
