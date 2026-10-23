@@ -12,6 +12,15 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
   // Edit user state
   const [editingUser, setEditingUser] = useState(null);
   const [showEditModal, setShowEditModal] = useState(false);
+
+  // Direct Admin/Developer Password Reset modal state
+  const [resetTargetUser, setResetTargetUser] = useState(null);
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [resetNewPassword, setResetNewPassword] = useState("");
+  const [resetConfirmPassword, setResetConfirmPassword] = useState("");
+  const [showResetPasswordText, setShowResetPasswordText] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resetError, setResetError] = useState("");
   const [editFormState, setEditFormState] = useState({
     username: "",
     email: "",
@@ -647,9 +656,31 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                             onClick={() => handleOpenEdit(u)}
                             disabled={u.role === "super_admin" && !isSuperAdmin}
                             title={u.role === "super_admin" && !isSuperAdmin ? "Only Super Admin can edit this account" : "Edit user profile, role, status & credentials"}
-                            style={{ borderColor: "#3b82f6", color: "#60a5fa" }}
+                            style={{ borderColor: "#3b82f6", color: "#2563eb" }}
                           >
                             ✏️ Edit
+                          </button>
+
+                          {/* DIRECT PASSWORD RESET (NO OTP) */}
+                          <button
+                            type="button"
+                            className="secondary-button small"
+                            onClick={() => {
+                              setResetTargetUser(u);
+                              setResetNewPassword("");
+                              setResetConfirmPassword("");
+                              setResetError("");
+                              setShowResetModal(true);
+                            }}
+                            disabled={u.role === "super_admin" && !isSuperAdmin}
+                            title={
+                              u.role === "super_admin" && !isSuperAdmin
+                                ? "Only Developer (Super Admin) can reset a Developer password"
+                                : "Directly reset this user's password without sending an OTP"
+                            }
+                            style={{ borderColor: "#6366f1", color: "#4f46e5", fontWeight: "700" }}
+                          >
+                            🔑 Reset Password
                           </button>
 
                           {/* COPY ACTIVATION LINK */}
@@ -1120,6 +1151,135 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                   disabled={editLoading}
                 >
                   {editLoading ? "Saving Changes..." : "Save Changes"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* DIRECT PASSWORD RESET MODAL (NO OTP) */}
+      {showResetModal && resetTargetUser && (
+        <div className="modal-overlay" onClick={() => setShowResetModal(false)}>
+          <div className="user-modal-box" onClick={(e) => e.stopPropagation()}>
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                setResetError("");
+                if (!resetNewPassword || resetNewPassword.length < 6) {
+                  setResetError("New password must be at least 6 characters long.");
+                  return;
+                }
+                if (resetNewPassword !== resetConfirmPassword) {
+                  setResetError("New passwords do not match.");
+                  return;
+                }
+                setResetLoading(true);
+                try {
+                  const res = await fetch(`${API_URL}/auth/admin-reset-password`, {
+                    method: "POST",
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({
+                      target_identifier: resetTargetUser.username,
+                      new_password: resetNewPassword,
+                    }),
+                  });
+                  const data = await res.json();
+                  if (!res.ok) {
+                    throw new Error(data.detail || "Failed to reset user password.");
+                  }
+                  setShowResetModal(false);
+                  setActionNotice(
+                    data.message ||
+                      `✅ Password for '${resetTargetUser.username}' directly reset without OTP.`
+                  );
+                  await loadUsers();
+                } catch (err) {
+                  setResetError(err.message || "Failed to reset password.");
+                } finally {
+                  setResetLoading(false);
+                }
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+                <div>
+                  <div style={{ fontSize: "18px", fontWeight: "800", color: "#0f172a" }}>
+                    🔑 Direct Password Reset: {resetTargetUser.username}
+                  </div>
+                  <div style={{ fontSize: "12px", color: "#475569", marginTop: "2px" }}>
+                    Immediately set a new password for <strong>{resetTargetUser.username}</strong> ({resetTargetUser.email}) using your {isSuperAdmin ? "Developer (Super Admin)" : "Administrator"} privileges — no Email or SMS OTP required.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  style={{ background: "none", border: "none", color: "#64748b", fontSize: "20px", cursor: "pointer" }}
+                  onClick={() => setShowResetModal(false)}
+                >
+                  ✕
+                </button>
+              </div>
+
+              {resetError && (
+                <div style={{ background: "#fef2f2", border: "1px solid #fca5a5", color: "#991b1b", padding: "10px 12px", borderRadius: "8px", fontSize: "12px", marginBottom: "14px" }}>
+                  {resetError}
+                </div>
+              )}
+
+              <div className="form-group" style={{ marginBottom: "14px" }}>
+                <label className="form-label" style={{ fontSize: "11px", fontWeight: "700", color: "#334155", display: "block", marginBottom: "4px" }}>
+                  New Password (min 6 characters) *
+                </label>
+                <div style={{ position: "relative" }}>
+                  <input
+                    type={showResetPasswordText ? "text" : "password"}
+                    className="login-input"
+                    placeholder="Enter new password for user"
+                    value={resetNewPassword}
+                    onChange={(e) => setResetNewPassword(e.target.value)}
+                    disabled={resetLoading}
+                    required
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowResetPasswordText(!showResetPasswordText)}
+                    style={{ position: "absolute", right: "10px", top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", fontSize: "14px" }}
+                  >
+                    {showResetPasswordText ? "👁️‍🗨️" : "👁️"}
+                  </button>
+                </div>
+              </div>
+
+              <div className="form-group" style={{ marginBottom: "20px" }}>
+                <label className="form-label" style={{ fontSize: "11px", fontWeight: "700", color: "#334155", display: "block", marginBottom: "4px" }}>
+                  Confirm New Password *
+                </label>
+                <input
+                  type={showResetPasswordText ? "text" : "password"}
+                  className="login-input"
+                  placeholder="Re-enter new password"
+                  value={resetConfirmPassword}
+                  onChange={(e) => setResetConfirmPassword(e.target.value)}
+                  disabled={resetLoading}
+                  required
+                />
+              </div>
+
+              <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => setShowResetModal(false)}
+                  disabled={resetLoading}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="primary-button"
+                  disabled={resetLoading}
+                >
+                  {resetLoading ? "Resetting Password..." : "🔑 Reset Password Now"}
                 </button>
               </div>
             </form>

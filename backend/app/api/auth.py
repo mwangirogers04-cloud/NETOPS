@@ -10,13 +10,16 @@ from ..services.auth_service import (
     check_user_conflicts,
     create_access_token,
     create_and_send_password_reset_otp,
+    decode_access_token,
     generate_activation_link,
     generate_activation_token,
     get_current_user,
     get_notification_settings,
     hash_password,
+    normalize_phone_number,
     require_admin,
     save_notification_settings,
+    security_bearer,
     send_activation_email,
     send_email_message,
     send_sms_message,
@@ -45,6 +48,32 @@ def mask_string(val: str | None, is_email: bool = False) -> str | None:
         if len(clean) <= 4:
             return "***" + clean[-1:]
         return clean[:3] + "***" + clean[-3:]
+
+
+def _find_user_by_identifier(db: Session, identifier: str) -> User | None:
+    """Find a user by username, email address, or phone number (raw or normalized)."""
+    ident = (identifier or "").strip()
+    if not ident:
+        return None
+    ident_lower = ident.lower()
+    user = db.scalar(
+        select(User).where(
+            or_(
+                func.lower(User.username) == ident_lower,
+                func.lower(User.email) == ident_lower,
+                User.phone_number == ident,
+            )
+        )
+    )
+    if user:
+        return user
+
+    norm_phone = normalize_phone_number(ident)
+    if norm_phone:
+        for candidate in db.scalars(select(User)).all():
+            if candidate.phone_number and normalize_phone_number(candidate.phone_number) == norm_phone:
+                return candidate
+    return None
 
 
 # -------------------------------------------------------------
@@ -124,6 +153,28 @@ class ResetPasswordRequest(BaseModel):
     def validate_new_password(cls, v: str) -> str:
         if len(v) < 6:
             raise ValueError("Password must be at least 6 characters long")
+        return v
+
+
+class AdminDirectResetPasswordRequest(BaseModel):
+    target_identifier: str
+    new_password: str
+    admin_identifier: str | None = None
+    admin_password: str | None = None
+
+    @field_validator("target_identifier")
+    @classmethod
+    def validate_target_identifier(cls, v: str) -> str:
+        clean = v.strip()
+        if not clean:
+            raise ValueError("Please provide the username, email, or phone number of the user to reset")
+        return clean
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_new_password(cls, v: str) -> str:
+        if len(v) < 6:
+            raise ValueError("New password must be at least 6 characters long")
         return v
 
 
@@ -400,17 +451,8 @@ def get_reset_channels(
     req: ForgotPasswordChannelRequest,
     db: Session = Depends(get_db),
 ):
-    """Find user and return masked email & phone channels for OTP dispatch."""
-    ident = req.identifier.strip().lower()
-
-    user = db.scalar(
-        select(User).where(
-            or_(
-                func.lower(User.username) == ident,
-                func.lower(User.email) == ident,
-            )
-        )
-    )
+    """Find user and return masked email & phone channels for OTP dispatch or Admin/Developer reset."""
+    user = _find_user_by_identifier(db, req.identifier)
 
     if not user:
         # Return generic error to avoid user enumeration
@@ -421,6 +463,7 @@ def get_reset_channels(
 
     return {
         "username": user.username,
+        "role": user.role,
         "email_masked": mask_string(user.email, is_email=True),
         "phone_masked": mask_string(user.phone_number, is_email=False),
         "has_email": bool(user.email),
@@ -438,16 +481,7 @@ def send_reset_otp(
     db: Session = Depends(get_db),
 ):
     """Generate and dispatch a 5-minute OTP to chosen channel."""
-    ident = req.identifier.strip().lower()
-
-    user = db.scalar(
-        select(User).where(
-            or_(
-                func.lower(User.username) == ident,
-                func.lower(User.email) == ident,
-            )
-        )
-    )
+    user = _find_user_by_identifier(db, req.identifier)
 
     if not user:
         raise HTTPException(
@@ -599,16 +633,7 @@ def reset_password(
     db: Session = Depends(get_db),
 ):
     """Validate 5-minute OTP and reset password."""
-    ident = req.identifier.strip().lower()
-
-    user = db.scalar(
-        select(User).where(
-            or_(
-                func.lower(User.username) == ident,
-                func.lower(User.email) == ident,
-            )
-        )
-    )
+    user = _find_user_by_identifier(db, req.identifier)
 
     if not user:
         raise HTTPException(
@@ -628,4 +653,103 @@ def reset_password(
         "status": "password_reset_success",
         "username": user.username,
         "message": "Password successfully reset! You can now log in with your new password.",
+    }
+
+
+# -------------------------------------------------------------
+# ADMIN / DEVELOPER DIRECT PASSWORD RESET (NO OTP REQUIRED)
+# -------------------------------------------------------------
+
+@router.post("/forgot-password/admin-reset")
+@router.post("/admin-reset-password")
+def admin_direct_reset_password(
+    req: AdminDirectResetPasswordRequest,
+    credentials=Depends(security_bearer),
+    db: Session = Depends(get_db),
+):
+    """
+    Directly reset a user's password using Administrative ('admin') or
+    Developer ('super_admin') rights without sending an OTP to phone or email.
+    Supports authorization via either:
+      1. Admin/Developer credentials (admin_identifier + admin_password) on the Login page, or
+      2. An active Admin/Developer JWT Bearer token.
+    """
+    authorizer: User | None = None
+
+    # 1. If explicit Admin / Developer credentials were provided on the Login page, verify them first
+    if req.admin_identifier and req.admin_identifier.strip():
+        if not req.admin_password:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Please enter the Administrator or Developer password to authorize this reset.",
+            )
+        candidate = _find_user_by_identifier(db, req.admin_identifier.strip())
+        if not candidate or not verify_password(req.admin_password, candidate.hashed_password):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid Administrator or Developer credentials. Please check your username/email and password.",
+            )
+        authorizer = candidate
+    elif credentials and credentials.credentials:
+        # 2. Otherwise check active Bearer token if present
+        payload = decode_access_token(credentials.credentials)
+        sub_username = payload.get("sub")
+        if sub_username:
+            authorizer = db.scalar(
+                select(User).where(func.lower(User.username) == sub_username.lower())
+            )
+
+    if not authorizer:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Please provide valid Administrator or Developer credentials to authorize a direct password reset.",
+        )
+
+    if not authorizer.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="The authorizing account is currently deactivated.",
+        )
+
+    if authorizer.role not in ("admin", "super_admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: Administrative or Developer rights are required to reset user passwords without an OTP.",
+        )
+
+    target_user = _find_user_by_identifier(db, req.target_identifier)
+    if not target_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No user account found matching '{req.target_identifier.strip()}'. Please check the username, email, or phone number.",
+        )
+
+    # Role hierarchy check: Only Developer (super_admin) can reset a Developer (super_admin) password
+    if target_user.role == "super_admin" and authorizer.role != "super_admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only a Developer (Super Administrator) can reset the password for a Developer account.",
+        )
+
+    target_user.hashed_password = hash_password(req.new_password)
+    target_user.is_verified = True
+    db.commit()
+
+    role_label = (
+        "Developer (Super Admin)"
+        if authorizer.role == "super_admin"
+        else "Administrator"
+    )
+    return {
+        "status": "password_reset_success",
+        "username": target_user.username,
+        "email": target_user.email,
+        "role": target_user.role,
+        "reset_by": authorizer.username,
+        "reset_by_role": authorizer.role,
+        "message": (
+            f"Password for user '{target_user.username}' has been directly reset by "
+            f"{role_label} '{authorizer.username}' (no OTP required). "
+            f"'{target_user.username}' can now sign in with the new password."
+        ),
     }

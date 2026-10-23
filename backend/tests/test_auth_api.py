@@ -411,3 +411,86 @@ def test_duplicate_email_and_phone_registration_prompts():
     assert adm_dup_phone.json()["detail"] == "The phone number already exists, please try another number."
 
 
+def test_admin_and_developer_direct_password_reset_without_otp():
+    # Register a standard user
+    reg_res = client.post(
+        "/auth/register",
+        json={
+            "username": "staff_member",
+            "email": "staff@example.com",
+            "phone_number": "+254744556677",
+            "password": "OldPassword@123",
+        },
+    )
+    assert reg_res.status_code == 201
+
+    # 1. Standard user cannot authorize a direct password reset without OTP
+    denied_res = client.post(
+        "/auth/forgot-password/admin-reset",
+        json={
+            "target_identifier": "staff_member",
+            "admin_identifier": "staff_member",
+            "admin_password": "OldPassword@123",
+            "new_password": "HackedPassword@123",
+        },
+    )
+    assert denied_res.status_code == 403
+    assert "administrative or developer rights" in denied_res.json()["detail"].lower()
+
+    # 2. Administrator directly resets staff_member's password on Login Page (no OTP required)
+    adm_reset_res = client.post(
+        "/auth/forgot-password/admin-reset",
+        json={
+            "target_identifier": "staff@example.com",
+            "admin_identifier": "admin",
+            "admin_password": "Admin@1234",
+            "new_password": "ResetByAdmin@456",
+        },
+    )
+    assert adm_reset_res.status_code == 200
+    assert adm_reset_res.json()["status"] == "password_reset_success"
+    assert adm_reset_res.json()["username"] == "staff_member"
+    assert adm_reset_res.json()["reset_by"] == "admin"
+
+    # Verify staff_member can log in with the new password immediately
+    login_staff = client.post(
+        "/auth/login",
+        json={"username": "staff_member", "password": "ResetByAdmin@456"},
+    )
+    assert login_staff.status_code == 200
+
+    # 3. Administrator cannot reset Developer (super_admin) password
+    adm_vs_dev = client.post(
+        "/auth/forgot-password/admin-reset",
+        json={
+            "target_identifier": "developer",
+            "admin_identifier": "admin",
+            "admin_password": "Admin@1234",
+            "new_password": "TryResetDev@123",
+        },
+    )
+    assert adm_vs_dev.status_code == 403
+    assert "only a developer" in adm_vs_dev.json()["detail"].lower()
+
+    # 4. Developer (super_admin) can directly reset any account (even by phone number)
+    dev_reset_res = client.post(
+        "/auth/forgot-password/admin-reset",
+        json={
+            "target_identifier": "0744556677",
+            "admin_identifier": "developer",
+            "admin_password": "Admin@1234",
+            "new_password": "ResetByDeveloper@789",
+        },
+    )
+    assert dev_reset_res.status_code == 200
+    assert dev_reset_res.json()["reset_by"] == "developer"
+    assert dev_reset_res.json()["reset_by_role"] == "super_admin"
+
+    login_staff_2 = client.post(
+        "/auth/login",
+        json={"username": "staff_member", "password": "ResetByDeveloper@789"},
+    )
+    assert login_staff_2.status_code == 200
+
+
+
