@@ -43,7 +43,7 @@ export default function LoginPage({ API_URL, onLoginSuccess, initialActivationTo
 
   // Forgot password flow states
   const [forgotStep, setForgotStep] = useState(1); // 1: search identifier, 2: choose channel, 3: verify otp & reset
-  const [resetMethod, setResetMethod] = useState("otp"); // "otp" | "admin"
+  const [resetMethod, setResetMethod] = useState("admin"); // strictly "admin" (Admin / Developer reset only)
   const [forgotIdentifier, setForgotIdentifier] = useState("");
   const [channels, setChannels] = useState(null);
   const [selectedChannel, setSelectedChannel] = useState("email");
@@ -578,7 +578,12 @@ export default function LoginPage({ API_URL, onLoginSuccess, initialActivationTo
       setAdminConfirmPassword("");
       setMode("signin");
       setForgotStep(1);
-      setResetMethod("otp");
+      setResetMethod("admin");
+      setIsLockedOut(false);
+      setFailedAttempts(0);
+      try {
+        sessionStorage.removeItem("netops_failed_login_attempts");
+      } catch (_) {}
       setIdentifier(resetUsername);
       setPassword("");
       setSuccessMessage(
@@ -1067,21 +1072,6 @@ export default function LoginPage({ API_URL, onLoginSuccess, initialActivationTo
                   <button
                     type="button"
                     className="login-link-btn"
-                    onClick={() => {
-                      setErrorMessage("");
-                      setSuccessMessage("");
-                      setMode("forgot");
-                      setResetMethod("otp");
-                      setForgotStep(1);
-                      setForgotIdentifier(identifier);
-                    }}
-                  >
-                    Forgot password?
-                  </button>
-                  <span style={{ color: "#cbd5e1", fontSize: "12px" }}>|</span>
-                  <button
-                    type="button"
-                    className="login-link-btn"
                     style={{ fontWeight: "700", color: "#1d4ed8" }}
                     onClick={() => {
                       setErrorMessage("");
@@ -1090,9 +1080,9 @@ export default function LoginPage({ API_URL, onLoginSuccess, initialActivationTo
                       setResetMethod("admin");
                       setAdminTargetUser(identifier);
                     }}
-                    title="Reset any user password directly using Administrator or Developer rights without sending an OTP"
+                    title="By policy, passwords can only be reset by an Administrator or Developer"
                   >
-                    🛡️ Admin / Dev Reset
+                    🛡️ Forgot Password? (Admin / Dev Reset)
                   </button>
                 </div>
               </div>
@@ -1381,79 +1371,34 @@ export default function LoginPage({ API_URL, onLoginSuccess, initialActivationTo
         {/* ======================================================== */}
         {mode === "forgot" && (
           <div>
-            {/* METHOD SWITCHER: OTP vs ADMIN / DEVELOPER DIRECT RESET */}
+            {/* SECURITY POLICY BANNER */}
             <div
               style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr",
-                gap: "6px",
-                background: "#f1f5f9",
-                padding: "4px",
+                background: "#eff6ff",
+                border: "1px solid #bfdbfe",
                 borderRadius: "10px",
-                border: "1px solid #cbd5e1",
+                padding: "12px 14px",
                 marginBottom: "18px",
               }}
             >
-              <button
-                type="button"
-                onClick={() => {
-                  setResetMethod("otp");
-                  setErrorMessage("");
-                  setSuccessMessage("");
-                }}
-                style={{
-                  background: resetMethod === "otp" ? "#2563eb" : "transparent",
-                  color: resetMethod === "otp" ? "#ffffff" : "#475569",
-                  border: "none",
-                  borderRadius: "7px",
-                  padding: "8px 10px",
-                  fontSize: "12px",
-                  fontWeight: "700",
-                  cursor: "pointer",
-                  transition: "all 0.2s",
-                }}
-              >
-                📲 Send OTP (Email / SMS)
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setResetMethod("admin");
-                  if (!adminTargetUser && (channels?.username || forgotIdentifier)) {
-                    setAdminTargetUser(channels?.username || forgotIdentifier);
-                  }
-                  setErrorMessage("");
-                  setSuccessMessage("");
-                }}
-                style={{
-                  background: resetMethod === "admin" ? "#2563eb" : "transparent",
-                  color: resetMethod === "admin" ? "#ffffff" : "#475569",
-                  border: "none",
-                  borderRadius: "7px",
-                  padding: "8px 10px",
-                  fontSize: "12px",
-                  fontWeight: "700",
-                  cursor: "pointer",
-                  transition: "all 0.2s",
-                }}
-              >
-                🛡️ Admin / Dev Direct Reset
-              </button>
+              <div style={{ fontSize: "14px", fontWeight: "800", color: "#1d4ed8", display: "flex", alignItems: "center", gap: "8px" }}>
+                <span>🛡️</span>
+                <span>Administrator & Developer Password Reset</span>
+              </div>
+              <div style={{ fontSize: "12px", color: "#334155", marginTop: "5px", lineHeight: "1.5" }}>
+                By system policy, <strong>standard users cannot reset passwords independently</strong>. When a user forgets their password or is locked out, an <strong>Administrator</strong> or <strong>Developer (Super Admin)</strong> must authorize the password reset below.
+              </div>
             </div>
 
-            {/* ==================================================== */}
-            {/* ADMIN / DEVELOPER DIRECT PASSWORD RESET (NO OTP)     */}
-            {/* ==================================================== */}
-            {resetMethod === "admin" && (
-              <form onSubmit={handleAdminDirectReset}>
-                <div style={{ marginBottom: "14px" }}>
-                  <div style={{ fontSize: "16px", fontWeight: "700", color: "#0f172a" }}>
-                    🛡️ Admin / Developer Direct Password Reset
-                  </div>
-                  <div style={{ fontSize: "12px", color: "#475569", marginTop: "4px", lineHeight: 1.45 }}>
-                    With <strong>Administrator</strong> or <strong>Developer (Super Admin)</strong> rights, you can directly reset a user&apos;s password here without sending OTPs to their phone number or email.
-                  </div>
+            <form onSubmit={handleAdminDirectReset}>
+              <div style={{ marginBottom: "14px" }}>
+                <div style={{ fontSize: "15px", fontWeight: "700", color: "#0f172a" }}>
+                  Reset User Credentials
                 </div>
+                <div style={{ fontSize: "12px", color: "#64748b", marginTop: "3px" }}>
+                  Enter the user account to reset and authorize with Administrator or Developer credentials.
+                </div>
+              </div>
 
                 <div className="form-group">
                   <label className="form-label">User Account to Reset (Username, Email, or Phone) *</label>
@@ -1579,296 +1524,14 @@ export default function LoginPage({ API_URL, onLoginSuccess, initialActivationTo
                     className="login-link-btn"
                     onClick={() => {
                       setMode("signin");
-                      setForgotStep(1);
-                      setResetMethod("otp");
                       setErrorMessage("");
+                      setSuccessMessage("");
                     }}
                   >
                     ← Back to Sign In
                   </button>
                 </div>
               </form>
-            )}
-
-            {/* STEP 1: IDENTIFY USER (OTP FLOW) */}
-            {resetMethod === "otp" && forgotStep === 1 && (
-              <form onSubmit={handleSearchChannels}>
-                <div style={{ marginBottom: "16px" }}>
-                  <div style={{ fontSize: "16px", fontWeight: "700", color: "#0f172a" }}>
-                    Forgot Password
-                  </div>
-                  <div style={{ fontSize: "13px", color: "#475569", marginTop: "4px" }}>
-                    Enter your username, registered email, or phone number to request a 5-minute security OTP, or use <strong>Admin / Dev Direct Reset</strong> above.
-                  </div>
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Username, Email, or Phone Number</label>
-                  <input
-                    type="text"
-                    className="login-input"
-                    placeholder="e.g. developer, user@netops.local, or 0712345678"
-                    value={forgotIdentifier}
-                    onChange={(e) => setForgotIdentifier(e.target.value)}
-                    disabled={loading}
-                    autoFocus
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  className="login-submit-btn"
-                  disabled={loading}
-                >
-                  {loading ? "Searching..." : "Find Account & Channels →"}
-                </button>
-
-                <div style={{ textAlign: "center", marginTop: "16px" }}>
-                  <button
-                    type="button"
-                    className="login-link-btn"
-                    onClick={() => {
-                      setMode("signin");
-                      setErrorMessage("");
-                    }}
-                  >
-                    ← Back to Sign In
-                  </button>
-                </div>
-              </form>
-            )}
-
-            {/* STEP 2: CHOOSE OTP CHANNEL (EMAIL OR SMS OR ADMIN DIRECT RESET) */}
-            {resetMethod === "otp" && forgotStep === 2 && channels && (
-              <form onSubmit={handleSendOtp}>
-                <div style={{ marginBottom: "16px" }}>
-                  <div style={{ fontSize: "16px", fontWeight: "700", color: "#0f172a" }}>
-                    Select Password Reset Method
-                  </div>
-                  <div style={{ fontSize: "13px", color: "#475569", marginTop: "4px" }}>
-                    Dispatch a <strong>5-minute verification OTP</strong> to <strong>{channels.username}</strong>, or reset directly with Administrator / Developer rights:
-                  </div>
-                </div>
-
-                {channels.has_email && (
-                  <div
-                    className={`channel-card ${selectedChannel === "email" ? "selected" : ""}`}
-                    onClick={() => setSelectedChannel("email")}
-                  >
-                    <input
-                      type="radio"
-                      name="otp_channel"
-                      checked={selectedChannel === "email"}
-                      onChange={() => setSelectedChannel("email")}
-                    />
-                    <div>
-                      <div style={{ fontWeight: "700", fontSize: "13px", color: "#0f172a" }}>
-                        📧 Email Address (5-Minute OTP)
-                      </div>
-                      <div style={{ fontSize: "12px", color: "#475569" }}>
-                        {channels.email_masked}
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {channels.has_phone && (
-                  <div
-                    className={`channel-card ${selectedChannel === "sms" ? "selected" : ""}`}
-                    onClick={() => setSelectedChannel("sms")}
-                  >
-                    <input
-                      type="radio"
-                      name="otp_channel"
-                      checked={selectedChannel === "sms"}
-                      onChange={() => setSelectedChannel("sms")}
-                    />
-                    <div>
-                      <div style={{ fontWeight: "700", fontSize: "13px", color: "#0f172a" }}>
-                        📱 SMS / Mobile Phone (5-Minute OTP)
-                      </div>
-                      <div style={{ fontSize: "12px", color: "#475569" }}>
-                        {channels.phone_masked}
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* DIRECT ADMIN / DEVELOPER RESET CARD */}
-                <div
-                  className="channel-card"
-                  style={{
-                    borderColor: "#93c5fd",
-                    background: "#eff6ff",
-                  }}
-                  onClick={() => {
-                    setAdminTargetUser(channels.username || forgotIdentifier);
-                    setResetMethod("admin");
-                    setErrorMessage("");
-                  }}
-                >
-                  <span style={{ fontSize: "18px" }}>🛡️</span>
-                  <div>
-                    <div style={{ fontWeight: "700", fontSize: "13px", color: "#1d4ed8" }}>
-                      Reset Directly with Admin / Developer Rights (No OTP)
-                    </div>
-                    <div style={{ fontSize: "12px", color: "#475569" }}>
-                      Bypass Email/SMS OTP using Administrator or Developer credentials →
-                    </div>
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  className="login-submit-btn"
-                  disabled={loading}
-                >
-                  {loading ? "Dispatching OTP..." : "Send 5-Minute OTP →"}
-                </button>
-
-                <div style={{ textAlign: "center", marginTop: "16px" }}>
-                  <button
-                    type="button"
-                    className="login-link-btn"
-                    onClick={() => {
-                      setForgotStep(1);
-                      setErrorMessage("");
-                    }}
-                  >
-                    ← Back to Step 1
-                  </button>
-                </div>
-              </form>
-            )}
-
-            {/* STEP 3: ENTER OTP & NEW PASSWORD */}
-            {resetMethod === "otp" && forgotStep === 3 && (
-              <form onSubmit={handleResetPassword}>
-                <div style={{ marginBottom: "14px", textAlign: "center" }}>
-                  <div style={{ fontSize: "16px", fontWeight: "700", color: "#0f172a" }}>
-                    Verify OTP & Reset Password
-                  </div>
-                  <div style={{ fontSize: "13px", color: "#475569", marginTop: "4px" }}>
-                    Enter the 6-digit code sent to your registered {selectedChannel.toUpperCase()}.
-                  </div>
-                </div>
-
-                {/* TIMER BADGE */}
-                <div style={{ textAlign: "center" }}>
-                  <div
-                    className={`timer-badge ${
-                      otpSecondsLeft <= 30
-                        ? "danger"
-                        : otpSecondsLeft <= 120
-                        ? "warning"
-                        : ""
-                    }`}
-                  >
-                    <span>⏳</span>
-                    <span>
-                      {otpSecondsLeft > 0
-                        ? `OTP expires in: ${formatTimer(otpSecondsLeft)}`
-                        : "⚠️ OTP EXPIRED (5-minute limit exceeded)"}
-                    </span>
-                  </div>
-                </div>
-
-                {/* DEV PREVIEW / LOCAL LAN FALLBACK OTP */}
-                {devOtpPreview && (
-                  <div className="dev-preview-box">
-                    <span>🔑 Local LAN Fallback OTP: <strong style={{ fontSize: "15px", letterSpacing: "2px", color: "#0f172a" }}>{devOtpPreview}</strong></span>
-                    <button
-                      type="button"
-                      style={{ background: "#2563eb", border: "none", color: "#fff", borderRadius: "4px", padding: "4px 10px", fontSize: "11px", fontWeight: "700", cursor: "pointer" }}
-                      onClick={() => setOtpCode(devOtpPreview)}
-                    >
-                      Auto-Fill OTP
-                    </button>
-                  </div>
-                )}
-
-                <div className="form-group">
-                  <label className="form-label" style={{ textAlign: "center" }}>
-                    6-Digit OTP Code
-                  </label>
-                  <input
-                    type="text"
-                    maxLength={6}
-                    className="login-input otp-input-field"
-                    placeholder="••••••"
-                    value={otpCode}
-                    onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ""))}
-                    disabled={loading || otpSecondsLeft <= 0}
-                    autoFocus
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">New Password (min 8 chars, A-Z, a-z, special)</label>
-                  <div className="input-wrapper">
-                    <input
-                      type={showNewPassword ? "text" : "password"}
-                      className="login-input"
-                      placeholder="e.g. SecurePass@123"
-                      value={newPassword}
-                      onChange={(e) => setNewPassword(e.target.value)}
-                      disabled={loading || otpSecondsLeft <= 0}
-                    />
-                    <button
-                      type="button"
-                      className="password-toggle-btn"
-                      onClick={() => setShowNewPassword(!showNewPassword)}
-                    >
-                      {showNewPassword ? "👁️‍🗨️" : "👁️"}
-                    </button>
-                  </div>
-                  {renderPasswordChecklist(newPassword)}
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Confirm New Password</label>
-                  <input
-                    type={showNewPassword ? "text" : "password"}
-                    className="login-input"
-                    placeholder="Re-enter new password"
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    disabled={loading || otpSecondsLeft <= 0}
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  className="login-submit-btn"
-                  disabled={loading || otpSecondsLeft <= 0}
-                >
-                  {loading ? "Validating & Resetting..." : "Reset Password & Sign In →"}
-                </button>
-
-                <div style={{ display: "flex", justifyContent: "space-between", marginTop: "16px" }}>
-                  <button
-                    type="button"
-                    className="login-link-btn"
-                    onClick={handleSendOtp}
-                    disabled={loading}
-                  >
-                    🔄 Resend OTP
-                  </button>
-
-                  <button
-                    type="button"
-                    className="login-link-btn"
-                    onClick={() => {
-                      setMode("signin");
-                      setForgotStep(1);
-                      setErrorMessage("");
-                    }}
-                  >
-                    Cancel & Sign In
-                  </button>
-                </div>
-              </form>
-            )}
           </div>
         )}
       </div>

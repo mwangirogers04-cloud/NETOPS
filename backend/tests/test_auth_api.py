@@ -478,6 +478,14 @@ def test_admin_and_developer_direct_password_reset_without_otp():
     assert denied_res.status_code == 403
     assert "administrative or developer rights" in denied_res.json()["detail"].lower()
 
+    # 1b. Standard user cannot self-service reset via OTP (must contact administrator)
+    otp_denied = client.post(
+        "/auth/forgot-password/send-otp",
+        json={"identifier": "staff_member", "channel": "email"},
+    )
+    assert otp_denied.status_code == 403
+    assert "standard users cannot reset passwords independently" in otp_denied.json()["detail"].lower()
+
     # 2. Administrator directly resets staff_member's password on Login Page (no OTP required)
     adm_reset_res = client.post(
         "/auth/forgot-password/admin-reset",

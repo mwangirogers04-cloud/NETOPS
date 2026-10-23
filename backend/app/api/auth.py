@@ -490,6 +490,12 @@ def get_reset_channels(
             detail="No account found matching this identifier.",
         )
 
+    if user.role not in ("admin", "super_admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Standard users cannot reset passwords independently. Please contact an Administrator or Developer to reset your password.",
+        )
+
     return {
         "username": user.username,
         "role": user.role,
@@ -516,6 +522,12 @@ def send_reset_otp(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User account not found.",
+        )
+
+    if user.role not in ("admin", "super_admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Standard users cannot reset passwords independently. Please contact an Administrator or Developer to reset your password.",
         )
 
     if req.channel == "sms" and not user.phone_number:
@@ -676,6 +688,12 @@ def reset_password(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User account not found.",
+        )
+
+    if user.role not in ("admin", "super_admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Standard users cannot reset passwords independently. Please contact an Administrator or Developer to reset your password.",
         )
 
     # Verify and consume OTP (strictly validates 5-minute expiry)
