@@ -1,6 +1,12 @@
 import React, { useEffect, useState } from "react";
 
-export default function LoginPage({ API_URL, onLoginSuccess, initialActivationToken }) {
+export default function LoginPage({
+  API_URL,
+  onLoginSuccess,
+  initialActivationToken,
+  inactivityNotice = "",
+  onClearInactivityNotice,
+}) {
   const [mode, setMode] = useState("signin"); // "signin" | "forgot"
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
@@ -9,6 +15,36 @@ export default function LoginPage({ API_URL, onLoginSuccess, initialActivationTo
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [activationNotice, setActivationNotice] = useState("");
+  const [inactivityAlert, setInactivityAlert] = useState(inactivityNotice);
+
+  useEffect(() => {
+    if (inactivityNotice) {
+      setInactivityAlert(inactivityNotice);
+    }
+  }, [inactivityNotice]);
+
+  // Clear typed credentials on the login page after 3 minutes of inactivity
+  useEffect(() => {
+    let timer;
+    const resetTimer = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (identifier || password) {
+          setPassword("");
+          setErrorMessage("Sign-in session cleared due to 3 minutes of inactivity.");
+        }
+      }, 180000);
+    };
+
+    const events = ["mousemove", "mousedown", "keydown", "touchstart", "scroll", "click"];
+    events.forEach((evt) => window.addEventListener(evt, resetTimer, { passive: true }));
+    resetTimer();
+
+    return () => {
+      clearTimeout(timer);
+      events.forEach((evt) => window.removeEventListener(evt, resetTimer));
+    };
+  }, [identifier, password]);
 
   // Track failed login attempts: lock and prompt contact admin on 3rd failure
   const [failedAttempts, setFailedAttempts] = useState(() => {
@@ -813,6 +849,51 @@ export default function LoginPage({ API_URL, onLoginSuccess, initialActivationTo
           <div className="login-alert error">
             <span>⚠️</span>
             <div>{errorMessage}</div>
+          </div>
+        ) : null}
+
+        {inactivityAlert ? (
+          <div
+            className="login-alert warning"
+            style={{
+              background: "#fef3c7",
+              border: "1px solid #f59e0b",
+              color: "#92400e",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "10px",
+              padding: "12px 14px",
+              borderRadius: "8px",
+              marginBottom: "16px",
+              fontSize: "13px",
+              fontWeight: "600",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <span style={{ fontSize: "16px" }}>⏱️</span>
+              <div>{inactivityAlert}</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setInactivityAlert("");
+                if (onClearInactivityNotice) onClearInactivityNotice();
+              }}
+              style={{
+                background: "transparent",
+                border: "none",
+                cursor: "pointer",
+                color: "#92400e",
+                fontWeight: "700",
+                fontSize: "16px",
+                lineHeight: "1",
+                padding: "2px 6px",
+              }}
+              title="Dismiss"
+            >
+              ×
+            </button>
           </div>
         ) : null}
 

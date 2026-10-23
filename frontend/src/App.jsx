@@ -47,14 +47,23 @@ function App() {
     return headers;
   };
 
+  const INACTIVITY_TIMEOUT_MS = 180000; // 3 minutes of inactivity
+  const INACTIVITY_WARNING_MS = 30000;  // 30 seconds warning countdown
+
+  const [inactivityNotice, setInactivityNotice] = useState("");
+  const [inactivitySecondsLeft, setInactivitySecondsLeft] = useState(null);
+
   const handleLoginSuccess = (user, token) => {
     localStorage.setItem("netops_token", token);
     localStorage.setItem("netops_user", JSON.stringify(user));
+    localStorage.setItem("netops_last_activity", Date.now().toString());
+    setInactivityNotice("");
+    setInactivitySecondsLeft(null);
     setCurrentUser(user);
     setActivePage("dashboard");
   };
 
-  const handleLogout = () => {
+  const handleLogout = (reason = null) => {
     const token = localStorage.getItem("netops_token");
     if (token) {
       fetch(`${API_URL}/auth/logout`, {
@@ -64,16 +73,75 @@ function App() {
     }
     localStorage.removeItem("netops_token");
     localStorage.removeItem("netops_user");
+    localStorage.removeItem("netops_last_activity");
     setCurrentUser(null);
     setActivePage("dashboard");
+    setInactivitySecondsLeft(null);
+    if (reason) {
+      setInactivityNotice(reason);
+    }
   };
 
-  // Keep active user session duration updated in real time via heartbeat
+  // 3-Minute Inactivity Tracker: Auto-logout after 3 minutes without user interaction
+  useEffect(() => {
+    if (!currentUser) return;
+
+    let lastRecorded = Date.now();
+    localStorage.setItem("netops_last_activity", lastRecorded.toString());
+
+    const handleUserActivity = () => {
+      const now = Date.now();
+      if (now - lastRecorded > 1000) {
+        lastRecorded = now;
+        localStorage.setItem("netops_last_activity", now.toString());
+        setInactivitySecondsLeft((prev) => (prev !== null ? null : prev));
+      }
+    };
+
+    const activityEvents = [
+      "mousemove",
+      "mousedown",
+      "keydown",
+      "touchstart",
+      "scroll",
+      "click",
+    ];
+
+    activityEvents.forEach((evt) => {
+      window.addEventListener(evt, handleUserActivity, { passive: true });
+    });
+
+    const inactivityInterval = setInterval(() => {
+      const storedLast = Number(localStorage.getItem("netops_last_activity") || lastRecorded);
+      const elapsed = Date.now() - storedLast;
+
+      if (elapsed >= INACTIVITY_TIMEOUT_MS) {
+        handleLogout("You have been automatically logged out due to 3 minutes of inactivity.");
+      } else if (elapsed >= INACTIVITY_TIMEOUT_MS - INACTIVITY_WARNING_MS) {
+        const remaining = Math.max(1, Math.ceil((INACTIVITY_TIMEOUT_MS - elapsed) / 1000));
+        setInactivitySecondsLeft(remaining);
+      } else {
+        setInactivitySecondsLeft((prev) => (prev !== null ? null : prev));
+      }
+    }, 1000);
+
+    return () => {
+      clearInterval(inactivityInterval);
+      activityEvents.forEach((evt) => {
+        window.removeEventListener(evt, handleUserActivity);
+      });
+    };
+  }, [currentUser]);
+
+  // Keep active user session duration updated in real time via heartbeat (only while active)
   useEffect(() => {
     if (!currentUser) return;
     const interval = setInterval(() => {
       const token = localStorage.getItem("netops_token");
       if (!token) return;
+      const storedLast = Number(localStorage.getItem("netops_last_activity") || 0);
+      if (Date.now() - storedLast >= INACTIVITY_TIMEOUT_MS) return;
+
       fetch(`${API_URL}/auth/heartbeat`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
@@ -98,11 +166,16 @@ function App() {
       .then((userData) => {
         setCurrentUser(userData);
         localStorage.setItem("netops_user", JSON.stringify(userData));
+        localStorage.setItem("netops_last_activity", Date.now().toString());
       })
-      .catch(() => {
+      .catch((err) => {
         localStorage.removeItem("netops_token");
         localStorage.removeItem("netops_user");
+        localStorage.removeItem("netops_last_activity");
         setCurrentUser(null);
+        if (err && err.message && err.message.toLowerCase().includes("inactivity")) {
+          setInactivityNotice("You have been automatically logged out due to 3 minutes of inactivity.");
+        }
       });
   }, []);
 
@@ -10166,6 +10239,8 @@ const EndpointUpdatesPage = () => {
         API_URL={API_URL}
         onLoginSuccess={handleLoginSuccess}
         initialActivationToken={activationToken}
+        inactivityNotice={inactivityNotice}
+        onClearInactivityNotice={() => setInactivityNotice("")}
       />
     );
   }
@@ -11529,6 +11604,55 @@ const EndpointUpdatesPage = () => {
       `}</style>
 
       <div className="app">
+        {inactivitySecondsLeft !== null && (
+          <div
+            style={{
+              position: "fixed",
+              top: "20px",
+              right: "20px",
+              zIndex: 999999,
+              background: "#ffffff",
+              border: "2px solid #f59e0b",
+              borderRadius: "12px",
+              padding: "16px 20px",
+              boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 10px 10px -5px rgba(0, 0, 0, 0.1)",
+              maxWidth: "380px",
+              animation: "fadeIn 0.2s ease-in-out",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "flex-start", gap: "12px" }}>
+              <span style={{ fontSize: "24px", lineHeight: "1" }}>⏱️</span>
+              <div>
+                <div style={{ fontWeight: "700", color: "#b45309", fontSize: "14px", marginBottom: "4px" }}>
+                  Inactivity Warning
+                </div>
+                <div style={{ fontSize: "13px", color: "#475569", lineHeight: "1.4" }}>
+                  You will be automatically logged out in <strong style={{ color: "#dc2626" }}>{inactivitySecondsLeft}s</strong> due to inactivity.
+                </div>
+                <div style={{ marginTop: "12px", display: "flex", gap: "8px" }}>
+                  <button
+                    type="button"
+                    className="primary-button small"
+                    style={{ background: "#d97706", borderColor: "#b45309", color: "#ffffff", fontWeight: "700" }}
+                    onClick={() => {
+                      localStorage.setItem("netops_last_activity", Date.now().toString());
+                      setInactivitySecondsLeft(null);
+                    }}
+                  >
+                    Stay Logged In
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button small"
+                    onClick={() => handleLogout("You have logged out.")}
+                  >
+                    Log Out Now
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
         <aside className="sidebar">
           <div className="brand">
             <div className="brand-mark">

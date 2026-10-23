@@ -399,6 +399,16 @@ def get_my_profile(
     )
     if active_session:
         now = datetime.now(timezone.utc).replace(tzinfo=None)
+        # Enforce 3-minute inactivity timeout (180 seconds)
+        if active_session.last_activity_at and (now - active_session.last_activity_at).total_seconds() > 180:
+            active_session.is_active = False
+            active_session.logout_at = now
+            active_session.duration_seconds = max(1, int((now - active_session.login_at).total_seconds()))
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Session expired due to 3 minutes of inactivity.",
+            )
         active_session.last_activity_at = now
         active_session.duration_seconds = max(1, int((now - active_session.login_at).total_seconds()))
         db.commit()
@@ -426,6 +436,16 @@ def session_heartbeat(
     )
     if active_session:
         now = datetime.now(timezone.utc).replace(tzinfo=None)
+        # Enforce 3-minute inactivity timeout (180 seconds)
+        if active_session.last_activity_at and (now - active_session.last_activity_at).total_seconds() > 180:
+            active_session.is_active = False
+            active_session.logout_at = now
+            active_session.duration_seconds = max(1, int((now - active_session.login_at).total_seconds()))
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Session expired due to 3 minutes of inactivity.",
+            )
         active_session.last_activity_at = now
         active_session.duration_seconds = max(1, int((now - active_session.login_at).total_seconds()))
         db.commit()
