@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models.user import User
+from .auth import clear_failed_login_attempts
 from ..services.auth_service import (
     check_user_conflicts,
     generate_activation_link,
@@ -366,6 +367,10 @@ def update_user(
 
     db.commit()
     db.refresh(user)
+
+    if req.password is not None or (req.is_active is not None and req.is_active):
+        clear_failed_login_attempts(user.username)
+        clear_failed_login_attempts(user.email)
 
     return {
         "status": "updated",

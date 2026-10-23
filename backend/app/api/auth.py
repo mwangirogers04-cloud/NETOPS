@@ -251,10 +251,29 @@ def register_account(
 # LOGIN
 # -------------------------------------------------------------
 
+FAILED_LOGIN_ATTEMPTS: dict[str, int] = {}
+
+
+def clear_failed_login_attempts(identifier: str | None = None):
+    """Reset failed login attempts counter for an identifier or all users."""
+    if identifier:
+        ident = identifier.strip().lower()
+        FAILED_LOGIN_ATTEMPTS.pop(ident, None)
+    else:
+        FAILED_LOGIN_ATTEMPTS.clear()
+
+
 @router.post("/login")
 def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
     """Authenticate user with username or email, record session, and return JWT bearer token."""
     ident = req.username.strip().lower()
+
+    # Block if already reached 3 failed attempts
+    if FAILED_LOGIN_ATTEMPTS.get(ident, 0) >= 3:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="You have entered an incorrect password 3 times. Please contact the administrator.",
+        )
 
     user = db.scalar(
         select(User).where(
@@ -266,9 +285,24 @@ def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
     )
 
     if not user or not verify_password(req.password, user.hashed_password):
+        current_fails = FAILED_LOGIN_ATTEMPTS.get(ident, 0) + 1
+        FAILED_LOGIN_ATTEMPTS[ident] = current_fails
+        if user:
+            if user.username:
+                FAILED_LOGIN_ATTEMPTS[user.username.lower()] = current_fails
+            if user.email:
+                FAILED_LOGIN_ATTEMPTS[user.email.lower()] = current_fails
+
+        if current_fails >= 3:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="You have entered an incorrect password 3 times. Please contact the administrator.",
+            )
+
+        remaining = 3 - current_fails
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password.",
+            detail=f"Incorrect username or password. ({remaining} attempt{'s' if remaining > 1 else ''} remaining)",
         )
 
     if not user.is_active:
@@ -276,6 +310,13 @@ def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account is currently deactivated. Contact your administrator.",
         )
+
+    # Success: reset failed attempts counter
+    clear_failed_login_attempts(ident)
+    if user.username:
+        clear_failed_login_attempts(user.username)
+    if user.email:
+        clear_failed_login_attempts(user.email)
 
     # Record User Access Session
     now = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -645,6 +686,9 @@ def reset_password(
     user.is_verified = True  # Verified via OTP
     db.commit()
 
+    clear_failed_login_attempts(user.username)
+    clear_failed_login_attempts(user.email)
+
     return {
         "status": "password_reset_success",
         "username": user.username,
@@ -741,6 +785,9 @@ def admin_direct_reset_password(
     target_user.hashed_password = hash_password(req.new_password)
     target_user.is_verified = True
     db.commit()
+
+    clear_failed_login_attempts(target_user.username)
+    clear_failed_login_attempts(target_user.email)
 
     role_label = (
         "Developer (Super Admin)"

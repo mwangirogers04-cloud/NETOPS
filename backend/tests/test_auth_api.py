@@ -8,6 +8,7 @@ from sqlalchemy.pool import StaticPool
 from backend.app.database import Base, get_db
 from backend.app.main import app
 from backend.app.models.user import PasswordResetOTP, User
+from backend.app.api.auth import clear_failed_login_attempts
 from backend.app.services.auth_service import (
     hash_password,
     seed_default_users,
@@ -36,12 +37,14 @@ client = TestClient(app)
 
 @pytest.fixture(autouse=True)
 def setup_database():
+    clear_failed_login_attempts()
     Base.metadata.create_all(bind=engine)
     db = TestingSessionLocal()
     seed_default_users(db)
     db.close()
     app.dependency_overrides[get_db] = override_get_db
     yield
+    clear_failed_login_attempts()
     app.dependency_overrides.clear()
     Base.metadata.drop_all(bind=engine)
 
@@ -79,6 +82,44 @@ def test_login_invalid_password():
     )
     assert res.status_code == 401
     assert "Incorrect" in res.json()["detail"]
+
+
+def test_three_failed_login_attempts_prompts_administrator():
+    # Attempt 1
+    res1 = client.post(
+        "/auth/login",
+        json={"username": "developer", "password": "BadPassword1"},
+    )
+    assert res1.status_code == 401
+    assert "Incorrect" in res1.json()["detail"]
+    assert "2 attempts remaining" in res1.json()["detail"]
+
+    # Attempt 2
+    res2 = client.post(
+        "/auth/login",
+        json={"username": "developer", "password": "BadPassword2"},
+    )
+    assert res2.status_code == 401
+    assert "Incorrect" in res2.json()["detail"]
+    assert "1 attempt remaining" in res2.json()["detail"]
+
+    # Attempt 3 -> Prompt to contact administrator
+    res3 = client.post(
+        "/auth/login",
+        json={"username": "developer", "password": "BadPassword3"},
+    )
+    assert res3.status_code == 401
+    detail = res3.json()["detail"].lower()
+    assert "3 times" in detail
+    assert "contact the administrator" in detail
+
+    # Attempt 4+ -> Remains locked requiring administrator
+    res4 = client.post(
+        "/auth/login",
+        json={"username": "developer", "password": "EvenCorrectPasswordNow"},
+    )
+    assert res4.status_code == 401
+    assert "contact the administrator" in res4.json()["detail"].lower()
 
 
 def test_create_user_and_activation_link():

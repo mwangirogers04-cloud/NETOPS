@@ -10,6 +10,24 @@ export default function LoginPage({ API_URL, onLoginSuccess, initialActivationTo
   const [successMessage, setSuccessMessage] = useState("");
   const [activationNotice, setActivationNotice] = useState("");
 
+  // Track failed login attempts: lock and prompt contact admin on 3rd failure
+  const [failedAttempts, setFailedAttempts] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem("netops_failed_login_attempts");
+      return saved ? parseInt(saved, 10) : 0;
+    } catch (_) {
+      return 0;
+    }
+  });
+  const [isLockedOut, setIsLockedOut] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem("netops_failed_login_attempts");
+      return saved ? parseInt(saved, 10) >= 3 : false;
+    } catch (_) {
+      return false;
+    }
+  });
+
   // Register account states & duplicate recheck prompts
   const [regUsername, setRegUsername] = useState("");
   const [regEmail, setRegEmail] = useState("");
@@ -352,8 +370,35 @@ export default function LoginPage({ API_URL, onLoginSuccess, initialActivationTo
       });
       const data = await response.json();
       if (!response.ok) {
-        throw new Error(data.detail || "Authentication failed. Check your credentials.");
+        const nextAttempts = failedAttempts + 1;
+        setFailedAttempts(nextAttempts);
+        try {
+          sessionStorage.setItem("netops_failed_login_attempts", String(nextAttempts));
+        } catch (_) {}
+
+        const detailMsg = data.detail || "Authentication failed. Check your credentials.";
+        const isContactAdmin =
+          nextAttempts >= 3 ||
+          detailMsg.toLowerCase().includes("contact the administrator");
+
+        if (isContactAdmin) {
+          setIsLockedOut(true);
+          throw new Error(
+            detailMsg ||
+              "You have entered an incorrect password 3 times. Please contact the administrator."
+          );
+        }
+
+        throw new Error(detailMsg);
       }
+
+      // Successful sign in: reset failed attempts
+      setFailedAttempts(0);
+      setIsLockedOut(false);
+      try {
+        sessionStorage.removeItem("netops_failed_login_attempts");
+      } catch (_) {}
+
       onLoginSuccess(data.user, data.access_token);
     } catch (err) {
       setErrorMessage(err.message || "Sign in failed.");
@@ -897,12 +942,103 @@ export default function LoginPage({ API_URL, onLoginSuccess, initialActivationTo
           </div>
         )}
 
-        {errorMessage && (
+        {isLockedOut ? (
+          <div
+            className="login-alert error"
+            style={{
+              background: "#450a0a",
+              border: "1px solid #ef4444",
+              color: "#fecaca",
+              flexDirection: "column",
+              gap: "10px",
+              padding: "16px",
+              borderRadius: "10px",
+              boxShadow: "0 4px 14px rgba(239, 68, 68, 0.25)",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", width: "100%" }}>
+              <span style={{ fontSize: "22px" }}>🚨</span>
+              <div>
+                <div style={{ fontWeight: "800", fontSize: "14px", color: "#fca5a5" }}>
+                  Account Locked: 3 Incorrect Password Attempts
+                </div>
+                <div style={{ fontSize: "12px", color: "#f87171" }}>
+                  Please contact the administrator for assistance.
+                </div>
+              </div>
+            </div>
+
+            <div style={{ fontSize: "13px", lineHeight: "1.5", color: "#fee2e2" }}>
+              {errorMessage || "You have entered an incorrect password 3 times. Please contact the administrator to unlock your account or reset your password."}
+            </div>
+
+            <div
+              style={{
+                background: "rgba(0, 0, 0, 0.35)",
+                border: "1px solid rgba(239, 68, 68, 0.3)",
+                borderRadius: "8px",
+                padding: "10px 12px",
+                fontSize: "12px",
+                color: "#f1f5f9",
+                lineHeight: "1.6",
+                width: "100%",
+                boxSizing: "border-box",
+              }}
+            >
+              <div style={{ fontWeight: "700", marginBottom: "4px", color: "#fca5a5" }}>
+                📞 Administrator Contacts:
+              </div>
+              <div>🛡️ <strong>System Administrator:</strong> <a href="mailto:admin@netops.local" style={{ color: "#93c5fd", textDecoration: "underline" }}>admin@netops.local</a></div>
+              <div>👑 <strong>Lead Developer (Super Admin):</strong> <a href="mailto:developer@netops.local" style={{ color: "#93c5fd", textDecoration: "underline" }}>developer@netops.local</a></div>
+            </div>
+
+            <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", marginTop: "4px", alignItems: "center" }}>
+              <button
+                type="button"
+                className="login-link-btn"
+                style={{
+                  color: "#93c5fd",
+                  fontWeight: "700",
+                  textDecoration: "underline",
+                  fontSize: "12px",
+                }}
+                onClick={() => {
+                  setErrorMessage("");
+                  setMode("forgot");
+                  setResetMethod("admin");
+                  setAdminTargetUser(identifier);
+                }}
+              >
+                🛡️ Direct Admin / Dev Password Reset →
+              </button>
+              <span style={{ color: "#64748b" }}>•</span>
+              <button
+                type="button"
+                className="login-link-btn"
+                style={{
+                  color: "#93c5fd",
+                  fontWeight: "700",
+                  textDecoration: "underline",
+                  fontSize: "12px",
+                }}
+                onClick={() => {
+                  setErrorMessage("");
+                  setMode("forgot");
+                  setResetMethod("otp");
+                  setForgotStep(1);
+                  setForgotIdentifier(identifier);
+                }}
+              >
+                🔑 Reset with 5-Minute OTP →
+              </button>
+            </div>
+          </div>
+        ) : errorMessage ? (
           <div className="login-alert error">
             <span>⚠️</span>
             <div>{errorMessage}</div>
           </div>
-        )}
+        ) : null}
 
         {/* ======================================================== */}
         {/* VIEW 1: SIGN IN                                          */}
@@ -983,10 +1119,46 @@ export default function LoginPage({ API_URL, onLoginSuccess, initialActivationTo
             <button
               type="submit"
               className="login-submit-btn"
-              disabled={loading}
+              disabled={loading || isLockedOut}
+              style={
+                isLockedOut
+                  ? {
+                      background: "#7f1d1d",
+                      borderColor: "#ef4444",
+                      color: "#fca5a5",
+                      cursor: "not-allowed",
+                      opacity: 0.9,
+                    }
+                  : {}
+              }
             >
-              {loading ? "Authenticating..." : "Sign In to Console →"}
+              {loading
+                ? "Authenticating..."
+                : isLockedOut
+                ? "🔒 Locked — Please Contact Administrator"
+                : "Sign In to Console →"}
             </button>
+
+            {isLockedOut && (
+              <div style={{ textAlign: "center", marginTop: "12px" }}>
+                <button
+                  type="button"
+                  className="login-link-btn"
+                  style={{ color: "#64748b", fontSize: "12px", textDecoration: "underline" }}
+                  onClick={() => {
+                    setIsLockedOut(false);
+                    setFailedAttempts(0);
+                    setErrorMessage("");
+                    setPassword("");
+                    try {
+                      sessionStorage.removeItem("netops_failed_login_attempts");
+                    } catch (_) {}
+                  }}
+                >
+                  🔄 Try logging in as another account
+                </button>
+              </div>
+            )}
 
             <div style={{ textAlign: "center", marginTop: "14px", fontSize: "13px", color: "#94a3b8" }}>
               Don&apos;t have an account?{" "}
