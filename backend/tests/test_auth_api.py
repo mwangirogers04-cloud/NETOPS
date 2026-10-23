@@ -380,9 +380,13 @@ def test_super_admin_can_update_roles():
 
 
 def test_duplicate_email_and_phone_registration_prompts():
+    login_adm = client.post("/auth/login", json={"username": "admin", "password": "Admin@1234"})
+    admin_headers = {"Authorization": f"Bearer {login_adm.json()['access_token']}"}
+
     # First register a new user via /auth/register
     reg_res = client.post(
         "/auth/register",
+        headers=admin_headers,
         json={
             "username": "first_user",
             "email": "unique_user@example.com",
@@ -396,6 +400,7 @@ def test_duplicate_email_and_phone_registration_prompts():
     # Attempt to register another account with the SAME email (case-insensitive)
     dup_email_res = client.post(
         "/auth/register",
+        headers=admin_headers,
         json={
             "username": "second_user",
             "email": "UNIQUE_USER@example.com",
@@ -409,6 +414,7 @@ def test_duplicate_email_and_phone_registration_prompts():
     # Attempt to register another account with the SAME phone number (even in local 07... format)
     dup_phone_res = client.post(
         "/auth/register",
+        headers=admin_headers,
         json={
             "username": "third_user",
             "email": "third_user@example.com",
@@ -434,8 +440,7 @@ def test_duplicate_email_and_phone_registration_prompts():
     assert avail_data["conflicts"]["phone_number"] == "The phone number already exists, please try another number."
 
     # Verify admin /users/ create endpoint also enforces phone & email uniqueness
-    login_adm = client.post("/auth/login", json={"username": "admin", "password": "Admin@1234"})
-    headers = {"Authorization": f"Bearer {login_adm.json()['access_token']}"}
+    headers = admin_headers
 
     adm_dup_phone = client.post(
         "/users/",
@@ -452,10 +457,63 @@ def test_duplicate_email_and_phone_registration_prompts():
     assert adm_dup_phone.json()["detail"] == "The phone number already exists, please try another number."
 
 
+def test_public_self_registration_forbidden():
+    # 1. Unauthenticated request to /auth/register is forbidden (403)
+    unauth_res = client.post(
+        "/auth/register",
+        json={
+            "username": "self_register_user",
+            "email": "self_reg@example.com",
+            "phone_number": "+254711223344",
+            "password": "Password@123",
+        },
+    )
+    assert unauth_res.status_code == 403
+    assert "Public self-registration is disabled" in unauth_res.json()["detail"]
+
+    # 2. Standard user cannot register accounts (403)
+    login_dev = client.post("/auth/login", json={"username": "developer", "password": "Admin@1234"})
+    dev_token = login_dev.json()["access_token"]
+    dev_headers = {"Authorization": f"Bearer {dev_token}"}
+
+    create_user_res = client.post(
+        "/auth/register",
+        headers=dev_headers,
+        json={
+            "username": "normal_user",
+            "email": "normal@example.com",
+            "phone_number": "+254722334455",
+            "password": "Password@123",
+        },
+    )
+    assert create_user_res.status_code == 201
+
+    login_user = client.post("/auth/login", json={"username": "normal_user", "password": "Password@123"})
+    user_token = login_user.json()["access_token"]
+    user_headers = {"Authorization": f"Bearer {user_token}"}
+
+    user_reg_res = client.post(
+        "/auth/register",
+        headers=user_headers,
+        json={
+            "username": "another_user",
+            "email": "another@example.com",
+            "phone_number": "+254733445566",
+            "password": "Password@123",
+        },
+    )
+    assert user_reg_res.status_code == 403
+    assert "Public self-registration is disabled" in user_reg_res.json()["detail"]
+
+
 def test_admin_and_developer_direct_password_reset_without_otp():
+    login_adm = client.post("/auth/login", json={"username": "admin", "password": "Admin@1234"})
+    admin_headers = {"Authorization": f"Bearer {login_adm.json()['access_token']}"}
+
     # Register a standard user
     reg_res = client.post(
         "/auth/register",
+        headers=admin_headers,
         json={
             "username": "staff_member",
             "email": "staff@example.com",

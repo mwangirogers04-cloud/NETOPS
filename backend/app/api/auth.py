@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr, field_validator
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
@@ -181,11 +182,25 @@ def check_account_availability(
 def register_account(
     req: RegisterRequest,
     db: Session = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security_bearer),
 ):
     """
-    Register a new user account from the Login page after rechecking that
-    the email address, phone number, and username do not already exist.
+    Register a new user account.
+    Public self-registration is disabled. Only Administrators and Developers
+    can register accounts.
     """
+    if not credentials:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Public self-registration is disabled. Accounts can only be created by an Administrator or Developer.",
+        )
+
+    authorizer = get_current_user(credentials=credentials, db=db)
+    if authorizer.role not in ("admin", "super_admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Public self-registration is disabled. Accounts can only be created by an Administrator or Developer.",
+        )
     clean_username = req.username.strip()
     clean_email = str(req.email).strip().lower()
     clean_phone = req.phone_number.strip()
