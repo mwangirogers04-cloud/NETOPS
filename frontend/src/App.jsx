@@ -846,6 +846,25 @@ const loadEvents = async () => {
     return () => clearTimeout(timer);
   }, [newDeviceAlert]);
 
+  // Global refresh: reloads every data source so any Refresh button updates everything.
+  const [refreshingAll, setRefreshingAll] = useState(false);
+  const refreshAll = async () => {
+    if (refreshingAll) return;
+    setRefreshingAll(true);
+    try {
+      await Promise.allSettled([
+        loadDevices(),
+        loadEvents(),
+        loadAccessSchedules(),
+        loadPatchJobs(),
+        loadUpdatePolicy(),
+        loadDetectedSubnets(),
+      ]);
+    } finally {
+      setRefreshingAll(false);
+    }
+  };
+
   // Jump straight to a specific machine (used by the new-device popup).
   const goToDevice = (target, page = "devices") => {
     if (!target) return;
@@ -1686,10 +1705,10 @@ const DevicesPage = () => {
           <button
             className="secondary-button"
             type="button"
-            onClick={loadDevices}
-            disabled={lanScanLoading}
+            onClick={refreshAll}
+            disabled={lanScanLoading || refreshingAll}
           >
-            Refresh Devices
+            {refreshingAll ? "Refreshing..." : "🔄 Refresh Devices"}
           </button>
         </div>
       </div>
@@ -2893,14 +2912,10 @@ const LanScannerPage = () => {
 
         <button
           className="secondary-button"
-          onClick={() => {
-            loadDevices();
-            loadEvents();
-            loadDetectedSubnets();
-          }}
-          disabled={lanDevicesScanning}
+          onClick={refreshAll}
+          disabled={lanDevicesScanning || refreshingAll}
         >
-          🔄 Refresh
+          {refreshingAll ? "Refreshing..." : "🔄 Refresh"}
         </button>
       </div>
 
@@ -3645,9 +3660,10 @@ const AccessPage = () => {
 
         <button
           className="secondary-button"
-          onClick={loadDevices}
+          onClick={refreshAll}
+          disabled={refreshingAll}
         >
-          Refresh
+          {refreshingAll ? "Refreshing..." : "🔄 Refresh"}
         </button>
 
       </div>
@@ -4349,9 +4365,10 @@ const AccessPage = () => {
 
         <button
           className="secondary-button"
-          onClick={loadEvents}
+          onClick={refreshAll}
+          disabled={refreshingAll}
         >
-          Refresh Events
+          {refreshingAll ? "Refreshing..." : "🔄 Refresh Events"}
         </button>
       </div>
 
@@ -5761,10 +5778,13 @@ return (
                 <button
                   type="button"
                   className="secondary-button small"
-                  onClick={checkLiveStatus}
-                  disabled={loadingLiveStatus}
+                  onClick={() => {
+                    refreshAll();
+                    checkLiveStatus();
+                  }}
+                  disabled={loadingLiveStatus || refreshingAll}
                 >
-                  {loadingLiveStatus ? "Checking..." : "🔄 Refresh Status"}
+                  {loadingLiveStatus || refreshingAll ? "Checking..." : "🔄 Refresh Status"}
                 </button>
               </div>
 
@@ -7390,10 +7410,13 @@ const EndpointUpdatesPage = () => {
           <button
             type="button"
             className="secondary-button"
-            onClick={() => loadEndpointUpdates(false)}
-            disabled={endpointUpdatesLoading || lanScanLoading}
+            onClick={() => {
+              refreshAll();
+              loadEndpointUpdates(false);
+            }}
+            disabled={endpointUpdatesLoading || lanScanLoading || refreshingAll}
           >
-            {endpointUpdatesLoading ? "Refreshing..." : "Refresh"}
+            {endpointUpdatesLoading || refreshingAll ? "Refreshing..." : "🔄 Refresh"}
           </button>
         </div>
       </div>
