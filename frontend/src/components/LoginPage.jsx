@@ -250,8 +250,9 @@ export default function LoginPage({ API_URL, onLoginSuccess, initialActivationTo
       setErrorMessage("Please enter a valid phone number.");
       return;
     }
-    if (regPassword.length < 6) {
-      setErrorMessage("Password must be at least 6 characters long.");
+    const pwdErr = validatePasswordComplexity(regPassword);
+    if (pwdErr) {
+      setErrorMessage(pwdErr);
       return;
     }
     if (regPassword !== regConfirmPassword) {
@@ -1139,12 +1140,12 @@ export default function LoginPage({ API_URL, onLoginSuccess, initialActivationTo
             </div>
 
             <div className="form-group">
-              <label className="form-label">Password (min 6 characters) *</label>
+              <label className="form-label">Password (min 8 chars, A-Z, a-z, special) *</label>
               <div className="input-wrapper">
                 <input
                   type={showRegPassword ? "text" : "password"}
                   className="login-input"
-                  placeholder="Create a password"
+                  placeholder="e.g. SecurePass@123"
                   value={regPassword}
                   onChange={(e) => setRegPassword(e.target.value)}
                   disabled={loading}
@@ -1159,6 +1160,7 @@ export default function LoginPage({ API_URL, onLoginSuccess, initialActivationTo
                   {showRegPassword ? "👁️‍🗨️" : "👁️"}
                 </button>
               </div>
+              {renderPasswordChecklist(regPassword)}
             </div>
 
             <div className="form-group">

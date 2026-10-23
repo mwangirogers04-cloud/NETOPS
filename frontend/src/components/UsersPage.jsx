@@ -49,11 +49,70 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
   });
   const [formLoading, setFormLoading] = useState(false);
   const [formError, setFormError] = useState("");
+  const [showCreatePasswordText, setShowCreatePasswordText] = useState(false);
+  const [showEditPasswordText, setShowEditPasswordText] = useState(false);
   const [createFieldWarnings, setCreateFieldWarnings] = useState({
     username: "",
     email: "",
     phone_number: "",
   });
+
+  const validatePasswordComplexity = (pwd) => {
+    if (!pwd || pwd.length < 8) {
+      return "Password must be at least 8 characters long and include at least one uppercase letter, one lowercase letter, and one special character.";
+    }
+    if (!/[A-Z]/.test(pwd)) {
+      return "Password must contain at least one uppercase letter (A-Z).";
+    }
+    if (!/[a-z]/.test(pwd)) {
+      return "Password must contain at least one lowercase letter (a-z).";
+    }
+    if (!/[^A-Za-z0-9\s]/.test(pwd)) {
+      return "Password must contain at least one special character (e.g. @, #, $, %, !, &, *).";
+    }
+    return null;
+  };
+
+  const renderPasswordChecklist = (pwd) => {
+    const val = pwd || "";
+    const rules = [
+      { label: "Min 8 characters", met: val.length >= 8 },
+      { label: "1 Uppercase (A–Z)", met: /[A-Z]/.test(val) },
+      { label: "1 Lowercase (a–z)", met: /[a-z]/.test(val) },
+      { label: "1 Special (@#$%!&*)", met: /[^A-Za-z0-9\s]/.test(val) },
+    ];
+    return (
+      <div
+        style={{
+          background: "#f8fafc",
+          border: "1px solid #cbd5e1",
+          borderRadius: "8px",
+          padding: "8px 10px",
+          marginTop: "6px",
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          gap: "4px 10px",
+          fontSize: "11px",
+        }}
+      >
+        {rules.map((r) => (
+          <div
+            key={r.label}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "5px",
+              color: r.met ? "#059669" : "#64748b",
+              fontWeight: r.met ? "700" : "500",
+            }}
+          >
+            <span>{r.met ? "✓" : "○"}</span>
+            <span>{r.label}</span>
+          </div>
+        ))}
+      </div>
+    );
+  };
 
   const recheckFieldAvailability = async (payload, excludeUserId = null) => {
     try {
@@ -101,8 +160,9 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
       setFormError("All fields (Username, Email, Phone Number, Password) are required.");
       return;
     }
-    if (formState.password.length < 6) {
-      setFormError("Password must be at least 6 characters.");
+    const pwdErr = validatePasswordComplexity(formState.password);
+    if (pwdErr) {
+      setFormError(pwdErr);
       return;
     }
 
@@ -239,9 +299,12 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
       setEditError("Username, Email, and Phone Number cannot be blank.");
       return;
     }
-    if (editFormState.password && editFormState.password.length < 6) {
-      setEditError("Password must be at least 6 characters (or leave empty to keep existing password).");
-      return;
+    if (editFormState.password && editFormState.password.trim()) {
+      const pwdErr = validatePasswordComplexity(editFormState.password.trim());
+      if (pwdErr) {
+        setEditError(pwdErr);
+        return;
+      }
     }
 
     setEditLoading(true);
@@ -915,17 +978,28 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
 
                 <div className="form-group" style={{ marginBottom: "20px" }}>
                   <label className="form-label" style={{ fontSize: "11px", fontWeight: "700", color: "#334155", display: "block", marginBottom: "4px" }}>
-                    Initial Password (min 6 characters) *
+                    Initial Password (min 8 chars, 1 uppercase, 1 lowercase, 1 special) *
                   </label>
-                  <input
-                    type="password"
-                    className="login-input"
-                    placeholder="Assign initial password"
-                    value={formState.password}
-                    onChange={(e) => setFormState({ ...formState, password: e.target.value })}
-                    disabled={formLoading}
-                    required
-                  />
+                  <div style={{ position: "relative" }}>
+                    <input
+                      type={showCreatePasswordText ? "text" : "password"}
+                      className="login-input"
+                      placeholder="e.g. InitialPass@123"
+                      value={formState.password}
+                      onChange={(e) => setFormState({ ...formState, password: e.target.value })}
+                      disabled={formLoading}
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowCreatePasswordText(!showCreatePasswordText)}
+                      style={{ position: "absolute", right: "10px", top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", fontSize: "14px" }}
+                      title={showCreatePasswordText ? "Hide password" : "Show password"}
+                    >
+                      {showCreatePasswordText ? "👁️‍🗨️" : "👁️"}
+                    </button>
+                  </div>
+                  {renderPasswordChecklist(formState.password)}
                 </div>
 
                 <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
@@ -1120,20 +1194,34 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
               </div>
 
               <div className="form-group" style={{ marginBottom: "20px" }}>
-                <label className="form-label" style={{ fontSize: "11px", fontWeight: "700", color: "#cbd5e1", display: "block", marginBottom: "4px" }}>
-                  Change Password (Optional)
+                <label className="form-label" style={{ fontSize: "11px", fontWeight: "700", color: "#334155", display: "block", marginBottom: "4px" }}>
+                  Change Password (Optional — min 8 chars, A-Z, a-z, special)
                 </label>
-                <input
-                  type="password"
-                  className="login-input"
-                  placeholder="Leave blank to keep existing password"
-                  value={editFormState.password}
-                  onChange={(e) => setEditFormState({ ...editFormState, password: e.target.value })}
-                  disabled={editLoading}
-                />
-                <div style={{ fontSize: "11px", color: "#64748b", marginTop: "3px" }}>
-                  Only enter a value if you wish to reset this user's password.
+                <div style={{ position: "relative" }}>
+                  <input
+                    type={showEditPasswordText ? "text" : "password"}
+                    className="login-input"
+                    placeholder="Leave blank to keep existing password"
+                    value={editFormState.password}
+                    onChange={(e) => setEditFormState({ ...editFormState, password: e.target.value })}
+                    disabled={editLoading}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowEditPasswordText(!showEditPasswordText)}
+                    style={{ position: "absolute", right: "10px", top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", fontSize: "14px" }}
+                    title={showEditPasswordText ? "Hide password" : "Show password"}
+                  >
+                    {showEditPasswordText ? "👁️‍🗨️" : "👁️"}
+                  </button>
                 </div>
+                {editFormState.password ? (
+                  renderPasswordChecklist(editFormState.password)
+                ) : (
+                  <div style={{ fontSize: "11px", color: "#64748b", marginTop: "3px" }}>
+                    Only enter a value if you wish to reset this user's password.
+                  </div>
+                )}
               </div>
 
               <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>

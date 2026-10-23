@@ -115,13 +115,6 @@ class RegisterRequest(BaseModel):
             raise ValueError("Please provide a valid phone number")
         return clean
 
-    @field_validator("password")
-    @classmethod
-    def validate_password(cls, v: str) -> str:
-        if len(v) < 6:
-            raise ValueError("Password must be at least 6 characters")
-        return v
-
 
 class ActivateRequest(BaseModel):
     activation_token: str
@@ -196,6 +189,14 @@ def register_account(
     clean_username = req.username.strip()
     clean_email = str(req.email).strip().lower()
     clean_phone = req.phone_number.strip()
+
+    try:
+        validate_password_complexity(req.password)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
 
     conflicts = check_user_conflicts(
         db=db,

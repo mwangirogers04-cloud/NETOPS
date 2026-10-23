@@ -45,13 +45,6 @@ class UserCreateRequest(BaseModel):
             raise ValueError("Please provide a valid phone number")
         return clean
 
-    @field_validator("password")
-    @classmethod
-    def validate_password(cls, v: str) -> str:
-        if len(v) < 6:
-            raise ValueError("Password must be at least 6 characters")
-        return v
-
     @field_validator("role")
     @classmethod
     def validate_role(cls, v: str) -> str:
@@ -94,8 +87,6 @@ class UserUpdateRequest(BaseModel):
     @classmethod
     def validate_password(cls, v: str | None) -> str | None:
         if v is not None and v.strip() != "":
-            if len(v) < 6:
-                raise ValueError("Password must be at least 6 characters")
             return v
         return None
 
@@ -185,6 +176,15 @@ def create_user(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only Super Administrators can create Admin accounts.",
+        )
+
+    # Validate initial password complexity (min 8 chars, 1 uppercase, 1 lowercase, 1 special)
+    try:
+        validate_password_complexity(req.password)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
         )
 
     # Check for existing username, email, or phone number
