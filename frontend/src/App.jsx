@@ -11101,11 +11101,11 @@ const EndpointUpdatesPage = () => {
                 }}
                 title={
                   alertSoundEnabled
-                    ? "New device notification chime is ON. Click to mute chime if irritating."
-                    : "New device notification chime is MUTED. Click to turn chime ON."
+                    ? "Alert chime is ON. Click to mute sound (visual popups still appear normally)."
+                    : "Alert chime is MUTED. Click to turn sound ON (visual popups still appear silently)."
                 }
               >
-                {alertSoundEnabled ? "🔊 Sound ON" : "🔇 Sound OFF"}
+                {alertSoundEnabled ? "🔊 Sound ON" : "🔇 Sound Muted"}
               </button>
 
               {currentUser && (
@@ -11147,19 +11147,38 @@ const EndpointUpdatesPage = () => {
 
             <div className="alert-body">
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div className="alert-label">
-                  {newDeviceAlert.event_type === "device_online"
-                    ? "🔔 MACHINE CONNECTED TO LAN"
-                    : "🆕 NEW MACHINE DETECTED ON LAN"}
+                <div className="alert-label" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                  <span>
+                    {newDeviceAlert.event_type === "device_online"
+                      ? "🔔 MACHINE CONNECTED TO LAN"
+                      : "🆕 NEW MACHINE DETECTED ON LAN"}
+                  </span>
+                  {!alertSoundEnabled && (
+                    <span
+                      style={{
+                        fontSize: "10px",
+                        fontWeight: "700",
+                        color: "#94a3b8",
+                        background: "#1e293b",
+                        border: "1px solid #334155",
+                        borderRadius: "8px",
+                        padding: "1px 6px",
+                        letterSpacing: "0.5px",
+                      }}
+                      title="Silent Mode: Popup appears visually, audio chime is muted"
+                    >
+                      🔇 Silent
+                    </span>
+                  )}
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                   <button
                     type="button"
                     onClick={toggleAlertSound}
                     style={{
-                      background: alertSoundEnabled ? "#ecfdf5" : "#fef2f2",
-                      border: alertSoundEnabled ? "1px solid #a7f3d0" : "1px solid #fecaca",
-                      color: alertSoundEnabled ? "#065f46" : "#991b1b",
+                      background: alertSoundEnabled ? "#ecfdf5" : "#f8fafc",
+                      border: alertSoundEnabled ? "1px solid #a7f3d0" : "1px solid #cbd5e1",
+                      color: alertSoundEnabled ? "#065f46" : "#475569",
                       padding: "2px 8px",
                       borderRadius: "12px",
                       fontSize: "11px",
@@ -11171,11 +11190,11 @@ const EndpointUpdatesPage = () => {
                     }}
                     title={
                       alertSoundEnabled
-                        ? "Turn chime sound off if irritating when new machines connect"
+                        ? "Turn chime sound off (visual popup will still appear)"
                         : "Turn chime sound back on"
                     }
                   >
-                    {alertSoundEnabled ? "🔊 Sound ON" : "🔇 Sound OFF"}
+                    {alertSoundEnabled ? "🔊 Sound ON" : "🔇 Sound Muted"}
                   </button>
                   <button
                     type="button"
