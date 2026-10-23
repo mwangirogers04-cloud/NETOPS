@@ -394,7 +394,7 @@ function App() {
 
   const loadPatchJobs = async () => {
     try {
-      const response = await fetch(`${API_URL}/endpoint-updates/jobs?limit=50`);
+      const response = await fetch(`${API_URL}/endpoint-updates/jobs?limit=100`);
       if (response.ok) {
         const data = await response.json();
         setPatchJobs(Array.isArray(data) ? data : []);
@@ -414,6 +414,29 @@ function App() {
          (device.id && job.device_id && device.id === job.device_id) ||
          (device.device_id && job.device_id && device.device_id === job.device_id))
     );
+  };
+
+  const isDeviceScheduledForUpdates = (device) => {
+    if (!device || !Array.isArray(patchJobs)) return false;
+    return patchJobs.some((job) => {
+      if (job.status !== "SCHEDULED" && !job.scheduled_at) return false;
+      return (
+        (device.hostname && job.hostname && device.hostname.toLowerCase() === job.hostname.toLowerCase()) ||
+        (device.mac_address && job.mac_address && device.mac_address.replace(/[:-]/g, "").toUpperCase() === job.mac_address.replace(/[:-]/g, "").toUpperCase()) ||
+        (device.id && job.device_id && device.id === job.device_id) ||
+        (device.device_id && job.device_id && device.device_id === job.device_id)
+      );
+    });
+  };
+
+  const isDeviceScheduledForAccess = (device) => {
+    if (!device || !accessSchedules) return false;
+    const list = accessSchedules[device.id];
+    return Array.isArray(list) && list.some((s) => s.enabled !== false);
+  };
+
+  const isDeviceScheduled = (device) => {
+    return isDeviceScheduledForUpdates(device) || isDeviceScheduledForAccess(device);
   };
 
   const openDeployModal = async (device, preferredMode = null) => {
@@ -2205,6 +2228,19 @@ const DevicesPage = () => {
           </button>
           <button
             type="button"
+            className={`secondary-button small ${deviceFilter.startsWith("scheduled") ? "active" : ""}`}
+            style={
+              deviceFilter.startsWith("scheduled")
+                ? { background: "#4f46e5", color: "#fff", borderColor: "#4338ca", fontWeight: "700" }
+                : { borderColor: "#6366f1", color: "#4f46e5", fontWeight: "600" }
+            }
+            onClick={() => setDeviceFilter("scheduled")}
+            title="View devices with scheduled patch updates or network access schedules"
+          >
+            🕒 Scheduled ({scopedDevices.filter(isDeviceScheduled).length})
+          </button>
+          <button
+            type="button"
             className={`secondary-button small ${deviceFilter === "needs_updates" ? "active" : ""}`}
             style={deviceFilter === "needs_updates" ? { background: "#d97706", color: "#fff" } : { borderColor: "#f59e0b" }}
             onClick={() => setDeviceFilter("needs_updates")}
@@ -2284,7 +2320,7 @@ const DevicesPage = () => {
             <div style={{ position: "relative", width: "100%" }}>
               <input
                 type="text"
-                placeholder={`🔍 Search ${deviceFilter === "online" ? "Online" : deviceFilter === "all" ? "All" : deviceFilter} devices (IP, MAC, hostname, vendor, VLAN)...`}
+                placeholder={`🔍 Search ${deviceFilter === "online" ? "Online" : deviceFilter.startsWith("scheduled") ? "Scheduled" : deviceFilter === "all" ? "All" : deviceFilter} devices (IP, MAC, hostname, vendor, VLAN)...`}
                 value={deviceSearchQuery}
                 onChange={(e) => setDeviceSearchQuery(e.target.value)}
                 style={{
@@ -2321,6 +2357,66 @@ const DevicesPage = () => {
             </div>
           </div>
         </div>
+
+        {/* SCHEDULED SUB-FILTER PILLS BAR */}
+        {deviceFilter.startsWith("scheduled") && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              flexWrap: "wrap",
+              padding: "10px 14px",
+              background: "#eef2ff",
+              border: "1px solid #c7d2fe",
+              borderRadius: "8px",
+              marginBottom: "16px",
+              fontSize: "12px",
+            }}
+          >
+            <span style={{ fontWeight: "700", color: "#3730a3", display: "flex", alignItems: "center", gap: "6px" }}>
+              <span>🕒</span> Scheduled Filters:
+            </span>
+            <button
+              type="button"
+              className="secondary-button small"
+              style={
+                deviceFilter === "scheduled"
+                  ? { background: "#4f46e5", color: "#ffffff", fontWeight: "700", borderColor: "#4338ca", padding: "4px 12px", fontSize: "12px" }
+                  : { background: "#ffffff", color: "#4338ca", borderColor: "#a5b4fc", padding: "4px 12px", fontSize: "12px" }
+              }
+              onClick={() => setDeviceFilter("scheduled")}
+            >
+              All Scheduled ({scopedDevices.filter(isDeviceScheduled).length})
+            </button>
+            <button
+              type="button"
+              className="secondary-button small"
+              style={
+                deviceFilter === "scheduled_updates"
+                  ? { background: "#6366f1", color: "#ffffff", fontWeight: "700", borderColor: "#4f46e5", padding: "4px 12px", fontSize: "12px" }
+                  : { background: "#ffffff", color: "#4f46e5", borderColor: "#a5b4fc", padding: "4px 12px", fontSize: "12px" }
+              }
+              onClick={() => setDeviceFilter("scheduled_updates")}
+              title="Filter devices that have patch updates scheduled"
+            >
+              📅 Scheduled Updates ({scopedDevices.filter(isDeviceScheduledForUpdates).length})
+            </button>
+            <button
+              type="button"
+              className="secondary-button small"
+              style={
+                deviceFilter === "scheduled_access"
+                  ? { background: "#2563eb", color: "#ffffff", fontWeight: "700", borderColor: "#1d4ed8", padding: "4px 12px", fontSize: "12px" }
+                  : { background: "#ffffff", color: "#1d4ed8", borderColor: "#93c5fd", padding: "4px 12px", fontSize: "12px" }
+              }
+              onClick={() => setDeviceFilter("scheduled_access")}
+              title="Filter devices with active network access schedules"
+            >
+              ⏱️ Scheduled Network Access ({scopedDevices.filter(isDeviceScheduledForAccess).length})
+            </button>
+          </div>
+        )}
         <div className="table-container">
           <table className="data-table">
             <thead>
@@ -2339,55 +2435,90 @@ const DevicesPage = () => {
             </thead>
 
             <tbody>
-              {scopedDevices.length === 0 ? (
-                <tr>
-                  <td colSpan="10">
-                    <div className="empty-state">
-                      No devices detected on {selectedInterface === "all" ? "LAN/WLAN0" : selectedInterface.toUpperCase()}.
-                    </div>
-                  </td>
-                </tr>
-              ) : (
-                scopedDevices
-  .filter((device) => {
-    if (deviceFilter === "online" && device.status !== "online") return false;
-    if (deviceFilter === "offline" && device.status !== "offline") return false;
-    if (deviceFilter === "needs_updates" && device.update_status !== "updates_available") return false;
-    if (deviceFilter === "queued" && !Boolean(getActiveJobForDevice(device))) return false;
-    if (deviceFilter === "up_to_date" && device.update_status !== "up_to_date") return false;
-    if (deviceFilter === "unmonitored" && device.update_status && device.update_status !== "unmonitored") return false;
-    if (deviceFilter === "pending" && device.approval_status !== "pending") return false;
-    if (deviceFilter === "rejected" && device.approval_status !== "rejected") return false;
-    if (deviceFilter === "quarantined" && device.enforcement_status !== "quarantined") return false;
-    if (deviceFilter === "isolated" && device.enforcement_status !== "isolated") return false;
-    if (deviceFilter === "ip_phone" && device.device_type !== "ip_phone") return false;
-    if (deviceFilter === "computer" && device.device_type !== "computer") return false;
-    if (deviceFilter === "cctv" && device.device_type !== "cctv") return false;
-    if (deviceFilter === "printer" && device.device_type !== "printer") return false;
-    if (deviceFilter === "server" && device.device_type !== "server") return false;
-    if (deviceFilter === "access_point" && !["access_point", "ap", "wifi_ap"].includes(device.device_type)) return false;
-    if (deviceFilter === "unknown" && ["ip_phone", "computer", "cctv", "printer", "server", "access_point", "ap", "wifi_ap"].includes(device.device_type)) return false;
-    if (deviceFilter === "vlan10" && Number(device.vlan_id) !== 10) return false;
-    if (deviceFilter === "vlan20" && Number(device.vlan_id) !== 20) return false;
-    if (deviceFilter === "vlan30" && Number(device.vlan_id) !== 30) return false;
-    if (deviceFilter === "vlan40" && Number(device.vlan_id) !== 40) return false;
-    if (deviceFilter === "vlan50" && Number(device.vlan_id) !== 50) return false;
-    if (deviceFilter === "vlan60" && Number(device.vlan_id) !== 60) return false;
-    if (deviceFilter === "vlan90" && Number(device.vlan_id) !== 90) return false;
+              {(() => {
+                const inventoryFilteredDevices = scopedDevices.filter((device) => {
+                  if (deviceFilter === "online" && device.status !== "online") return false;
+                  if (deviceFilter === "offline" && device.status !== "offline") return false;
+                  if (deviceFilter === "needs_updates" && device.update_status !== "updates_available") return false;
+                  if (deviceFilter === "queued" && !Boolean(getActiveJobForDevice(device))) return false;
+                  if (deviceFilter === "up_to_date" && device.update_status !== "up_to_date") return false;
+                  if (deviceFilter === "unmonitored" && device.update_status && device.update_status !== "unmonitored") return false;
+                  if (deviceFilter === "pending" && device.approval_status !== "pending") return false;
+                  if (deviceFilter === "rejected" && device.approval_status !== "rejected") return false;
+                  if (deviceFilter === "quarantined" && device.enforcement_status !== "quarantined") return false;
+                  if (deviceFilter === "isolated" && device.enforcement_status !== "isolated") return false;
+                  if (deviceFilter === "scheduled" && !isDeviceScheduled(device)) return false;
+                  if (deviceFilter === "scheduled_updates" && !isDeviceScheduledForUpdates(device)) return false;
+                  if (deviceFilter === "scheduled_access" && !isDeviceScheduledForAccess(device)) return false;
+                  if (deviceFilter === "ip_phone" && device.device_type !== "ip_phone") return false;
+                  if (deviceFilter === "computer" && device.device_type !== "computer") return false;
+                  if (deviceFilter === "cctv" && device.device_type !== "cctv") return false;
+                  if (deviceFilter === "printer" && device.device_type !== "printer") return false;
+                  if (deviceFilter === "server" && device.device_type !== "server") return false;
+                  if (deviceFilter === "access_point" && !["access_point", "ap", "wifi_ap"].includes(device.device_type)) return false;
+                  if (deviceFilter === "unknown" && ["ip_phone", "computer", "cctv", "printer", "server", "access_point", "ap", "wifi_ap"].includes(device.device_type)) return false;
+                  if (deviceFilter === "vlan10" && Number(device.vlan_id) !== 10) return false;
+                  if (deviceFilter === "vlan20" && Number(device.vlan_id) !== 20) return false;
+                  if (deviceFilter === "vlan30" && Number(device.vlan_id) !== 30) return false;
+                  if (deviceFilter === "vlan40" && Number(device.vlan_id) !== 40) return false;
+                  if (deviceFilter === "vlan50" && Number(device.vlan_id) !== 50) return false;
+                  if (deviceFilter === "vlan60" && Number(device.vlan_id) !== 60) return false;
+                  if (deviceFilter === "vlan90" && Number(device.vlan_id) !== 90) return false;
 
-    if (
-      !deviceMatchesSearch(device, deviceSearchQuery, [
-        device.device_type,
-        `vlan ${device.vlan_id || ""}`,
-        device.network_interface,
-      ])
-    ) {
-      return false;
-    }
+                  if (
+                    !deviceMatchesSearch(device, deviceSearchQuery, [
+                      device.device_type,
+                      `vlan ${device.vlan_id || ""}`,
+                      device.network_interface,
+                    ])
+                  ) {
+                    return false;
+                  }
 
-    return true;
-  })
-  .map((device) => (
+                  return true;
+                });
+
+                if (scopedDevices.length === 0) {
+                  return (
+                    <tr>
+                      <td colSpan="10">
+                        <div className="empty-state">
+                          No devices detected on {selectedInterface === "all" ? "LAN/WLAN0" : selectedInterface.toUpperCase()}.
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                }
+
+                if (inventoryFilteredDevices.length === 0) {
+                  return (
+                    <tr>
+                      <td colSpan="10">
+                        <div className="empty-state" style={{ padding: "32px 16px", textAlign: "center" }}>
+                          {deviceFilter.startsWith("scheduled") ? (
+                            <>
+                              <div style={{ fontSize: "28px", marginBottom: "8px" }}>🕒</div>
+                              <div style={{ fontWeight: "700", fontSize: "14px", color: "#334155" }}>
+                                No Scheduled Devices Found
+                              </div>
+                              <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
+                                {deviceFilter === "scheduled_updates"
+                                  ? "No LAN devices currently have scheduled update or patch remediation jobs."
+                                  : deviceFilter === "scheduled_access"
+                                  ? "No LAN devices currently have active network access schedules."
+                                  : "No LAN devices currently have scheduled updates or network access schedules. You can schedule updates from Endpoint Updates or configure access schedules using '⏱️ Set Schedule'."}
+                              </div>
+                            </>
+                          ) : (
+                            `No devices found matching filter "${deviceFilter}".`
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                }
+
+                return inventoryFilteredDevices.map((device) => (
                   <React.Fragment key={device.id}>
                   <tr
                     id={`device-row-${device.id}`}
@@ -2417,6 +2548,47 @@ const DevicesPage = () => {
                       <div className="device-secondary">
                         {device.mac_address || "-"}
                       </div>
+
+                      {(isDeviceScheduledForUpdates(device) || isDeviceScheduledForAccess(device)) && (
+                        <div style={{ display: "flex", gap: "4px", flexWrap: "wrap", marginTop: "4px" }}>
+                          {isDeviceScheduledForUpdates(device) && (
+                            <span
+                              style={{
+                                fontSize: "10px",
+                                padding: "1px 6px",
+                                borderRadius: "4px",
+                                background: "#e0e7ff",
+                                color: "#4338ca",
+                                fontWeight: "700",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "3px",
+                              }}
+                              title="Scheduled patch remediation update job"
+                            >
+                              📅 Update Sched
+                            </span>
+                          )}
+                          {isDeviceScheduledForAccess(device) && (
+                            <span
+                              style={{
+                                fontSize: "10px",
+                                padding: "1px 6px",
+                                borderRadius: "4px",
+                                background: "#dbeafe",
+                                color: "#1e40af",
+                                fontWeight: "700",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "3px",
+                              }}
+                              title="Active network access schedule configured"
+                            >
+                              ⏱️ Access Sched
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </td>
 
                     <td>
@@ -2929,8 +3101,8 @@ const DevicesPage = () => {
                   </tr>
                   {renderInlineScheduleRow(device, 10)}
                   </React.Fragment>
-                ))
-              )}
+                ));
+              })()}
             </tbody>
           </table>
         </div>
