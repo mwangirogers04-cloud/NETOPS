@@ -1178,7 +1178,7 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                 try {
                   const res = await fetch(`${API_URL}/auth/admin-reset-password`, {
                     method: "POST",
-                    headers: getAuthHeaders(),
+                    headers: getAuthHeaders({ "Content-Type": "application/json" }),
                     body: JSON.stringify({
                       target_identifier: resetTargetUser.username,
                       new_password: resetNewPassword,
@@ -1186,7 +1186,13 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                   });
                   const data = await res.json();
                   if (!res.ok) {
-                    throw new Error(data.detail || "Failed to reset user password.");
+                    const errMsg =
+                      typeof data.detail === "string"
+                        ? data.detail
+                        : Array.isArray(data.detail)
+                        ? data.detail.map((d) => d.msg || JSON.stringify(d)).join(", ")
+                        : "Failed to reset user password.";
+                    throw new Error(errMsg);
                   }
                   setShowResetModal(false);
                   setActionNotice(
