@@ -390,6 +390,13 @@ def generate_report(
     report_type = report_type.lower().strip()
 
     # -----------------------------------------------------
+    # ISP INTERNET USAGE & FIREWALL BANDWIDTH REPORT
+    # -----------------------------------------------------
+    if report_type in ("isp_internet_usage", "firewall_internet_usage", "isp_usage"):
+        from ..services.firewall.isp_usage_service import get_firewall_isp_bandwidth_usage
+        return get_firewall_isp_bandwidth_usage(db, start=start, end=end, period=period)
+
+    # -----------------------------------------------------
     # USER ACTIVITY & ACCESS REPORT
     # -----------------------------------------------------
 
@@ -789,6 +796,63 @@ def generate_report(
         ],
     }
 
+
+# -----------------------------------------------------
+# ISP INTERNET USAGE DEDICATED ENDPOINTS
+# -----------------------------------------------------
+
+@router.get("/isp-usage")
+def get_isp_internet_usage_endpoint(
+    period: str = "daily",
+    date: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    start_datetime: str | None = None,
+    end_datetime: str | None = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Get live and historical ISP internet usage queried from the active firewall.
+    """
+    start, end = get_period_range(
+        period, date, start_date, end_date, start_datetime, end_datetime
+    )
+    from ..services.firewall.isp_usage_service import get_firewall_isp_bandwidth_usage
+    return get_firewall_isp_bandwidth_usage(db, start=start, end=end, period=period)
+
+
+@router.get("/isp-usage/download/csv")
+def download_isp_usage_csv(
+    period: str = "daily",
+    date: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    start_datetime: str | None = None,
+    end_datetime: str | None = None,
+    token: str | None = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Download a formatted CSV report of ISP internet usage and firewall device counters.
+    """
+    start, end = get_period_range(
+        period, date, start_date, end_date, start_datetime, end_datetime
+    )
+    from ..services.firewall.isp_usage_service import (
+        get_firewall_isp_bandwidth_usage,
+        generate_isp_usage_csv,
+    )
+    data = get_firewall_isp_bandwidth_usage(db, start=start, end=end, period=period)
+    csv_content = generate_isp_usage_csv(data)
+
+    filename = f"netops_isp_internet_usage_{period}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
+    return Response(
+        content=csv_content,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 # -----------------------------------------------------
 # EXCEL REPORT EXPORT
 # -----------------------------------------------------
@@ -824,9 +888,146 @@ def export_report_excel(
     clean_type = report_type.lower().strip()
 
     # -------------------------------------------------
+    # ISP INTERNET USAGE & FIREWALL BANDWIDTH REPORT
+    # -------------------------------------------------
+    if clean_type in ("isp_internet_usage", "firewall_internet_usage", "isp_usage"):
+        # Sheet 1: User & Device Bandwidth Usage (Active tab)
+        ws_devices = workbook.active
+        ws_devices.title = "User Bandwidth Usage"
+
+        dev_headers = [
+            "Device Hostname",
+            "IP Address",
+            "MAC Address",
+            "Device Type",
+            "VLAN ID",
+            "Department",
+            "Download (MB)",
+            "Upload (MB)",
+            "Total (MB)",
+            "Total (GB)",
+            "% of ISP Bandwidth",
+            "Firewall Status",
+            "Active Sessions",
+        ]
+        dev_rows = []
+        for d in report.get("devices", []):
+            dev_rows.append([
+                d.get("hostname", ""),
+                d.get("ip_address", ""),
+                d.get("mac_address", ""),
+                (d.get("device_type") or "computer").upper(),
+                d.get("vlan_id", 1),
+                d.get("department", ""),
+                d.get("download_mb", 0.0),
+                d.get("upload_mb", 0.0),
+                d.get("total_mb", 0.0),
+                d.get("total_gb", 0.0),
+                f"{d.get('percent_of_total', 0.0)}%",
+                d.get("enforcement_status", "").upper(),
+                d.get("sessions_count", 0),
+            ])
+        populate_smart_excel_sheet(
+            ws_devices,
+            headers=dev_headers,
+            rows=dev_rows,
+            center_columns={2, 3, 4, 5, 11, 12, 13},
+        )
+
+        # Sheet 2: Department Summary
+        ws_depts = workbook.create_sheet(title="Department Breakdown")
+        dept_headers = [
+            "Department / Segment",
+            "VLAN ID",
+            "Active Devices",
+            "Download (GB)",
+            "Upload (GB)",
+            "Total Consumed (GB)",
+            "% of Total ISP Traffic",
+        ]
+        dept_rows = []
+        for dep in report.get("departments", []):
+            dept_rows.append([
+                dep.get("department", ""),
+                dep.get("vlan_id", 1),
+                dep.get("devices_count", 0),
+                dep.get("download_gb", 0.0),
+                dep.get("upload_gb", 0.0),
+                dep.get("total_gb", 0.0),
+                f"{dep.get('percent_of_total', 0.0)}%",
+            ])
+        populate_smart_excel_sheet(
+            ws_depts,
+            headers=dept_headers,
+            rows=dept_rows,
+            center_columns={2, 3, 7},
+        )
+
+        # Sheet 3: ISP & Gateway Overview
+        ws_overview = workbook.create_sheet(title="ISP & Gateway Overview")
+        fw = report.get("firewall_info", {})
+        bw = report.get("bandwidth_summary", {})
+        overview_headers = ["Metric / Parameter", "Value"]
+        overview_rows = [
+            ["Report Type", "ISP Internet Usage & Firewall Bandwidth"],
+            ["Reporting Period", report.get("period", "").capitalize()],
+            ["Period Start", report.get("start", "")],
+            ["Period End", report.get("end", "")],
+            ["Report Generated At", report.get("generated_at", "")],
+            ["Active Firewall", fw.get("vendor_title", "")],
+            ["Firewall Management IP", fw.get("firewall_ip", "")],
+            ["WAN Interface", fw.get("wan_interface", "")],
+            ["ISP Provider", fw.get("isp_provider", "")],
+            ["Public WAN IP", fw.get("public_ip", "")],
+            ["Total Download (GB)", bw.get("total_download_gb", 0.0)],
+            ["Total Upload (GB)", bw.get("total_upload_gb", 0.0)],
+            ["Total Consumed (GB)", bw.get("total_consumed_gb", 0.0)],
+            ["Monthly Plan Quota (GB)", bw.get("monthly_quota_gb", 0.0)],
+            ["Quota Used %", f"{bw.get('quota_used_pct', 0.0)}%"],
+            ["Peak Throughput (Mbps)", bw.get("peak_bandwidth_mbps", 0.0)],
+            ["Total LAN Hosts Monitored", bw.get("total_hosts_monitored", 0)],
+            ["Hosts Allowed on Firewall", bw.get("allowed_hosts_count", 0)],
+            ["Hosts Blocked / Quarantined", bw.get("quarantined_hosts_count", 0)],
+        ]
+        populate_smart_excel_sheet(
+            ws_overview,
+            headers=overview_headers,
+            rows=overview_rows,
+        )
+
+        # Sheet 4: Daily Trends
+        ws_trends = workbook.create_sheet(title="Daily Trends")
+        trend_headers = [
+            "Date",
+            "Download (GB)",
+            "Upload (GB)",
+            "Total Consumed (GB)",
+            "Active Devices",
+            "Peak Speed (Mbps)",
+        ]
+        trend_rows = []
+        for dt in report.get("daily_trends", []):
+            trend_rows.append([
+                dt.get("date", ""),
+                dt.get("download_gb", 0.0),
+                dt.get("upload_gb", 0.0),
+                dt.get("total_gb", 0.0),
+                dt.get("active_devices", 0),
+                dt.get("peak_speed_mbps", 0.0),
+            ])
+        populate_smart_excel_sheet(
+            ws_trends,
+            headers=trend_headers,
+            rows=trend_rows,
+            center_columns={1, 5},
+        )
+
+        workbook.active = ws_devices
+
+    # -------------------------------------------------
     # USER ACTIVITY & ACCESS REPORT
     # -------------------------------------------------
-    if clean_type == "user_activity":
+    elif clean_type == "user_activity":
         # Sheet 1: User Access & Session History (Active tab)
         ws_sessions = workbook.active
         ws_sessions.title = "User Sessions"
@@ -1239,10 +1440,65 @@ def export_report_pdf(
     )
 
     # -------------------------------------------------
+    # ISP INTERNET USAGE PDF
+    # -------------------------------------------------
+    if report_type.lower().strip() in ("isp_internet_usage", "firewall_internet_usage", "isp_usage"):
+        bw = report.get("bandwidth_summary", {})
+        fw = report.get("firewall_info", {})
+
+        story.append(Paragraph("ISP & Firewall Bandwidth Summary", styles["Heading2"]))
+        summary_data = [
+            ["Metric", "Value"],
+            ["Active Firewall", str(fw.get("vendor_title", ""))],
+            ["WAN Interface", str(fw.get("wan_interface", ""))],
+            ["ISP Provider", str(fw.get("isp_provider", ""))],
+            ["Total Download", f"{bw.get('total_download_gb', 0)} GB"],
+            ["Total Upload", f"{bw.get('total_upload_gb', 0)} GB"],
+            ["Total Internet Consumed", f"{bw.get('total_consumed_gb', 0)} GB"],
+            ["Monthly Plan Quota", f"{bw.get('monthly_quota_gb', 0)} GB ({bw.get('quota_used_pct', 0)}% used)"],
+            ["Peak Speed", f"{bw.get('peak_bandwidth_mbps', 0)} Mbps"],
+        ]
+        sum_table = Table(summary_data, colWidths=[200, 290])
+        sum_table.setStyle(
+            TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1F4E79")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ])
+        )
+        story.append(sum_table)
+        story.append(Spacer(1, 15))
+
+        # Top user devices breakdown table
+        story.append(Paragraph("Top User Device Bandwidth Consumption (Firewall Counters)", styles["Heading2"]))
+        dev_table_data = [["Hostname", "IP Address", "Department", "Download", "Upload", "Total", "% ISP"]]
+        for d in report.get("devices", [])[:20]:
+            dev_table_data.append([
+                str(d.get("hostname", ""))[:18],
+                str(d.get("ip_address", "")),
+                str(d.get("department", ""))[:16],
+                f"{d.get('download_mb', 0)} MB",
+                f"{d.get('upload_mb', 0)} MB",
+                f"{d.get('total_mb', 0)} MB",
+                f"{d.get('percent_of_total', 0)}%",
+            ])
+        dev_table = Table(dev_table_data, repeatRows=1, colWidths=[90, 80, 80, 60, 60, 60, 60])
+        dev_table.setStyle(
+            TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1F4E79")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                ("FONTSIZE", (0, 0), (-1, -1), 7),
+            ])
+        )
+        story.append(dev_table)
+
+    # -------------------------------------------------
     # DEVICE INVENTORY PDF
     # -------------------------------------------------
 
-    if report_type.lower().strip() == "device_inventory":
+    elif report_type.lower().strip() == "device_inventory":
 
         summary = report["summary"]
 

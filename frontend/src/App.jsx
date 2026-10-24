@@ -5434,6 +5434,15 @@ return (
 
       <div className="report-grid">
         <ReportCard
+          title="ISP Internet Usage"
+          value="Bandwidth"
+          description="Live ISP data & firewall bandwidth usage."
+          onClick={() => {
+            setReportType("isp_internet_usage");
+          }}
+        />
+
+        <ReportCard
           title="Device Inventory"
           value={totalDevices}
           description="Current LAN device inventory."
@@ -5690,6 +5699,9 @@ return (
               value={reportType}
               onChange={(event) => setReportType(event.target.value)}
             >
+              <option value="isp_internet_usage">
+                🌐 ISP Internet Usage & Firewall Bandwidth
+              </option>
               <option value="user_activity">
                 User Access & Audit Report
               </option>
@@ -5935,9 +5947,531 @@ return (
               >
                 Download PDF
               </button>
+
+              <button
+                type="button"
+                className="secondary-button"
+                style={{
+                  background: "rgba(16, 185, 129, 0.12)",
+                  color: "#059669",
+                  borderColor: "#10b981",
+                  fontWeight: 600,
+                }}
+                onClick={() => {
+                  if (!isAdmin) return;
+                  const today = new Date().toISOString().slice(0, 10);
+
+                  if (reportPeriod === "custom") {
+                    if (
+                      reportStartDate > today ||
+                      reportEndDate > today ||
+                      reportEndDate < reportStartDate
+                    ) {
+                      setReportError(
+                        "Date input invalid, please select a valid date."
+                      );
+                      return;
+                    }
+                  } else {
+                    if (reportDate > today) {
+                      setReportError(
+                        "Date input invalid, please select a valid date."
+                      );
+                      return;
+                    }
+                  }
+                  const params = new URLSearchParams({
+                    period: reportPeriod,
+                  });
+
+                  if (reportPeriod === "custom") {
+                    params.append(
+                      "start_datetime",
+                      `${reportStartDate}T${reportStartTime}`
+                    );
+                    params.append(
+                      "end_datetime",
+                      `${reportEndDate}T${reportEndTime}`
+                    );
+                  } else if (reportDate) {
+                    params.append("date", reportDate);
+                  }
+                  const token = localStorage.getItem("netops_token");
+                  if (token) params.append("token", token);
+
+                  window.open(
+                    `${API_URL}/reports/isp-usage/download/csv?${params.toString()}`,
+                    "_blank"
+                  );
+                }}
+              >
+                📥 Download CSV (ISP Usage)
+              </button>
             </div>
             )}
-            {reportData.report_type === "user_activity" ? (
+            {reportData.report_type === "isp_internet_usage" ? (
+              <div style={{ marginTop: "20px" }}>
+                {/* Active Firewall & ISP Uplink Information Banner */}
+                <div
+                  style={{
+                    background: "linear-gradient(135deg, rgba(37, 99, 235, 0.08) 0%, rgba(14, 165, 233, 0.04) 100%)",
+                    border: "1px solid rgba(37, 99, 235, 0.25)",
+                    borderRadius: "12px",
+                    padding: "20px",
+                    marginBottom: "24px",
+                    display: "flex",
+                    flexWrap: "wrap",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: "16px",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+                    <div
+                      style={{
+                        width: "48px",
+                        height: "48px",
+                        borderRadius: "10px",
+                        background: "#2563eb",
+                        color: "#fff",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: "24px",
+                        boxShadow: "0 4px 12px rgba(37, 99, 235, 0.25)",
+                      }}
+                    >
+                      🌐
+                    </div>
+                    <div>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "var(--text-color, #0f172a)" }}>
+                          {reportData.firewall_info?.vendor_title || "Enterprise Firewall"}
+                        </h3>
+                        <span
+                          style={{
+                            background: "#10b981",
+                            color: "#ffffff",
+                            padding: "2px 8px",
+                            borderRadius: "12px",
+                            fontSize: "11px",
+                            fontWeight: 700,
+                            letterSpacing: "0.5px",
+                            textTransform: "uppercase",
+                          }}
+                        >
+                          ● {reportData.firewall_info?.gateway_status || "ONLINE"}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: "13px", color: "#64748b", marginTop: "4px" }}>
+                        <strong>ISP:</strong> {reportData.firewall_info?.isp_provider || "Dedicated Fiber Uplink"} &nbsp;·&nbsp;
+                        <strong>WAN Interface:</strong> <code>{reportData.firewall_info?.wan_interface || "wan0"}</code> &nbsp;·&nbsp;
+                        <strong>Gateway IP:</strong> <code>{reportData.firewall_info?.firewall_ip || "192.168.0.1"}</code>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontSize: "11px", color: "#64748b", textTransform: "uppercase", fontWeight: 600 }}>
+                      Report Timeframe
+                    </div>
+                    <div style={{ fontSize: "13px", fontWeight: 600, color: "var(--text-color, #0f172a)", marginTop: "2px" }}>
+                      {reportData.start ? reportData.start.replace("T", " ").slice(0, 16) : ""} — {reportData.end ? reportData.end.replace("T", " ").slice(0, 16) : ""}
+                    </div>
+                    <div style={{ fontSize: "11px", color: "#2563eb", marginTop: "2px" }}>
+                      Period: <strong style={{ textTransform: "capitalize" }}>{reportData.period}</strong>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 6 Executive Bandwidth KPI Cards */}
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
+                    gap: "14px",
+                    marginBottom: "24px",
+                  }}
+                >
+                  <div
+                    style={{
+                      background: "#ffffff",
+                      border: "1px solid #cbd5e1",
+                      borderRadius: "10px",
+                      padding: "16px",
+                      boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+                    }}
+                  >
+                    <div style={{ fontSize: "12px", color: "#475569", textTransform: "uppercase", fontWeight: 600 }}>
+                      Total Internet Consumed
+                    </div>
+                    <div style={{ fontSize: "24px", fontWeight: 800, color: "#2563eb", marginTop: "6px" }}>
+                      {reportData.bandwidth_summary?.total_consumed_gb ?? 0} <span style={{ fontSize: "14px", fontWeight: 600 }}>GB</span>
+                    </div>
+                    <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
+                      Total traffic through firewall
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      background: "#ffffff",
+                      border: "1px solid #cbd5e1",
+                      borderRadius: "10px",
+                      padding: "16px",
+                      boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+                    }}
+                  >
+                    <div style={{ fontSize: "12px", color: "#475569", textTransform: "uppercase", fontWeight: 600 }}>
+                      Download Traffic
+                    </div>
+                    <div style={{ fontSize: "24px", fontWeight: 800, color: "#059669", marginTop: "6px" }}>
+                      {reportData.bandwidth_summary?.total_download_gb ?? 0} <span style={{ fontSize: "14px", fontWeight: 600 }}>GB</span>
+                    </div>
+                    <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
+                      Inbound from ISP
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      background: "#ffffff",
+                      border: "1px solid #cbd5e1",
+                      borderRadius: "10px",
+                      padding: "16px",
+                      boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+                    }}
+                  >
+                    <div style={{ fontSize: "12px", color: "#475569", textTransform: "uppercase", fontWeight: 600 }}>
+                      Upload Traffic
+                    </div>
+                    <div style={{ fontSize: "24px", fontWeight: 800, color: "#d97706", marginTop: "6px" }}>
+                      {reportData.bandwidth_summary?.total_upload_gb ?? 0} <span style={{ fontSize: "14px", fontWeight: 600 }}>GB</span>
+                    </div>
+                    <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
+                      Outbound to WAN
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      background: "#ffffff",
+                      border: "1px solid #cbd5e1",
+                      borderRadius: "10px",
+                      padding: "16px",
+                      boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+                    }}
+                  >
+                    <div style={{ fontSize: "12px", color: "#475569", textTransform: "uppercase", fontWeight: 600 }}>
+                      ISP Quota Utilization
+                    </div>
+                    <div style={{ fontSize: "24px", fontWeight: 800, color: "#7c3aed", marginTop: "6px" }}>
+                      {reportData.bandwidth_summary?.quota_used_pct ?? 0}%
+                    </div>
+                    <div
+                      style={{
+                        background: "#f1f5f9",
+                        borderRadius: "4px",
+                        height: "6px",
+                        marginTop: "8px",
+                        overflow: "hidden",
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: `${Math.min(100, reportData.bandwidth_summary?.quota_used_pct ?? 0)}%`,
+                          background: (reportData.bandwidth_summary?.quota_used_pct ?? 0) > 85 ? "#dc2626" : "#7c3aed",
+                          height: "100%",
+                        }}
+                      />
+                    </div>
+                    <div style={{ fontSize: "11px", color: "#64748b", marginTop: "4px" }}>
+                      of {reportData.bandwidth_summary?.monthly_quota_gb ?? 1000} GB plan
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      background: "#ffffff",
+                      border: "1px solid #cbd5e1",
+                      borderRadius: "10px",
+                      padding: "16px",
+                      boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+                    }}
+                  >
+                    <div style={{ fontSize: "12px", color: "#475569", textTransform: "uppercase", fontWeight: 600 }}>
+                      Peak Speed Observed
+                    </div>
+                    <div style={{ fontSize: "24px", fontWeight: 800, color: "#0891b2", marginTop: "6px" }}>
+                      {reportData.bandwidth_summary?.peak_bandwidth_mbps ?? 0} <span style={{ fontSize: "14px", fontWeight: 600 }}>Mbps</span>
+                    </div>
+                    <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
+                      Firewall WAN burst rate
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      background: "#ffffff",
+                      border: "1px solid #cbd5e1",
+                      borderRadius: "10px",
+                      padding: "16px",
+                      boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+                    }}
+                  >
+                    <div style={{ fontSize: "12px", color: "#475569", textTransform: "uppercase", fontWeight: 600 }}>
+                      Monitored LAN Hosts
+                    </div>
+                    <div style={{ fontSize: "24px", fontWeight: 800, color: "#334155", marginTop: "6px" }}>
+                      {reportData.bandwidth_summary?.total_hosts_monitored ?? 0}
+                    </div>
+                    <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
+                      <span style={{ color: "#059669", fontWeight: 700 }}>
+                        {reportData.bandwidth_summary?.allowed_hosts_count ?? 0} Allowed
+                      </span>
+                      {" · "}
+                      <span style={{ color: "#dc2626", fontWeight: 700 }}>
+                        {reportData.bandwidth_summary?.quarantined_hosts_count ?? 0} Quarantined
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Department / VLAN Bandwidth Breakdown */}
+                <div style={{ marginBottom: "28px" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px" }}>
+                    <div className="panel-title" style={{ fontSize: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
+                      <span>🏢</span> Department & VLAN Internet Consumption
+                    </div>
+                    <span style={{ fontSize: "12px", color: "#64748b" }}>
+                      Aggregated across {reportData.departments?.length || 0} network segments
+                    </span>
+                  </div>
+
+                  <div className="table-container">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>DEPARTMENT / SEGMENT</th>
+                          <th>VLAN ID</th>
+                          <th>CONNECTED DEVICES</th>
+                          <th>DOWNLOAD (GB)</th>
+                          <th>UPLOAD (GB)</th>
+                          <th>TOTAL (GB)</th>
+                          <th>% OF ISP USAGE</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {reportData.departments && reportData.departments.length > 0 ? (
+                          reportData.departments.map((dept) => (
+                            <tr key={dept.department}>
+                              <td>
+                                <strong style={{ color: "var(--text-color, #0f172a)" }}>{dept.department}</strong>
+                              </td>
+                              <td>
+                                <span
+                                  style={{
+                                    display: "inline-block",
+                                    padding: "2px 8px",
+                                    borderRadius: "4px",
+                                    fontSize: "12px",
+                                    fontWeight: 700,
+                                    background: "#e0f2fe",
+                                    color: "#0369a1",
+                                  }}
+                                >
+                                  VLAN {dept.vlan_id}
+                                </span>
+                              </td>
+                              <td>{dept.devices_count}</td>
+                              <td style={{ color: "#059669", fontWeight: 600 }}>{dept.download_gb} GB</td>
+                              <td style={{ color: "#d97706", fontWeight: 600 }}>{dept.upload_gb} GB</td>
+                              <td>
+                                <strong>{dept.total_gb} GB</strong>
+                              </td>
+                              <td>
+                                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                                  <div
+                                    style={{
+                                      flex: 1,
+                                      background: "#e2e8f0",
+                                      height: "8px",
+                                      borderRadius: "4px",
+                                      overflow: "hidden",
+                                      minWidth: "60px",
+                                    }}
+                                  >
+                                    <div
+                                      style={{
+                                        width: `${Math.min(100, dept.percent_of_total || 0)}%`,
+                                        height: "100%",
+                                        background: "#2563eb",
+                                      }}
+                                    />
+                                  </div>
+                                  <span style={{ fontSize: "12px", fontWeight: 700, minWidth: "40px" }}>
+                                    {dept.percent_of_total}%
+                                  </span>
+                                </div>
+                              </td>
+                            </tr>
+                          ))
+                        ) : (
+                          <tr>
+                            <td colSpan={7} style={{ textAlign: "center", color: "#64748b" }}>
+                              No department usage data available.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Per-User / Device Bandwidth Breakdown Table */}
+                <div style={{ marginBottom: "28px" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px" }}>
+                    <div className="panel-title" style={{ fontSize: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
+                      <span>💻</span> User Device Internet Usage (Active Firewall Counters)
+                    </div>
+                    <span style={{ fontSize: "12px", color: "#64748b" }}>
+                      {reportData.devices?.length || 0} monitored host{reportData.devices?.length === 1 ? "" : "s"}
+                    </span>
+                  </div>
+
+                  <div className="table-container">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>HOSTNAME</th>
+                          <th>IP ADDRESS</th>
+                          <th>MAC ADDRESS</th>
+                          <th>DEPARTMENT</th>
+                          <th>DOWNLOAD (MB)</th>
+                          <th>UPLOAD (MB)</th>
+                          <th>TOTAL (MB)</th>
+                          <th>% ISP USAGE</th>
+                          <th>FIREWALL STATUS</th>
+                          <th>SESSIONS</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {reportData.devices && reportData.devices.length > 0 ? (
+                          reportData.devices.map((dev) => (
+                            <tr key={dev.id || dev.mac_address}>
+                              <td>
+                                <strong style={{ color: "#2563eb" }}>{dev.hostname}</strong>
+                              </td>
+                              <td>
+                                <code>{dev.ip_address}</code>
+                              </td>
+                              <td style={{ fontSize: "12px", color: "#64748b" }}>
+                                <code>{dev.mac_address}</code>
+                              </td>
+                              <td>
+                                <span style={{ fontSize: "12px", color: "#334155" }}>
+                                  {dev.department}
+                                </span>
+                              </td>
+                              <td style={{ color: "#059669", fontWeight: 600 }}>{dev.download_mb.toLocaleString()}</td>
+                              <td style={{ color: "#d97706", fontWeight: 600 }}>{dev.upload_mb.toLocaleString()}</td>
+                              <td>
+                                <strong>{dev.total_mb.toLocaleString()} MB</strong>
+                                <span style={{ fontSize: "11px", color: "#64748b", marginLeft: "4px" }}>
+                                  ({dev.total_gb} GB)
+                                </span>
+                              </td>
+                              <td>
+                                <span style={{ fontWeight: 700, color: "#1e293b" }}>{dev.percent_of_total}%</span>
+                              </td>
+                              <td>
+                                <span
+                                  style={{
+                                    display: "inline-block",
+                                    padding: "3px 8px",
+                                    borderRadius: "6px",
+                                    fontSize: "11px",
+                                    fontWeight: 700,
+                                    textTransform: "uppercase",
+                                    background:
+                                      dev.enforcement_status === "quarantined"
+                                        ? "rgba(239, 68, 68, 0.15)"
+                                        : "rgba(16, 185, 129, 0.15)",
+                                    color:
+                                      dev.enforcement_status === "quarantined"
+                                        ? "#dc2626"
+                                        : "#059669",
+                                    border: `1px solid ${
+                                      dev.enforcement_status === "quarantined"
+                                        ? "rgba(239, 68, 68, 0.3)"
+                                        : "rgba(16, 185, 129, 0.3)"
+                                    }`,
+                                  }}
+                                >
+                                  {dev.enforcement_status === "quarantined" ? "Blocked (Quarantined)" : "Allowed (Passing)"}
+                                </span>
+                              </td>
+                              <td style={{ textAlign: "center" }}>{dev.sessions_count}</td>
+                            </tr>
+                          ))
+                        ) : (
+                          <tr>
+                            <td colSpan={10} style={{ textAlign: "center", color: "#64748b" }}>
+                              No device internet usage recorded for this period.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Daily Usage Trends */}
+                {reportData.daily_trends && reportData.daily_trends.length > 0 && (
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px" }}>
+                      <div className="panel-title" style={{ fontSize: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
+                        <span>📈</span> Daily Bandwidth & Speed Trend
+                      </div>
+                      <span style={{ fontSize: "12px", color: "#64748b" }}>
+                        {reportData.daily_trends.length} recorded day{reportData.daily_trends.length === 1 ? "" : "s"}
+                      </span>
+                    </div>
+
+                    <div className="table-container">
+                      <table className="data-table">
+                        <thead>
+                          <tr>
+                            <th>DATE</th>
+                            <th>DOWNLOAD (GB)</th>
+                            <th>UPLOAD (GB)</th>
+                            <th>TOTAL (GB)</th>
+                            <th>ACTIVE DEVICES</th>
+                            <th>PEAK SPEED (MBPS)</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {reportData.daily_trends.map((t) => (
+                            <tr key={t.date}>
+                              <td>
+                                <strong>{t.date}</strong>
+                              </td>
+                              <td style={{ color: "#059669", fontWeight: 600 }}>{t.download_gb} GB</td>
+                              <td style={{ color: "#d97706", fontWeight: 600 }}>{t.upload_gb} GB</td>
+                              <td>
+                                <strong>{t.total_gb} GB</strong>
+                              </td>
+                              <td>{t.active_devices}</td>
+                              <td style={{ color: "#0891b2", fontWeight: 700 }}>{t.peak_speed_mbps} Mbps</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : reportData.report_type === "user_activity" ? (
               <div style={{ marginTop: "20px" }}>
                 {/* 6 Executive Summary Cards */}
                 <div
