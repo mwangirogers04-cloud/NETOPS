@@ -681,17 +681,29 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                 padding: "20px",
                 boxShadow: "inset 0 2px 4px rgba(0,0,0,0.5)",
                 border: "2px solid #334155",
+                overflowX: "auto",
               }}
             >
-              <div style={{ display: "flex", justifyContent: "space-between", color: "#94a3b8", fontSize: "11px", marginBottom: "12px", fontWeight: "700", letterSpacing: "1px", flexWrap: "wrap", gap: "8px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", color: "#94a3b8", fontSize: "11px", marginBottom: "16px", fontWeight: "700", letterSpacing: "1px", flexWrap: "wrap", gap: "8px" }}>
                 <span>SWITCH CHASSIS 24-PORT GIGABIT PANEL</span>
-                <span style={{ color: "#a855f7" }}>LAST 2 PORTS (23 & 24) = RECOMMENDED TRUNK UPLINKS</span>
+                <span style={{ color: "#a855f7" }}>STANDARD LAYOUT: TOP = ODD (1, 3, 5...), BOTTOM = EVEN (2, 4, 6...) | PORTS 23 & 24 = TRUNK UPLINKS</span>
                 <span style={{ color: "#38bdf8" }}>MANAGEMENT: {activeSwitch?.config?.management_ip || "192.168.0.2"}</span>
               </div>
 
-              {/* 24-PORT MATRIX (2 ROWS OF 12 PORTS) */}
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: "8px" }}>
-                {ports.map((p, idx) => {
+              {/* CHASSIS RACK CONTAINER */}
+              {(() => {
+                const getPortNum = (p, fallback) => {
+                  if (!p) return fallback;
+                  const match = String(p.port || p.short_name || "").match(/(\d+)$/);
+                  return match ? parseInt(match[1], 10) : fallback;
+                };
+
+                const sortedChassisPorts = [...ports].sort((a, b) => getPortNum(a, 0) - getPortNum(b, 0));
+                const topRowOddPorts = sortedChassisPorts.filter((p, i) => getPortNum(p, i + 1) % 2 === 1);
+                const bottomRowEvenPorts = sortedChassisPorts.filter((p, i) => getPortNum(p, i + 1) % 2 === 0);
+                const numCols = Math.max(12, Math.max(topRowOddPorts.length, bottomRowEvenPorts.length));
+
+                const renderChassisPort = (p) => {
                   const isUp = p.status === "connected";
                   const isQuarantine = p.vlan === 90;
                   const isTrunkPort = p.mode === "trunk" || !!p.is_uplink;
@@ -699,7 +711,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
 
                   return (
                     <div
-                      key={p.port || idx}
+                      key={p.port}
                       onClick={() => {
                         if (isAdmin) {
                           setSelectedPort(p);
@@ -716,6 +728,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                         cursor: isAdmin ? "pointer" : "default",
                         transition: "all 0.15s ease",
                         boxShadow: isTrunkPort ? "0 0 8px rgba(139, 92, 246, 0.4)" : "none",
+                        minWidth: "48px",
                       }}
                       onMouseEnter={(e) => {
                         e.currentTarget.style.transform = "translateY(-2px)";
@@ -725,7 +738,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                         e.currentTarget.style.transform = "none";
                         e.currentTarget.style.boxShadow = isTrunkPort ? "0 0 8px rgba(139, 92, 246, 0.4)" : "none";
                       }}
-                      title={`Click to reassign ${p.port} (${isTrunkPort ? "TRUNK UPLINK" : `VLAN ${p.vlan}`})`}
+                      title={`Click to configure ${p.port} (${isTrunkPort ? "TRUNK UPLINK" : `VLAN ${p.vlan}`})`}
                     >
                       {/* LINK LED */}
                       <div style={{ display: "flex", justifyContent: "center", marginBottom: "4px" }}>
@@ -743,7 +756,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
 
                       {/* PORT NUMBER */}
                       <div style={{ fontSize: "11px", fontWeight: "800", color: "#f8fafc" }}>
-                        {p.short_name || `P${idx + 1}`}
+                        {p.short_name || p.port}
                       </div>
 
                       {/* CURRENT VLAN / TRUNK BADGE */}
@@ -763,8 +776,48 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                       </div>
                     </div>
                   );
-                })}
-              </div>
+                };
+
+                return (
+                  <div>
+                    {/* TOP ROW: ODD NUMBERED PORTS (1, 3, 5 ... 23) */}
+                    <div style={{ marginBottom: "6px" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                        <span style={{ fontSize: "10px", fontWeight: "800", color: "#64748b", textTransform: "uppercase", letterSpacing: "1px" }}>
+                          ▲ Top Row (Odd Ports: 1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23)
+                        </span>
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: `repeat(${numCols}, minmax(44px, 1fr))`, gap: "8px" }}>
+                        {topRowOddPorts.map(renderChassisPort)}
+                      </div>
+                    </div>
+
+                    {/* CHASSIS SEPARATOR RAIL */}
+                    <div
+                      style={{
+                        height: "6px",
+                        background: "linear-gradient(90deg, #1e293b 0%, #334155 50%, #1e293b 100%)",
+                        borderRadius: "3px",
+                        margin: "10px 0",
+                        borderTop: "1px solid #475569",
+                        borderBottom: "1px solid #0f172a",
+                      }}
+                    />
+
+                    {/* BOTTOM ROW: EVEN NUMBERED PORTS (2, 4, 6 ... 24) */}
+                    <div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                        <span style={{ fontSize: "10px", fontWeight: "800", color: "#64748b", textTransform: "uppercase", letterSpacing: "1px" }}>
+                          ▼ Bottom Row (Even Ports: 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24)
+                        </span>
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: `repeat(${numCols}, minmax(44px, 1fr))`, gap: "8px" }}>
+                        {bottomRowEvenPorts.map(renderChassisPort)}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           </div>
 
