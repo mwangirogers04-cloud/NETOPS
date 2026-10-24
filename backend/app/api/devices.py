@@ -51,11 +51,11 @@ def add_access_information(device: Device):
     if device.enforcement_status == "isolated":
         device.access_decision = "isolated"
 
-    elif device.approval_status in {"pending", "rejected"}:
-        device.access_decision = "quarantine"
-
     elif device.enforcement_status == "allowed":
         device.access_decision = "allowed"
+
+    elif device.approval_status in {"pending", "rejected"}:
+        device.access_decision = "quarantine"
 
     else:
         device.access_decision = "quarantine"
@@ -69,6 +69,11 @@ def add_access_information(device: Device):
     if device.enforcement_status == "isolated":
         device.access_reason = (
             "Device is explicitly isolated from the network (VLAN 90)"
+        )
+
+    elif device.enforcement_status == "allowed" and device.approval_status == "rejected":
+        device.access_reason = (
+            "Device rejected by policy, but currently allowed internet access via active schedule"
         )
 
     elif device.approval_status in {"pending", "rejected"}:

@@ -58,6 +58,9 @@ class DeviceResponse(DeviceCreate):
         if self.enforcement_status == "isolated":
             return "Device is explicitly isolated from the network (VLAN 90)"
 
+        if self.enforcement_status == "allowed" and self.approval_status == "rejected":
+            return "Device rejected by policy, but currently allowed internet access via active schedule"
+
         if self.approval_status == "pending":
             return "Pending administrator approval"
 

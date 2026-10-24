@@ -87,8 +87,6 @@ def enforce_device_access(
             )
             if schedule_allows_access:
                 # Active schedule currently allows access.
-                # If the device is already recognized, it returns online automatically from quarantine
-                # without requiring manual approval again.
                 recognized_type = normalize_device_type(device.device_type)
                 if not recognized_type:
                     classified = classify_device(
@@ -101,16 +99,26 @@ def enforce_device_access(
                         device.device_type = recognized_type
 
                 if recognized_type:
-                    # Recognized machine: Auto-approve and return online from quarantine
-                    device.approval_status = "approved"
+                    # Recognized machine: Auto-approve pending machines and return online from quarantine
+                    if device.approval_status == "pending":
+                        device.approval_status = "approved"
                     device.internet_access_authorized = True
                     if getattr(device, "vlan_id", None) == 90 or not getattr(device, "vlan_id", None):
                         device.vlan_id = get_vlan_for_device_type(recognized_type)
                     if getattr(device, "status", None) != "online" and (device.ip_address or device.mac_address):
                         device.status = "online"
                     decision = "allowed"
+                elif getattr(device, "approval_status", None) == "rejected":
+                    # Rejected device with an active schedule removes itself from quarantine zone
+                    # and accesses internet, remaining scheduled and quarantined by policy unless reset
+                    device.internet_access_authorized = True
+                    if getattr(device, "vlan_id", None) == 90 or not getattr(device, "vlan_id", None):
+                        device.vlan_id = 10
+                    if getattr(device, "status", None) != "online" and (device.ip_address or device.mac_address):
+                        device.status = "online"
+                    decision = "allowed"
                 else:
-                    # Unrecognized / unknown device cannot be auto-approved
+                    # Unrecognized pending device cannot be auto-approved
                     decision = "quarantine"
                     device.internet_access_authorized = False
             else:
@@ -280,12 +288,20 @@ def enforce_device_access(
             .order_by(Event.id.desc())
             .limit(1)
         )
-        auto_sched_message = (
-            f"Scheduled access active: Recognized machine "
-            f"{device.hostname or device.ip_address} ({device.mac_address}) "
-            f"automatically returned online from quarantine on VLAN {device.vlan_id} "
-            f"without requiring administrator approval."
-        )
+        if getattr(device, "approval_status", None) == "rejected":
+            auto_sched_message = (
+                f"Scheduled access active: Machine "
+                f"{device.hostname or device.ip_address} ({device.mac_address}) "
+                f"removed from quarantine zone, restored to VLAN {device.vlan_id}, "
+                f"and internet access enabled per schedule (remains scheduled unless reset)."
+            )
+        else:
+            auto_sched_message = (
+                f"Scheduled access active: Recognized machine "
+                f"{device.hostname or device.ip_address} ({device.mac_address}) "
+                f"automatically returned online from quarantine on VLAN {device.vlan_id} "
+                f"without requiring administrator approval."
+            )
         if latest_auto_sched_event is None or latest_auto_sched_event.message != auto_sched_message:
             create_event(
                 db,

@@ -48,31 +48,28 @@ def get_combined_access_decision(
         recognized_type = normalize_device_type(classified)
 
     # ---------------------------------------------------------
-    # 1. Active schedule takes precedence for recognized devices
+    # 1. Active schedule takes precedence
     # ---------------------------------------------------------
     if has_active_schedule:
-        if schedule_allows_access and recognized_type:
+        if schedule_allows_access:
+            current_appr = (
+                device.approval_status
+                if device.approval_status == "rejected"
+                else ("approved" if recognized_type else device.approval_status)
+            )
             return {
                 "device_id": device.id,
                 "ip_address": device.ip_address,
                 "mac_address": device.mac_address,
-                "approval_status": "approved",
+                "approval_status": current_appr,
                 "schedule_allows_access": True,
                 "decision": "allowed",
-                "reason": "approved_and_within_schedule",
+                "reason": (
+                    "approved_and_within_schedule"
+                    if current_appr == "approved"
+                    else "scheduled_access_allowed"
+                ),
                 "action": "allow",
-                "mode": "simulation",
-            }
-        elif not schedule_allows_access:
-            return {
-                "device_id": device.id,
-                "ip_address": device.ip_address,
-                "mac_address": device.mac_address,
-                "approval_status": device.approval_status,
-                "schedule_allows_access": False,
-                "decision": "quarantine",
-                "reason": "outside_access_schedule",
-                "action": "quarantine",
                 "mode": "simulation",
             }
         else:
@@ -81,9 +78,9 @@ def get_combined_access_decision(
                 "ip_address": device.ip_address,
                 "mac_address": device.mac_address,
                 "approval_status": device.approval_status,
-                "schedule_allows_access": True,
+                "schedule_allows_access": False,
                 "decision": "quarantine",
-                "reason": "unrecognized_device_type",
+                "reason": "outside_access_schedule",
                 "action": "quarantine",
                 "mode": "simulation",
             }

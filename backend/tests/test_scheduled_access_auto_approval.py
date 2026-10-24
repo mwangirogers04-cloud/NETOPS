@@ -569,3 +569,102 @@ def test_delete_last_access_schedule_removes_device_from_quarantine(db_session):
         mock_restore_l2.assert_called_once()
 
 
+def test_rejected_device_remains_scheduled_leaves_quarantine_zone_on_schedule_and_returns_unless_reset(db_session):
+    """
+    When a new device is detected and rejected:
+    1. Outside schedule, it remains scheduled, quarantined since it is rejected (VLAN 90, quarantined).
+    2. During its active schedule window, it removes itself from quarantine zone (VLAN 90 -> VLAN 20)
+       and accesses internet (enforcement_status='allowed').
+    3. It remains in the schedule and retains approval_status='rejected'.
+    4. Outside schedule hours, it moves back to quarantine (VLAN 90).
+    5. It stays in the schedule cycle unless the schedule is reset.
+    """
+    from backend.app.api.devices import add_access_information
+    from backend.app.api.access_schedules import reset_device_schedules
+
+    dev = Device(
+        mac_address="AA:BB:CC:DD:EE:77",
+        ip_address="192.168.0.77",
+        hostname="NEW-WORKSTATION-77",
+        vendor="HP Inc.",
+        device_type="computer",
+        approval_status="rejected",
+        enforcement_status="quarantined",
+        internet_access_authorized=False,
+        vlan_id=90,
+        status="online",
+    )
+    db_session.add(dev)
+    db_session.commit()
+    db_session.refresh(dev)
+
+    schedule = AccessSchedule(
+        device_id=dev.id,
+        enabled=True,
+        days="daily",
+        start_time=time(8, 0, 0),
+        end_time=time(17, 0, 0),
+    )
+    db_session.add(schedule)
+    db_session.commit()
+    db_session.refresh(schedule)
+
+    # 1. During active schedule window: leaves quarantine zone and accesses internet
+    with (
+        patch("backend.app.services.network_enforcement.is_access_allowed", return_value=True),
+        patch("backend.app.services.network_enforcement.is_sophos_configured", return_value=False),
+        patch("backend.app.services.network_enforcement.restore_device_l2") as mock_restore,
+    ):
+        res = enforce_device_access(dev, db_session, force=True)
+
+        assert res["decision"] == "allowed"
+        assert dev.enforcement_status == "allowed"
+        assert dev.vlan_id == 20  # Removed itself from quarantine zone (VLAN 90 -> VLAN 20)
+        assert dev.internet_access_authorized is True
+        assert dev.approval_status == "rejected"  # Retains rejected status
+        mock_restore.assert_called_once()
+
+        # Check API access information
+        add_access_information(dev)
+        assert dev.access_decision == "allowed"
+        assert "schedule" in dev.access_reason.lower()
+
+    # 2. Outside schedule window: automatically moves back to quarantine on VLAN 90
+    with (
+        patch("backend.app.services.network_enforcement.is_access_allowed", return_value=False),
+        patch("backend.app.services.network_enforcement.is_sophos_configured", return_value=False),
+        patch("backend.app.services.network_enforcement.quarantine_device_l2") as mock_quar,
+    ):
+        res_outside = enforce_device_access(dev, db_session, force=True)
+
+        assert res_outside["decision"] == "quarantine"
+        assert dev.enforcement_status == "quarantined"
+        assert dev.vlan_id == 90  # Back in quarantine zone
+        assert dev.internet_access_authorized is False
+        assert dev.approval_status == "rejected"  # Still rejected and still scheduled
+        mock_quar.assert_called_once()
+
+        # Schedule remains active
+        active_scheds = db_session.query(AccessSchedule).filter(
+            AccessSchedule.device_id == dev.id,
+            AccessSchedule.enabled.is_(True),
+        ).all()
+        assert len(active_scheds) == 1
+
+    # 3. When schedule is reset: schedule is removed
+    with (
+        patch("backend.app.services.network_enforcement.is_sophos_configured", return_value=False),
+        patch("backend.app.services.network_enforcement.restore_device_l2"),
+    ):
+        reset_res = reset_device_schedules(dev.id, db=db_session)
+        assert "reset" in reset_res["message"].lower()
+
+        remaining_scheds = db_session.query(AccessSchedule).filter(
+            AccessSchedule.device_id == dev.id
+        ).all()
+        assert len(remaining_scheds) == 0
+
+
+
+
+
