@@ -5270,7 +5270,7 @@ const AccessPage = () => {
   const [reportEndDate, setReportEndDate] = useState(
   new Date().toISOString().slice(0, 10)
   );
-  const [reportStartTime, setReportStartTime] = useState("00:00");
+  const [reportStartTime, setReportStartTime] = useState("00:00:00");
   const [reportEndTime, setReportEndTime] = useState("23:59:59");
   const [reportData, setReportData] = useState(null);
   const [reportLoading, setReportLoading] = useState(false);
@@ -5354,7 +5354,7 @@ const enforcedAllowed = devices.filter(
   const getTodayStr = () => new Date().toISOString().slice(0, 10);
   const getCurrentTimeStr = () => {
     const d = new Date();
-    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
   };
 
   const validateReportDates = () => {
@@ -5849,13 +5849,14 @@ return (
         />
         <input
           type="time"
+          step="1"
           max={reportStartDate === getTodayStr() ? getCurrentTimeStr() : undefined}
           value={reportStartTime}
           onChange={(event) => {
             const val = event.target.value;
             const nowTime = getCurrentTimeStr();
             if (reportStartDate === getTodayStr() && val > nowTime) {
-              setReportError("Cannot select future time. Capped to current time.");
+              setReportError("Cannot select future start time. Capped to current time.");
               setReportStartTime(nowTime);
               return;
             }
@@ -5902,25 +5903,6 @@ return (
             setReportEndTime(val);
           }}
         />
-        <button
-          type="button"
-          onClick={() => {
-            setReportEndTime("23:59:59");
-            setReportError("");
-          }}
-          style={{
-            padding: "4px 8px",
-            fontSize: "12px",
-            borderRadius: "4px",
-            border: "1px solid #cbd5e1",
-            background: "#f8fafc",
-            cursor: "pointer",
-            fontWeight: 600,
-          }}
-          title="Set ending time to 23:59:59"
-        >
-          23:59:59
-        </button>
       </div>
     </div>
   </>
