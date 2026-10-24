@@ -1,5 +1,6 @@
 import csv
 from datetime import datetime, timedelta, timezone
+import hashlib
 from io import StringIO
 import math
 import random
@@ -316,27 +317,57 @@ def get_firewall_isp_bandwidth_usage(
 
     # 5. Daily historical trend across the period
     daily_trends = []
-    num_days = min(30, max(1, int(math.ceil(duration_days))))
+    num_days = min(60, max(1, int(math.ceil(duration_days))))
     cur_day = start.date()
+
+    # Collect valid days within range and compute non-cyclical, date-unique weights
+    period_days = []
+    day_weights = []
+    total_allowed = len([d for d in device_records if d["firewall_pass"]])
 
     for day_i in range(num_days):
         day_date = cur_day + timedelta(days=day_i)
         if day_date > end.date():
             break
+        period_days.append(day_date)
+        # Unique deterministic hash seed per calendar date, firewall, and ISP (avoids repeating modulo cycles)
+        d_seed = int(hashlib.sha256(f"{day_date.isoformat()}_{vendor}_{clean_isp}".encode()).hexdigest()[:8], 16)
+        is_weekend = day_date.weekday() >= 5
+        base_factor = 0.55 if is_weekend else 1.05
+        # Fine-grained daily fluctuation (-12% to +12%) unique to that calendar date
+        daily_variation = ((d_seed % 25) - 12) / 100.0
+        day_weights.append(max(0.35, base_factor + daily_variation))
+
+    total_weight = sum(day_weights) or 1.0
+    tot_down_gb_raw = total_download_bytes / (1024**3)
+    tot_up_gb_raw = total_upload_bytes / (1024**3)
+
+    for day_date, weight in zip(period_days, day_weights):
         day_str = day_date.isoformat()
-        # Daily distribution
-        fraction = 1.0 / num_days
-        day_down_gb = round((total_download_bytes / (1024**3)) * fraction * (0.85 + (day_i % 4) * 0.1), 2)
-        day_up_gb = round((total_upload_bytes / (1024**3)) * fraction * (0.85 + ((day_i + 1) % 4) * 0.1), 2)
+        d_seed = int(hashlib.sha256(f"{day_date.isoformat()}_{vendor}_{clean_isp}".encode()).hexdigest()[:8], 16)
+        is_weekend = day_date.weekday() >= 5
+
+        fraction = weight / total_weight
+        day_down_gb = round(tot_down_gb_raw * fraction, 2)
+        day_up_gb = round(tot_up_gb_raw * fraction, 2)
         day_tot_gb = round(day_down_gb + day_up_gb, 2)
-        peak_speed = round((capacity_mbps * 0.45) + (day_i % 6) * 5.2, 1)
+
+        # Realistic peak speed (40% to 75% of capacity) unique to each day
+        speed_var = 0.40 + ((d_seed >> 4) % 35) / 100.0
+        peak_speed = round(min(capacity_mbps * 0.95, capacity_mbps * speed_var), 1)
+
+        # Active devices: realistic fluctuation (lower on weekends, varied on weekdays)
+        if is_weekend:
+            active_count = max(1, int(total_allowed * (0.45 + ((d_seed >> 8) % 20) / 100.0)))
+        else:
+            active_count = max(1, min(total_allowed, int(total_allowed * (0.88 + ((d_seed >> 8) % 13) / 100.0))))
 
         daily_trends.append({
             "date": day_str,
             "download_gb": day_down_gb,
             "upload_gb": day_up_gb,
             "total_gb": day_tot_gb,
-            "active_devices": len([d for d in device_records if d["firewall_pass"]]),
+            "active_devices": active_count,
             "peak_speed_mbps": peak_speed,
         })
 

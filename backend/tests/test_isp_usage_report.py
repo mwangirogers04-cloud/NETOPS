@@ -360,3 +360,39 @@ def test_custom_period_ending_time_up_to_23_59_59():
         assert "23:59:59" in data["end"]
     finally:
         app.dependency_overrides.pop(reports.get_db, None)
+
+
+def test_daily_trends_no_four_day_repeating_duplicates():
+    dev = Device(
+        id=1,
+        ip_address="192.168.10.50",
+        mac_address="AA:BB:CC:DD:EE:01",
+        hostname="HOST-01",
+        device_type="computer",
+        vlan_id=10,
+        enforcement_status="allowed",
+    )
+    mock_db = MagicMock()
+    mock_res = MagicMock()
+    mock_res.all.return_value = [dev]
+    mock_db.scalars.return_value = mock_res
+
+    start = datetime(2026, 10, 1, 0, 0, 0)
+    end = datetime(2026, 10, 15, 23, 59, 59)
+    res = get_firewall_isp_bandwidth_usage(mock_db, start=start, end=end, period="custom", isp="safaricom")
+
+    trends = res["daily_trends"]
+    assert len(trends) == 15
+
+    # Check Day 0 vs Day 4, Day 1 vs Day 5, etc. are NOT duplicates
+    day_0 = trends[0]
+    day_4 = trends[4]
+    day_8 = trends[8]
+    assert day_0["total_gb"] != day_4["total_gb"] or day_0["peak_speed_mbps"] != day_4["peak_speed_mbps"]
+    assert day_4["total_gb"] != day_8["total_gb"] or day_4["peak_speed_mbps"] != day_8["peak_speed_mbps"]
+
+    # Verify that values are varied across the 15 days without 4-day repeating cycles
+    total_gbs = [t["total_gb"] for t in trends]
+    assert len(set(total_gbs)) >= 6
+    peak_speeds = [t["peak_speed_mbps"] for t in trends]
+    assert len(set(peak_speeds)) >= 6
