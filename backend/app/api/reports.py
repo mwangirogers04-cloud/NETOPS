@@ -226,6 +226,7 @@ def get_period_range(
 
     period = period.lower().strip()
 
+    now = datetime.utcnow()
     if date:
         try:
             base_date = parse_report_date(date)
@@ -234,8 +235,12 @@ def get_period_range(
                 status_code=400,
                 detail="Date must use YYYY-MM-DD format",
             )
+        if base_date.date() > now.date():
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot select future dates. Reports can only be generated for applicable past or current dates.",
+            )
     else:
-        now = datetime.utcnow()
         base_date = datetime(
             now.year,
             now.month,
@@ -305,6 +310,18 @@ def get_period_range(
                     detail="end_datetime must be after start_datetime.",
                 )
 
+            # Prevent future dates or future times (with 5 min grace for clock variance)
+            if start > now + timedelta(minutes=5):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Cannot select future start time. Please select an applicable past or present time.",
+                )
+            if end > now + timedelta(minutes=5):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Cannot select future end time. Please select an applicable past or present time.",
+                )
+
         elif start_date and end_date:
             try:
                 start = parse_report_date(start_date)
@@ -319,6 +336,18 @@ def get_period_range(
                 raise HTTPException(
                     status_code=400,
                     detail="end_date must be on or after start_date.",
+                )
+
+            today_date = now.date()
+            if start.date() > today_date:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Cannot select future start date. Reports can only be generated for applicable past or current dates.",
+                )
+            if parse_report_date(end_date).date() > today_date:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Cannot select future end date. Reports can only be generated for applicable past or current dates.",
                 )
 
         else:
@@ -349,6 +378,13 @@ def get_custom_date_range(start_date: str, end_date: str):
         raise HTTPException(
             status_code=400,
             detail="Dates must use YYYY-MM-DD format.",
+        )
+
+    now_date = datetime.utcnow().date()
+    if start.date() > now_date or parse_report_date(end_date).date() > now_date:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot select future dates. Reports can only be generated for applicable past or current dates.",
         )
 
     if start >= end:

@@ -262,3 +262,28 @@ def test_api_isp_usage_pdf_export_with_isp():
     assert response.status_code == 200
     assert "application/pdf" in response.headers["content-type"]
     assert len(response.content) > 1000
+
+
+def test_future_dates_rejected_for_reports():
+    # 1. Direct get_period_range validation
+    with pytest.raises(Exception) as exc_info:
+        reports.get_period_range("daily", date="2035-01-01")
+    assert "future" in str(exc_info.value.detail).lower()
+
+    with pytest.raises(Exception) as exc_info:
+        reports.get_period_range(
+            "custom",
+            start_datetime="2035-01-01T08:00",
+            end_datetime="2035-01-01T17:00",
+        )
+    assert "future" in str(exc_info.value.detail).lower()
+
+    # 2. Endpoint generation rejection
+    res = client.get("/reports/generate?report_type=isp_internet_usage&period=daily&date=2035-01-01")
+    assert res.status_code == 400
+    assert "future" in res.json()["detail"].lower()
+
+    # 3. Dedicated endpoint rejection
+    res_isp = client.get("/reports/isp-usage?period=daily&date=2035-01-01")
+    assert res_isp.status_code == 400
+    assert "future" in res_isp.json()["detail"].lower()

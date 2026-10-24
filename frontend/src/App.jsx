@@ -5271,7 +5271,10 @@ const AccessPage = () => {
   new Date().toISOString().slice(0, 10)
   );
   const [reportStartTime, setReportStartTime] = useState("00:00");
-  const [reportEndTime, setReportEndTime] = useState("23:59");
+  const [reportEndTime, setReportEndTime] = useState(() => {
+    const d = new Date();
+    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  });
   const [reportData, setReportData] = useState(null);
   const [reportLoading, setReportLoading] = useState(false);
   const [reportError, setReportError] = useState("");
@@ -5351,36 +5354,62 @@ const enforcedAllowed = devices.filter(
       device.access_decision === "quarantine"
   ).length;
 
- const generateReport = async () => {
+  const getTodayStr = () => new Date().toISOString().slice(0, 10);
+  const getCurrentTimeStr = () => {
+    const d = new Date();
+    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  };
+
+  const validateReportDates = () => {
+    const today = getTodayStr();
+    const nowTime = getCurrentTimeStr();
+
+    if (reportPeriod === "custom") {
+      if (reportStartDate > today) {
+        setReportError("Starting date cannot be in the future. Reports can only be generated for applicable past or current dates.");
+        return false;
+      }
+      if (reportEndDate > today) {
+        setReportError("Ending date cannot be in the future. Reports can only be generated for applicable past or current dates.");
+        return false;
+      }
+      if (reportEndDate < reportStartDate) {
+        setReportError("Ending date must be on or after starting date.");
+        return false;
+      }
+      if (reportStartDate === today && reportStartTime > nowTime) {
+        setReportError("Starting time cannot be in the future. Please select an applicable time up to current time.");
+        return false;
+      }
+      if (reportEndDate === today && reportEndTime > nowTime) {
+        setReportError("Ending time cannot be in the future. Please select an applicable time up to current time.");
+        return false;
+      }
+      if (reportStartDate === reportEndDate && reportEndTime <= reportStartTime) {
+        setReportError("Ending time must be after starting time.");
+        return false;
+      }
+    } else {
+      if (reportDate > today) {
+        setReportError("Future dates are not permitted. Reports can only be generated for applicable past or current dates.");
+        return false;
+      }
+    }
+    setReportError("");
+    return true;
+  };
+
+  const generateReport = async () => {
     if (!isAdmin) {
       setReportError("Access Denied: Standard users are not permitted to generate or download reports.");
+      return;
+    }
+    if (!validateReportDates()) {
       return;
     }
     setReportLoading(true);
     setReportError("");
     setReportData(null);
-    const today = new Date().toISOString().slice(0, 10);
-if (reportPeriod === "custom") {
-      if (
-        reportStartDate > today ||
-        reportEndDate > today ||
-        reportEndDate < reportStartDate
-      ) {
-        setReportError(
-          "Date input invalid, please select a valid date."
-        );
-        setReportLoading(false);
-        return;
-      }
-    } else {
-      if (reportDate > today) {
-        setReportError(
-          "Date input invalid, please select a valid date."
-        );
-        setReportLoading(false);
-        return;
-      }
-    }
 
 
     try {
@@ -5807,13 +5836,35 @@ return (
       <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
         <input
           type="date"
+          max={reportEndDate || getTodayStr()}
           value={reportStartDate}
-          onChange={(event) => setReportStartDate(event.target.value)}
+          onChange={(event) => {
+            const val = event.target.value;
+            const today = getTodayStr();
+            if (val > today) {
+              setReportError("Cannot select future dates. Capped to current date.");
+              setReportStartDate(today);
+              return;
+            }
+            setReportError("");
+            setReportStartDate(val);
+          }}
         />
         <input
           type="time"
+          max={reportStartDate === getTodayStr() ? getCurrentTimeStr() : undefined}
           value={reportStartTime}
-          onChange={(event) => setReportStartTime(event.target.value)}
+          onChange={(event) => {
+            const val = event.target.value;
+            const nowTime = getCurrentTimeStr();
+            if (reportStartDate === getTodayStr() && val > nowTime) {
+              setReportError("Cannot select future time. Capped to current time.");
+              setReportStartTime(nowTime);
+              return;
+            }
+            setReportError("");
+            setReportStartTime(val);
+          }}
         />
       </div>
     </div>
@@ -5823,13 +5874,36 @@ return (
       <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
         <input
           type="date"
+          min={reportStartDate}
+          max={getTodayStr()}
           value={reportEndDate}
-          onChange={(event) => setReportEndDate(event.target.value)}
+          onChange={(event) => {
+            const val = event.target.value;
+            const today = getTodayStr();
+            if (val > today) {
+              setReportError("Cannot select future dates. Capped to current date.");
+              setReportEndDate(today);
+              return;
+            }
+            setReportError("");
+            setReportEndDate(val);
+          }}
         />
         <input
           type="time"
+          max={reportEndDate === getTodayStr() ? getCurrentTimeStr() : undefined}
           value={reportEndTime}
-          onChange={(event) => setReportEndTime(event.target.value)}
+          onChange={(event) => {
+            const val = event.target.value;
+            const nowTime = getCurrentTimeStr();
+            if (reportEndDate === getTodayStr() && val > nowTime) {
+              setReportError("Cannot select future time. Capped to current time.");
+              setReportEndTime(nowTime);
+              return;
+            }
+            setReportError("");
+            setReportEndTime(val);
+          }}
         />
       </div>
     </div>
@@ -5839,8 +5913,19 @@ return (
     <label>Date</label>
     <input
       type="date"
+      max={getTodayStr()}
       value={reportDate}
-      onChange={(event) => setReportDate(event.target.value)}
+      onChange={(event) => {
+        const val = event.target.value;
+        const today = getTodayStr();
+        if (val > today) {
+          setReportError("Cannot select future dates. Capped to current date.");
+          setReportDate(today);
+          return;
+        }
+        setReportError("");
+        setReportDate(val);
+      }}
     />
   </div>
 )}
@@ -5890,27 +5975,7 @@ return (
                 className="primary-button"
                 onClick={() => {
                   if (!isAdmin) return;
-                  const today = new Date().toISOString().slice(0, 10);
-
-                  if (reportPeriod === "custom") {
-                    if (
-                      reportStartDate > today ||
-                      reportEndDate > today ||
-                      reportEndDate < reportStartDate
-                    ) {
-                      setReportError(
-                        "Date input invalid, please select a valid date."
-                      );
-                      return;
-                    }
-                  } else {
-                    if (reportDate > today) {
-                      setReportError(
-                        "Date input invalid, please select a valid date."
-                      );
-                      return;
-                    }
-                  }
+                  if (!validateReportDates()) return;
                   const params = new URLSearchParams({
                     report_type: reportType,
                     period: reportPeriod,
@@ -5950,27 +6015,7 @@ return (
                 className="secondary-button"
                 onClick={() => {
                   if (!isAdmin) return;
-                  const today = new Date().toISOString().slice(0, 10);
-
-                  if (reportPeriod === "custom") {
-                    if (
-                      reportStartDate > today ||
-                      reportEndDate > today ||
-                      reportEndDate < reportStartDate
-                    ) {
-                      setReportError(
-                        "Date input invalid, please select a valid date."
-                      );
-                      return;
-                    }
-                  } else {
-                    if (reportDate > today) {
-                      setReportError(
-                        "Date input invalid, please select a valid date."
-                      );
-                      return;
-                    }
-                  }
+                  if (!validateReportDates()) return;
                   const params = new URLSearchParams({
                     report_type: reportType,
                     period: reportPeriod,
@@ -6016,27 +6061,7 @@ return (
                 }}
                 onClick={() => {
                   if (!isAdmin) return;
-                  const today = new Date().toISOString().slice(0, 10);
-
-                  if (reportPeriod === "custom") {
-                    if (
-                      reportStartDate > today ||
-                      reportEndDate > today ||
-                      reportEndDate < reportStartDate
-                    ) {
-                      setReportError(
-                        "Date input invalid, please select a valid date."
-                      );
-                      return;
-                    }
-                  } else {
-                    if (reportDate > today) {
-                      setReportError(
-                        "Date input invalid, please select a valid date."
-                      );
-                      return;
-                    }
-                  }
+                  if (!validateReportDates()) return;
                   const params = new URLSearchParams({
                     period: reportPeriod,
                   });
