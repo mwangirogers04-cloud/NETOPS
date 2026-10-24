@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from ...models.switch_config import SwitchConfig
 from .base import BaseSwitchDriver
 from .cisco_driver import CiscoSwitchDriver
+from .cisco_sge_driver import CiscoSgeSwitchDriver
 from .enterprise_drivers import ArubaSwitchDriver, MikrotikSwitchDriver
 from .simulation_driver import SimulationSwitchDriver
 
@@ -17,6 +18,10 @@ SWITCH_VENDOR_DRIVERS: dict[str, type[BaseSwitchDriver]] = {
     "cisco": CiscoSwitchDriver,
     "cisco_catalyst": CiscoSwitchDriver,
     "cisco_nexus": CiscoSwitchDriver,
+    "cisco_sge": CiscoSgeSwitchDriver,
+    "cisco_sge2000": CiscoSgeSwitchDriver,
+    "cisco_s300": CiscoSgeSwitchDriver,
+    "sge2000": CiscoSgeSwitchDriver,
     "aruba": ArubaSwitchDriver,
     "hp_procurve": ArubaSwitchDriver,
     "mikrotik": MikrotikSwitchDriver,
@@ -26,6 +31,15 @@ SWITCH_VENDOR_DRIVERS: dict[str, type[BaseSwitchDriver]] = {
 }
 
 SUPPORTED_SWITCH_VENDORS = [
+    {
+        "id": "cisco_sge",
+        "name": "Cisco SGE2000 / Small Business Series",
+        "icon": "🏢",
+        "description": "Cisco SGE2000, SGE2000P, SG300, SG350, SG500 24-Port Gigabit Switches via SSH CLI",
+        "default_port": 22,
+        "requires_secret": True,
+        "default_model": "Cisco SGE2000 24-Port Gigabit Managed Switch",
+    },
     {
         "id": "cisco_ios",
         "name": "Cisco Catalyst & IOS-XE",

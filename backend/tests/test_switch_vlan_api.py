@@ -283,3 +283,38 @@ def test_standard_user_forbidden_from_switch_configuration(client, db_session):
         json={"vlan_id": 88, "name": "Illegal_Vlan"},
     )
     assert res.status_code == 403
+
+
+def test_cisco_sge2000_driver_and_vendor(client, db_session):
+    """Test Cisco SGE2000 vendor profile and driver instantiation."""
+    from backend.app.services.switch.manager import create_switch_driver
+    from backend.app.services.switch.cisco_sge_driver import CiscoSgeSwitchDriver
+
+    # Verify vendor listing includes Cisco SGE2000
+    res = client.get("/switches/vendors")
+    assert res.status_code == 200
+    vendors = res.json()
+    sge_vendor = next((v for v in vendors if v["id"] == "cisco_sge"), None)
+    assert sge_vendor is not None
+    assert "SGE2000" in sge_vendor["name"]
+
+    # Test driver creation
+    sge_cfg = {
+        "vendor": "cisco_sge",
+        "name": "Company SGE2000 Switch",
+        "management_ip": "192.168.1.254",
+        "port": 22,
+        "username": "admin",
+        "password": "secretpassword",
+        "enable_secret": "",
+    }
+    driver = create_switch_driver(sge_cfg)
+    assert isinstance(driver, CiscoSgeSwitchDriver)
+    assert driver.get_vendor_id() == "cisco_sge"
+    assert "cisco_s300" in driver._get_connection_params()["device_type"]
+
+    # Test port normalization
+    assert driver._normalize_port_name("1") == "ethernet g1"
+    assert driver._normalize_port_name("g5") == "ethernet g5"
+    assert driver._normalize_port_name("GigabitEthernet24") == "ethernet g24"
+
