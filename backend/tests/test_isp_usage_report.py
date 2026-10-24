@@ -292,3 +292,71 @@ def test_future_dates_rejected_for_reports():
     res_isp = client.get("/reports/isp-usage?period=daily&date=2035-01-01")
     assert res_isp.status_code == 400
     assert "future" in res_isp.json()["detail"].lower()
+
+
+def test_custom_period_ending_time_up_to_23_59_59():
+    today_str = datetime.utcnow().strftime("%Y-%m-%d")
+
+    # 1. Ending time at 23:59:59 of current day is allowed
+    start, end = reports.get_period_range(
+        "custom",
+        start_datetime=f"{today_str}T00:00:00",
+        end_datetime=f"{today_str}T23:59:59",
+    )
+    assert start.date() == datetime.utcnow().date()
+    assert end.hour == 23 and end.minute == 59 and end.second == 59
+
+    # 2. Ending time at 23:59 of current day is allowed
+    start2, end2 = reports.get_period_range(
+        "custom",
+        start_datetime=f"{today_str}T00:00",
+        end_datetime=f"{today_str}T23:59",
+    )
+    assert end2.hour == 23 and end2.minute == 59
+
+    # 3. Any intermediate time of the day is allowed
+    start3, end3 = reports.get_period_range(
+        "custom",
+        start_datetime=f"{today_str}T00:00:00",
+        end_datetime=f"{today_str}T18:30:00",
+    )
+    assert end3.hour == 18 and end3.minute == 30
+
+    # 4. Beyond the day (e.g. tomorrow) is rejected
+    with pytest.raises(Exception) as exc_info:
+        reports.get_period_range(
+            "custom",
+            start_datetime=f"{today_str}T00:00:00",
+            end_datetime="2035-01-01T23:59:59",
+        )
+    assert "future" in str(exc_info.value.detail).lower()
+
+    # 5. Inverted datetime (end before start) is rejected
+    with pytest.raises(Exception) as exc_info:
+        reports.get_period_range(
+            "custom",
+            start_datetime=f"{today_str}T12:00:00",
+            end_datetime=f"{today_str}T08:00:00",
+        )
+    assert "must be after" in str(exc_info.value.detail).lower()
+
+    # 6. Verify via API endpoint with 23:59:59
+    mock_db = MagicMock()
+    mock_res = MagicMock()
+    mock_res.all.return_value = []
+    mock_db.scalars.return_value = mock_res
+
+    def override_get_db():
+        yield mock_db
+
+    app.dependency_overrides[reports.get_db] = override_get_db
+    try:
+        res = client.get(
+            f"/reports/generate?report_type=isp_internet_usage&period=custom&start_datetime={today_str}T00:00:00&end_datetime={today_str}T23:59:59&isp=all"
+        )
+        assert res.status_code == 200
+        data = res.json()
+        assert data["report_type"] == "isp_internet_usage"
+        assert "23:59:59" in data["end"]
+    finally:
+        app.dependency_overrides.pop(reports.get_db, None)

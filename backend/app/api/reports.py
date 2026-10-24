@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
 from io import BytesIO
 from xml.sax.saxutils import escape as xml_escape
 
@@ -310,16 +310,32 @@ def get_period_range(
                     detail="end_datetime must be after start_datetime.",
                 )
 
-            # Prevent future dates or future times (with 5 min grace for clock variance)
+            today_date = now.date()
+
+            # Prevent future start date / time
+            if start.date() > today_date:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Cannot select future start date. Reports can only be generated for applicable past or current dates.",
+                )
             if start > now + timedelta(minutes=5):
                 raise HTTPException(
                     status_code=400,
                     detail="Cannot select future start time. Please select an applicable past or present time.",
                 )
-            if end > now + timedelta(minutes=5):
+
+            # Ending date cannot be in the future (beyond current date)
+            if end.date() > today_date:
                 raise HTTPException(
                     status_code=400,
-                    detail="Cannot select future end time. Please select an applicable past or present time.",
+                    detail="Cannot select future end date. Reports can only be generated for applicable past or current dates.",
+                )
+
+            # For ending date, time can be any time of the day up to 23:59:59 but not beyond that
+            if end.time() > time(23, 59, 59):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Ending time cannot be beyond 23:59:59.",
                 )
 
         elif start_date and end_date:
