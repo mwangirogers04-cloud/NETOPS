@@ -906,7 +906,7 @@ def download_isp_usage_csv(
     filename = f"netops_isp_internet_usage_{clean_isp}_{period}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
     return Response(
         content=csv_content,
-        media_type="text/csv",
+        media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 

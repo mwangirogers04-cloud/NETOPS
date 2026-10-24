@@ -13,6 +13,7 @@ from backend.app.services.firewall.isp_usage_service import (
     generate_isp_usage_csv,
     get_connected_isp_options,
     get_firewall_isp_bandwidth_usage,
+    to_bold_header,
 )
 
 
@@ -106,14 +107,16 @@ def test_get_firewall_isp_bandwidth_usage_unit():
     assert quarantined["firewall_pass"] is False
     assert quarantined["sessions_count"] == 0
 
-    # Verify CSV generator with headers on top row
+    # Verify CSV generator with bold headers on top row
     csv_out = generate_isp_usage_csv(res_saf)
-    csv_lines = [l for l in csv_out.splitlines() if l.strip()]
-    assert csv_lines[0].startswith("Device Hostname,IP Address,MAC Address")
-    assert "Selected ISP" in csv_lines[0]
+    assert csv_out.startswith("\ufeff")
+    csv_lines = [l for l in csv_out.lstrip("\ufeff").splitlines() if l.strip()]
+    expected_bold_start = f"{to_bold_header('Device Hostname')},{to_bold_header('IP Address')},{to_bold_header('MAC Address')}"
+    assert csv_lines[0].startswith(expected_bold_start)
+    assert to_bold_header("Selected ISP") in csv_lines[0]
     assert "Safaricom" in csv_out
-    assert "DEPARTMENT BANDWIDTH BREAKDOWN" in csv_out
-    assert "ISP GATEWAY & FIREWALL STATUS" in csv_out
+    assert to_bold_header("DEPARTMENT BANDWIDTH BREAKDOWN") in csv_out
+    assert to_bold_header("ISP GATEWAY & FIREWALL STATUS") in csv_out
 
 
 def test_api_isp_options_endpoint():
@@ -188,7 +191,9 @@ def test_api_isp_usage_csv_download_with_isp():
     assert response.status_code == 200
     assert "text/csv" in response.headers["content-type"]
     assert "attachment; filename=\"netops_isp_internet_usage_safaricom" in response.headers["content-disposition"]
-    assert response.text.startswith("Device Hostname,IP Address,MAC Address")
+    assert response.text.startswith("\ufeff")
+    expected_bold_start = f"{to_bold_header('Device Hostname')},{to_bold_header('IP Address')},{to_bold_header('MAC Address')}"
+    assert response.text.lstrip("\ufeff").startswith(expected_bold_start)
     assert "Safaricom" in response.text
 
 

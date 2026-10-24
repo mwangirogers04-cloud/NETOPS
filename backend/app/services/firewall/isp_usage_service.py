@@ -409,10 +409,31 @@ def get_firewall_isp_bandwidth_usage(
     }
 
 
+def to_bold_header(text: str) -> str:
+    """
+    Converts alphanumeric ASCII characters in a header string to Unicode
+    Mathematical Sans-Serif Bold characters (e.g., A -> 𝗔, a -> 𝗮, 0 -> 𝟬).
+    Symbols, spaces, and punctuation remain unchanged.
+    This formats headers in bold text across all spreadsheet viewers (Excel,
+    Google Sheets, LibreOffice Calc) and CSV text viewers natively.
+    """
+    res = []
+    for c in text:
+        if "A" <= c <= "Z":
+            res.append(chr(ord(c) - ord("A") + 0x1D5D4))
+        elif "a" <= c <= "z":
+            res.append(chr(ord(c) - ord("a") + 0x1D5EE))
+        elif "0" <= c <= "9":
+            res.append(chr(ord(c) - ord("0") + 0x1D7EC))
+        else:
+            res.append(c)
+    return "".join(res)
+
+
 def generate_isp_usage_csv(data: dict[str, Any]) -> str:
     """
     Generate an RFC-4180 compliant CSV string where headers appear on the top row
-    followed by their contents in the columns below.
+    formatted in bold, followed by their contents in the columns below.
     """
     output = StringIO()
     writer = csv.writer(output)
@@ -427,9 +448,9 @@ def generate_isp_usage_csv(data: dict[str, Any]) -> str:
     period = data.get("period", "").capitalize()
 
     # -------------------------------------------------------------
-    # ROW 1: PRIMARY COLUMN HEADERS AT THE VERY TOP
+    # ROW 1: PRIMARY COLUMN HEADERS AT THE VERY TOP (BOLD)
     # -------------------------------------------------------------
-    writer.writerow([
+    primary_headers = [
         "Device Hostname",
         "IP Address",
         "MAC Address",
@@ -449,7 +470,8 @@ def generate_isp_usage_csv(data: dict[str, Any]) -> str:
         "ISP Provider",
         "Gateway IP",
         "Reporting Period",
-    ])
+    ]
+    writer.writerow([to_bold_header(h) for h in primary_headers])
 
     # -------------------------------------------------------------
     # ROWS 2+: CONTENTS INSIDE EACH COLUMN
@@ -478,11 +500,11 @@ def generate_isp_usage_csv(data: dict[str, Any]) -> str:
         ])
 
     # -------------------------------------------------------------
-    # SECTION 2: DEPARTMENT BANDWIDTH BREAKDOWN
+    # SECTION 2: DEPARTMENT BANDWIDTH BREAKDOWN (BOLD HEADERS)
     # -------------------------------------------------------------
     writer.writerow([])
-    writer.writerow(["--- DEPARTMENT BANDWIDTH BREAKDOWN ---"])
-    writer.writerow([
+    writer.writerow([to_bold_header("--- DEPARTMENT BANDWIDTH BREAKDOWN ---")])
+    dept_headers = [
         "Department / Segment",
         "VLAN ID",
         "Connected Devices",
@@ -490,7 +512,8 @@ def generate_isp_usage_csv(data: dict[str, Any]) -> str:
         "Upload (GB)",
         "Total (GB)",
         "% of ISP Traffic",
-    ])
+    ]
+    writer.writerow([to_bold_header(h) for h in dept_headers])
     for dept in data.get("departments", []):
         writer.writerow([
             dept.get("department", ""),
@@ -503,11 +526,11 @@ def generate_isp_usage_csv(data: dict[str, Any]) -> str:
         ])
 
     # -------------------------------------------------------------
-    # SECTION 3: ISP GATEWAY & FIREWALL STATUS
+    # SECTION 3: ISP GATEWAY & FIREWALL STATUS (BOLD HEADERS)
     # -------------------------------------------------------------
     writer.writerow([])
-    writer.writerow(["--- ISP GATEWAY & FIREWALL STATUS ---"])
-    writer.writerow([
+    writer.writerow([to_bold_header("--- ISP GATEWAY & FIREWALL STATUS ---")])
+    gw_headers = [
         "Active Firewall",
         "Selected ISP",
         "Gateway IP",
@@ -523,7 +546,8 @@ def generate_isp_usage_csv(data: dict[str, Any]) -> str:
         "Hosts Monitored",
         "Hosts Allowed",
         "Hosts Quarantined",
-    ])
+    ]
+    writer.writerow([to_bold_header(h) for h in gw_headers])
     writer.writerow([
         fw_title,
         selected_isp_name,
@@ -543,18 +567,19 @@ def generate_isp_usage_csv(data: dict[str, Any]) -> str:
     ])
 
     # -------------------------------------------------------------
-    # SECTION 4: DAILY ISP USAGE TREND
+    # SECTION 4: DAILY ISP USAGE TREND (BOLD HEADERS)
     # -------------------------------------------------------------
     writer.writerow([])
-    writer.writerow(["--- DAILY ISP USAGE TREND ---"])
-    writer.writerow([
+    writer.writerow([to_bold_header("--- DAILY ISP USAGE TREND ---")])
+    trend_headers = [
         "Date",
         "Download (GB)",
         "Upload (GB)",
         "Total Consumed (GB)",
         "Active Devices",
         "Peak Speed (Mbps)",
-    ])
+    ]
+    writer.writerow([to_bold_header(h) for h in trend_headers])
     for dt in data.get("daily_trends", []):
         writer.writerow([
             dt.get("date", ""),
@@ -565,4 +590,4 @@ def generate_isp_usage_csv(data: dict[str, Any]) -> str:
             dt.get("peak_speed_mbps", 0.0),
         ])
 
-    return output.getvalue()
+    return "\ufeff" + output.getvalue()
