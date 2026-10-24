@@ -861,6 +861,31 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
             <form onSubmit={handleSaveSwitch}>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "16px", marginBottom: "16px" }}>
                 <div className="form-group">
+                  <label className="form-label">Switch Vendor Platform *</label>
+                  <select
+                    className="login-input"
+                    value={switchForm.vendor}
+                    onChange={(e) => {
+                      const selected = switchVendors.find((v) => v.id === e.target.value);
+                      setSwitchForm({
+                        ...switchForm,
+                        vendor: e.target.value,
+                        name: selected ? `${selected.name} Switch` : switchForm.name,
+                        port: selected ? selected.default_port : switchForm.port,
+                        model: selected ? selected.default_model : switchForm.model,
+                      });
+                      setTestResult(null);
+                    }}
+                  >
+                    {switchVendors.map((vnd) => (
+                      <option key={vnd.id} value={vnd.id}>
+                        {vnd.icon} {vnd.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="form-group">
                   <label className="form-label">Switch Profile Name *</label>
                   <input
                     type="text"

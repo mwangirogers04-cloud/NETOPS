@@ -318,3 +318,83 @@ def test_cisco_sge2000_driver_and_vendor(client, db_session):
     assert driver._normalize_port_name("g5") == "ethernet g5"
     assert driver._normalize_port_name("GigabitEthernet24") == "ethernet g24"
 
+
+def test_multi_vendor_switch_drivers(client, db_session):
+    """Test full multi-vendor driver registry including Ubiquiti, Juniper, Dell, TP-Link, Arista, etc."""
+    from backend.app.services.switch.manager import create_switch_driver
+    from backend.app.services.switch.enterprise_drivers import (
+        UbiquitiSwitchDriver,
+        JuniperSwitchDriver,
+        AristaSwitchDriver,
+        DellSwitchDriver,
+        TpLinkSwitchDriver,
+        DLinkSwitchDriver,
+        HuaweiSwitchDriver,
+        ExtremeBrocadeSwitchDriver,
+        NetgearSwitchDriver,
+        ZyxelSwitchDriver,
+        ArubaSwitchDriver,
+        MikrotikSwitchDriver,
+    )
+
+    # 1. Verify all 15 vendors are advertised in the endpoint
+    res = client.get("/switches/vendors")
+    assert res.status_code == 200
+    vendors = res.json()
+    vendor_ids = {v["id"] for v in vendors}
+
+    expected_vendors = {
+        "cisco_sge",
+        "cisco_ios",
+        "ubiquiti",
+        "juniper",
+        "arista",
+        "dell",
+        "tplink",
+        "dlink",
+        "huawei",
+        "extreme",
+        "netgear",
+        "zyxel",
+        "aruba",
+        "mikrotik",
+        "simulation",
+    }
+    for ev in expected_vendors:
+        assert ev in vendor_ids, f"Expected vendor {ev} missing from /switches/vendors"
+
+    # 2. Test Ubiquiti EdgeSwitch / UniFi Switch driver
+    ubnt_driver = create_switch_driver({"vendor": "ubiquiti", "management_ip": "10.0.0.1"})
+    assert isinstance(ubnt_driver, UbiquitiSwitchDriver)
+    assert ubnt_driver.device_type == "ubiquiti_edgeswitch"
+    res_ubnt = ubnt_driver.create_vlan(50, "CCTV_Ubiquiti")
+    assert res_ubnt["success"] is True
+    assert "vlan database" in res_ubnt["commands_applied"]
+
+    # 3. Test Juniper Junos driver
+    juniper_driver = create_switch_driver({"vendor": "juniper", "management_ip": "10.0.0.2"})
+    assert isinstance(juniper_driver, JuniperSwitchDriver)
+    assert juniper_driver.device_type == "juniper_junos"
+    res_juniper = juniper_driver.create_vlan(60, "VoIP_Juniper")
+    assert res_juniper["success"] is True
+    assert any("set vlans" in cmd for cmd in res_juniper["commands_applied"])
+
+    # 4. Test Dell EMC driver
+    dell_driver = create_switch_driver({"vendor": "dell", "management_ip": "10.0.0.3"})
+    assert isinstance(dell_driver, DellSwitchDriver)
+    res_dell = dell_driver.create_vlan(70, "Servers_Dell")
+    assert res_dell["success"] is True
+
+    # 5. Test TP-Link driver
+    tplink_driver = create_switch_driver({"vendor": "tplink", "management_ip": "10.0.0.4"})
+    assert isinstance(tplink_driver, TpLinkSwitchDriver)
+    res_tp = tplink_driver.create_vlan(80, "IoT_TPLink")
+    assert res_tp["success"] is True
+
+    # 6. Test Arista driver
+    arista_driver = create_switch_driver({"vendor": "arista", "management_ip": "10.0.0.5"})
+    assert isinstance(arista_driver, AristaSwitchDriver)
+    res_arista = arista_driver.set_port_vlan("Ethernet1", 80, "access")
+    assert res_arista["success"] is True
+
+
