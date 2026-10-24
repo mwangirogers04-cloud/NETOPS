@@ -81,13 +81,15 @@ def test_get_firewall_isp_bandwidth_usage_unit():
     assert quarantined["firewall_pass"] is False
     assert quarantined["sessions_count"] == 0
 
-    # Verify CSV generator
+    # Verify CSV generator with headers on top row
     csv_out = generate_isp_usage_csv(res)
-    assert "ISP INTERNET USAGE & FIREWALL BANDWIDTH REPORT" in csv_out
-    assert "BANDWIDTH USAGE BY DEPARTMENT / VLAN" in csv_out
-    assert "USER & DEVICE BANDWIDTH BREAKDOWN" in csv_out
-    assert "PC-HR-01" in csv_out
-    assert "SRV-DATABASE" in csv_out
+    csv_lines = [l for l in csv_out.splitlines() if l.strip()]
+    # Row 1 must have the column headings at the top
+    assert csv_lines[0].startswith("Device Hostname,IP Address,MAC Address")
+    # Row 2 must have the content inside each column
+    assert "PC-HR-01" in csv_lines[1] or "SRV-DATABASE" in csv_lines[1]
+    assert "DEPARTMENT BANDWIDTH BREAKDOWN" in csv_out
+    assert "ISP GATEWAY & FIREWALL STATUS" in csv_out
 
 
 def test_api_generate_isp_usage_report():
@@ -151,7 +153,7 @@ def test_api_isp_usage_csv_download():
     assert response.status_code == 200
     assert "text/csv" in response.headers["content-type"]
     assert "attachment; filename=\"netops_isp_internet_usage" in response.headers["content-disposition"]
-    assert "ISP INTERNET USAGE" in response.text
+    assert response.text.startswith("Device Hostname,IP Address,MAC Address")
 
 
 def test_api_isp_usage_excel_export():
@@ -190,7 +192,15 @@ def test_api_isp_usage_excel_export():
     ]
     for s in expected_sheets:
         assert s in wb.sheetnames
+        ws = wb[s]
+        assert ws.cell(1, 1).value is not None
+        assert ws.freeze_panes == "A2"
     assert wb.active.title == "User Bandwidth Usage"
+
+    # Verify Sheet 3 ISP & Gateway Overview has column headers on top row
+    ws_ov = wb["ISP & Gateway Overview"]
+    assert ws_ov.cell(1, 1).value == "Active Firewall"
+    assert ws_ov.cell(1, 2).value == "Gateway IP"
 
 
 def test_api_isp_usage_pdf_export():

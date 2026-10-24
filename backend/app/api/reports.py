@@ -967,32 +967,51 @@ def export_report_excel(
         ws_overview = workbook.create_sheet(title="ISP & Gateway Overview")
         fw = report.get("firewall_info", {})
         bw = report.get("bandwidth_summary", {})
-        overview_headers = ["Metric / Parameter", "Value"]
+        overview_headers = [
+            "Active Firewall",
+            "Gateway IP",
+            "WAN Interface",
+            "ISP Provider",
+            "Public WAN IP",
+            "Total Download (GB)",
+            "Total Upload (GB)",
+            "Total Consumed (GB)",
+            "Monthly Quota (GB)",
+            "Quota Used %",
+            "Peak Speed (Mbps)",
+            "Hosts Monitored",
+            "Hosts Allowed",
+            "Hosts Quarantined",
+            "Reporting Period",
+            "Period Start",
+            "Period End",
+        ]
         overview_rows = [
-            ["Report Type", "ISP Internet Usage & Firewall Bandwidth"],
-            ["Reporting Period", report.get("period", "").capitalize()],
-            ["Period Start", report.get("start", "")],
-            ["Period End", report.get("end", "")],
-            ["Report Generated At", report.get("generated_at", "")],
-            ["Active Firewall", fw.get("vendor_title", "")],
-            ["Firewall Management IP", fw.get("firewall_ip", "")],
-            ["WAN Interface", fw.get("wan_interface", "")],
-            ["ISP Provider", fw.get("isp_provider", "")],
-            ["Public WAN IP", fw.get("public_ip", "")],
-            ["Total Download (GB)", bw.get("total_download_gb", 0.0)],
-            ["Total Upload (GB)", bw.get("total_upload_gb", 0.0)],
-            ["Total Consumed (GB)", bw.get("total_consumed_gb", 0.0)],
-            ["Monthly Plan Quota (GB)", bw.get("monthly_quota_gb", 0.0)],
-            ["Quota Used %", f"{bw.get('quota_used_pct', 0.0)}%"],
-            ["Peak Throughput (Mbps)", bw.get("peak_bandwidth_mbps", 0.0)],
-            ["Total LAN Hosts Monitored", bw.get("total_hosts_monitored", 0)],
-            ["Hosts Allowed on Firewall", bw.get("allowed_hosts_count", 0)],
-            ["Hosts Blocked / Quarantined", bw.get("quarantined_hosts_count", 0)],
+            [
+                fw.get("vendor_title", ""),
+                fw.get("firewall_ip", ""),
+                fw.get("wan_interface", ""),
+                fw.get("isp_provider", ""),
+                fw.get("public_ip", ""),
+                bw.get("total_download_gb", 0.0),
+                bw.get("total_upload_gb", 0.0),
+                bw.get("total_consumed_gb", 0.0),
+                bw.get("monthly_quota_gb", 0.0),
+                f"{bw.get('quota_used_pct', 0.0)}%",
+                bw.get("peak_bandwidth_mbps", 0.0),
+                bw.get("total_hosts_monitored", 0),
+                bw.get("allowed_hosts_count", 0),
+                bw.get("quarantined_hosts_count", 0),
+                report.get("period", "").capitalize(),
+                report.get("start", ""),
+                report.get("end", ""),
+            ]
         ]
         populate_smart_excel_sheet(
             ws_overview,
             headers=overview_headers,
             rows=overview_rows,
+            center_columns={2, 10, 11, 12, 13, 14, 15},
         )
 
         # Sheet 4: Daily Trends
@@ -1458,7 +1477,7 @@ def export_report_pdf(
             ["Monthly Plan Quota", f"{bw.get('monthly_quota_gb', 0)} GB ({bw.get('quota_used_pct', 0)}% used)"],
             ["Peak Speed", f"{bw.get('peak_bandwidth_mbps', 0)} Mbps"],
         ]
-        sum_table = Table(summary_data, colWidths=[200, 290])
+        sum_table = Table(summary_data, repeatRows=1, colWidths=[200, 290])
         sum_table.setStyle(
             TableStyle([
                 ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1F4E79")),

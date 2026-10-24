@@ -11475,24 +11475,35 @@ const EndpointUpdatesPage = () => {
         .table-container {
           width: 100%;
           overflow-x: auto;
+          overflow-y: auto;
+          max-height: 520px;
+          border: 1px solid #cbd5e1;
+          border-radius: 8px;
+          background: #ffffff;
+          position: relative;
         }
 
         .data-table {
           width: 100%;
-          border-collapse: collapse;
+          border-collapse: separate;
+          border-spacing: 0;
           min-width: 1150px;
         }
 
         .data-table th {
-          background: #f8fafc;
-          color: #334155;
+          position: sticky;
+          top: 0;
+          z-index: 10;
+          background: #0f172a;
+          color: #f8fafc;
           text-align: left;
-          padding: 11px 13px;
-          font-size: 8px;
+          padding: 12px 14px;
+          font-size: 11px;
           font-weight: 800;
           letter-spacing: 0.7px;
-          border-bottom: 1px solid #cbd5e1;
+          border-bottom: 2px solid #334155;
           white-space: nowrap;
+          box-shadow: 0 2px 4px rgba(0, 0, 0, 0.12);
         }
 
         .data-table td {

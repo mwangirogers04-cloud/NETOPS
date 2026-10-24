@@ -264,60 +264,30 @@ def get_firewall_isp_bandwidth_usage(
 
 
 def generate_isp_usage_csv(data: dict[str, Any]) -> str:
-    """Generate a clean RFC-4180 compliant CSV string for ISP usage download."""
+    """
+    Generate an RFC-4180 compliant CSV string where headers appear on the top row
+    followed by their contents in the columns below.
+    """
     output = StringIO()
     writer = csv.writer(output)
 
-    # 1. Title & Header metadata
-    writer.writerow(["=========================================================================="])
-    writer.writerow(["NETOPS - ISP INTERNET USAGE & FIREWALL BANDWIDTH REPORT"])
-    writer.writerow(["=========================================================================="])
-    writer.writerow(["Generated At", data.get("generated_at", "")])
-    writer.writerow(["Reporting Period", data.get("period", "").capitalize()])
-    writer.writerow(["Start Date", data.get("start", "")])
-    writer.writerow(["End Date", data.get("end", "")])
-    writer.writerow([])
-
-    # 2. ISP & Firewall Overview
     fw = data.get("firewall_info", {})
     bw = data.get("bandwidth_summary", {})
-    writer.writerow(["--- ISP GATEWAY & FIREWALL STATUS ---"])
-    writer.writerow(["Active Firewall", fw.get("vendor_title", "")])
-    writer.writerow(["Firewall Management IP", fw.get("firewall_ip", "")])
-    writer.writerow(["WAN Interface", fw.get("wan_interface", "")])
-    writer.writerow(["ISP Provider", fw.get("isp_provider", "")])
-    writer.writerow(["Public WAN IP", fw.get("public_ip", "")])
-    writer.writerow(["Total Download", f"{bw.get('total_download_gb', 0)} GB"])
-    writer.writerow(["Total Upload", f"{bw.get('total_upload_gb', 0)} GB"])
-    writer.writerow(["Total Consumed", f"{bw.get('total_consumed_gb', 0)} GB"])
-    writer.writerow(["Monthly Plan Quota", f"{bw.get('monthly_quota_gb', 0)} GB"])
-    writer.writerow(["Quota Consumed %", f"{bw.get('quota_used_pct', 0)}%"])
-    writer.writerow(["Peak Throughput", f"{bw.get('peak_bandwidth_mbps', 0)} Mbps"])
-    writer.writerow([])
+    fw_title = fw.get("vendor_title", "")
+    wan_iface = fw.get("wan_interface", "")
+    isp_prov = fw.get("isp_provider", "")
+    gw_ip = fw.get("firewall_ip", "")
+    period = data.get("period", "").capitalize()
 
-    # 3. Department Summary
-    writer.writerow(["--- BANDWIDTH USAGE BY DEPARTMENT / VLAN ---"])
-    writer.writerow(["Department / Segment", "VLAN ID", "Devices", "Download (GB)", "Upload (GB)", "Total (GB)", "% of ISP Traffic"])
-    for dept in data.get("departments", []):
-        writer.writerow([
-            dept.get("department"),
-            dept.get("vlan_id"),
-            dept.get("devices_count"),
-            dept.get("download_gb"),
-            dept.get("upload_gb"),
-            dept.get("total_gb"),
-            f"{dept.get('percent_of_total')}%",
-        ])
-    writer.writerow([])
-
-    # 4. Device Usage Breakdown
-    writer.writerow(["--- USER & DEVICE BANDWIDTH BREAKDOWN (FIREWALL TRAFFIC COUNTERS) ---"])
+    # -------------------------------------------------------------
+    # ROW 1: PRIMARY COLUMN HEADERS AT THE VERY TOP
+    # -------------------------------------------------------------
     writer.writerow([
         "Device Hostname",
         "IP Address",
         "MAC Address",
-        "Type",
-        "VLAN",
+        "Device Type",
+        "VLAN ID",
         "Department",
         "Download (MB)",
         "Upload (MB)",
@@ -326,36 +296,122 @@ def generate_isp_usage_csv(data: dict[str, Any]) -> str:
         "% of ISP Traffic",
         "Firewall Enforcement",
         "Active Sessions",
+        "Active Firewall",
+        "WAN Interface",
+        "ISP Provider",
+        "Gateway IP",
+        "Reporting Period",
     ])
+
+    # -------------------------------------------------------------
+    # ROWS 2+: CONTENTS INSIDE EACH COLUMN
+    # -------------------------------------------------------------
     for dev in data.get("devices", []):
         writer.writerow([
-            dev.get("hostname"),
-            dev.get("ip_address"),
-            dev.get("mac_address"),
-            dev.get("device_type"),
-            dev.get("vlan_id"),
-            dev.get("department"),
-            dev.get("download_mb"),
-            dev.get("upload_mb"),
-            dev.get("total_mb"),
-            dev.get("total_gb"),
-            f"{dev.get('percent_of_total')}%",
+            dev.get("hostname", ""),
+            dev.get("ip_address", ""),
+            dev.get("mac_address", ""),
+            (dev.get("device_type") or "computer").upper(),
+            dev.get("vlan_id", 1),
+            dev.get("department", ""),
+            dev.get("download_mb", 0.0),
+            dev.get("upload_mb", 0.0),
+            dev.get("total_mb", 0.0),
+            dev.get("total_gb", 0.0),
+            f"{dev.get('percent_of_total', 0.0)}%",
             dev.get("enforcement_status", "").upper(),
-            dev.get("sessions_count"),
+            dev.get("sessions_count", 0),
+            fw_title,
+            wan_iface,
+            isp_prov,
+            gw_ip,
+            period,
         ])
-    writer.writerow([])
 
-    # 5. Daily Trends
+    # -------------------------------------------------------------
+    # SECTION 2: DEPARTMENT BANDWIDTH BREAKDOWN
+    # -------------------------------------------------------------
+    writer.writerow([])
+    writer.writerow(["--- DEPARTMENT BANDWIDTH BREAKDOWN ---"])
+    writer.writerow([
+        "Department / Segment",
+        "VLAN ID",
+        "Connected Devices",
+        "Download (GB)",
+        "Upload (GB)",
+        "Total (GB)",
+        "% of ISP Traffic",
+    ])
+    for dept in data.get("departments", []):
+        writer.writerow([
+            dept.get("department", ""),
+            dept.get("vlan_id", 1),
+            dept.get("devices_count", 0),
+            dept.get("download_gb", 0.0),
+            dept.get("upload_gb", 0.0),
+            dept.get("total_gb", 0.0),
+            f"{dept.get('percent_of_total', 0.0)}%",
+        ])
+
+    # -------------------------------------------------------------
+    # SECTION 3: ISP GATEWAY & FIREWALL STATUS
+    # -------------------------------------------------------------
+    writer.writerow([])
+    writer.writerow(["--- ISP GATEWAY & FIREWALL STATUS ---"])
+    writer.writerow([
+        "Active Firewall",
+        "Gateway IP",
+        "WAN Interface",
+        "ISP Provider",
+        "Public WAN IP",
+        "Total Download (GB)",
+        "Total Upload (GB)",
+        "Total Consumed (GB)",
+        "Monthly Quota (GB)",
+        "Quota Used %",
+        "Peak Throughput (Mbps)",
+        "Hosts Monitored",
+        "Hosts Allowed",
+        "Hosts Quarantined",
+    ])
+    writer.writerow([
+        fw_title,
+        gw_ip,
+        wan_iface,
+        isp_prov,
+        fw.get("public_ip", ""),
+        bw.get("total_download_gb", 0.0),
+        bw.get("total_upload_gb", 0.0),
+        bw.get("total_consumed_gb", 0.0),
+        bw.get("monthly_quota_gb", 0.0),
+        f"{bw.get('quota_used_pct', 0.0)}%",
+        bw.get("peak_bandwidth_mbps", 0.0),
+        bw.get("total_hosts_monitored", 0),
+        bw.get("allowed_hosts_count", 0),
+        bw.get("quarantined_hosts_count", 0),
+    ])
+
+    # -------------------------------------------------------------
+    # SECTION 4: DAILY ISP USAGE TREND
+    # -------------------------------------------------------------
+    writer.writerow([])
     writer.writerow(["--- DAILY ISP USAGE TREND ---"])
-    writer.writerow(["Date", "Download (GB)", "Upload (GB)", "Total Consumed (GB)", "Active Devices", "Peak Speed (Mbps)"])
+    writer.writerow([
+        "Date",
+        "Download (GB)",
+        "Upload (GB)",
+        "Total Consumed (GB)",
+        "Active Devices",
+        "Peak Speed (Mbps)",
+    ])
     for dt in data.get("daily_trends", []):
         writer.writerow([
-            dt.get("date"),
-            dt.get("download_gb"),
-            dt.get("upload_gb"),
-            dt.get("total_gb"),
-            dt.get("active_devices"),
-            dt.get("peak_speed_mbps"),
+            dt.get("date", ""),
+            dt.get("download_gb", 0.0),
+            dt.get("upload_gb", 0.0),
+            dt.get("total_gb", 0.0),
+            dt.get("active_devices", 0),
+            dt.get("peak_speed_mbps", 0.0),
         ])
 
     return output.getvalue()
