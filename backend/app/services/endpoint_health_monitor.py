@@ -17,6 +17,9 @@ from .network_enforcement import enforce_device_access
 STALE_AFTER_MINUTES = 15
 CHECK_INTERVAL_SECONDS = 4
 
+# In-memory debounce tracking to prevent flapping on transient ARP packet drops
+_consecutive_misses: dict[str, int] = {}
+
 
 def get_endpoint_key(report):
     """Return the strongest available endpoint identifier."""
@@ -110,11 +113,11 @@ async def endpoint_health_monitor_loop():
                 for iface in ("eth0", "wlan0"):
                     try:
                         res = subprocess.run(
-                            ["arp-scan", "--interface", iface, "--localnet", "--retry=1", "--timeout=400"],
+                            ["arp-scan", "--interface", iface, "--localnet", "--retry=2", "--timeout=600"],
                             capture_output=True,
                             text=True,
                             check=False,
-                            timeout=4,
+                            timeout=5,
                         )
                         for line in res.stdout.splitlines():
                             parts = line.strip().split()
@@ -138,13 +141,27 @@ async def endpoint_health_monitor_loop():
                     res = subprocess.run(["ip", "neigh", "show"], capture_output=True, text=True, check=False, timeout=3)
                     for line in res.stdout.splitlines():
                         parts = line.strip().split()
-                        if "REACHABLE" in parts or "DELAY" in parts:
+                        # Valid neighbour states include REACHABLE, DELAY, PROBE, and STALE (with valid lladdr)
+                        if any(st in parts for st in ("REACHABLE", "DELAY", "PROBE", "STALE")):
                             if len(parts) >= 1:
                                 active_ips.add(parts[0].strip())
                             if "lladdr" in parts:
                                 idx = parts.index("lladdr")
                                 if idx + 1 < len(parts):
-                                    active_macs.add(parts[idx + 1].strip().replace(":", "").replace("-", "").upper())
+                                    mac_entry = parts[idx + 1].strip().replace(":", "").replace("-", "").upper()
+                                    active_macs.add(mac_entry)
+                                    if mac_entry not in live_by_mac and len(parts) >= 1:
+                                        dev_iface = (
+                                            parts[parts.index("dev") + 1]
+                                            if "dev" in parts and parts.index("dev") + 1 < len(parts)
+                                            else "eth0"
+                                        )
+                                        live_by_mac[mac_entry] = {
+                                            "ip_address": parts[0].strip(),
+                                            "mac_address": parts[idx + 1].strip().upper(),
+                                            "vendor": "LAN Device",
+                                            "interface": dev_iface,
+                                        }
                 except Exception:
                     pass
 
@@ -203,14 +220,16 @@ async def endpoint_health_monitor_loop():
                     is_active = (d.ip_address and d.ip_address in active_ips) or (d_mac and d_mac in active_macs)
 
                     if not is_active and d.status == "online" and d.ip_address:
-                        # If device was online, perform fallback individual probe before marking offline
-                        for iface in ("eth0", "wlan0"):
+                        # Prioritize the device's recorded interface, then fall back to others
+                        preferred_iface = getattr(d, "network_interface", None) or "eth0"
+                        ifaces_to_try = [preferred_iface] if preferred_iface in ("eth0", "wlan0") else ["eth0", "wlan0"]
+                        for iface in ifaces_to_try:
                             try:
                                 res = subprocess.run(
-                                    ["arping", "-c", "1", "-w", "1", "-I", iface, d.ip_address],
+                                    ["arping", "-c", "2", "-w", "1.5", "-I", iface, d.ip_address],
                                     capture_output=True,
                                     check=False,
-                                    timeout=2,
+                                    timeout=3,
                                 )
                                 if res.returncode == 0:
                                     is_active = True
@@ -231,7 +250,9 @@ async def endpoint_health_monitor_loop():
                             except Exception:
                                 pass
 
+                    d_key = d_mac or str(d.id)
                     if is_active:
+                        _consecutive_misses[d_key] = 0
                         live_info = live_by_mac.get(d_mac) if d_mac else None
                         if live_info:
                             old_ip = d.ip_address
@@ -314,16 +335,22 @@ async def endpoint_health_monitor_loop():
                         online_devices.append(d)
                     else:
                         if d.status == "online":
-                            d.status = "offline"
-                            create_event(
-                                db=db,
-                                event_type="device_offline",
-                                message=(
-                                    f"Device {d.hostname or d.ip_address} ({d.mac_address}) "
-                                    f"went offline / disconnected from the LAN."
-                                ),
-                                device_id=d.id,
-                            )
+                            misses = _consecutive_misses.get(d_key, 0) + 1
+                            _consecutive_misses[d_key] = misses
+                            if misses < 3:
+                                # Debounce: retain online status for 3 consecutive misses (~12s) to absorb transient ARP/Wi-Fi jitter
+                                online_devices.append(d)
+                            else:
+                                d.status = "offline"
+                                create_event(
+                                    db=db,
+                                    event_type="device_offline",
+                                    message=(
+                                        f"Device {d.hostname or d.ip_address} ({d.mac_address}) "
+                                        f"went offline / disconnected from the LAN."
+                                    ),
+                                    device_id=d.id,
+                                )
 
             online_macs = set()
             online_ips = set()

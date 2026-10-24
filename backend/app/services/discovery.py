@@ -679,16 +679,46 @@ def save_discovered_devices(
             existing_device.status == "online"
             and dev_mac not in discovered_macs
         ):
-            existing_device.status = "offline"
-            create_event(
-                db,
-                "device_offline",
-                (
-                    f"Device {existing_device.hostname or existing_device.ip_address or dev_mac} "
-                    f"({existing_device.mac_address}) went offline / disconnected from the LAN."
-                ),
-                existing_device.id,
-            )
+            # Verify if device is actually unreachable before marking offline
+            is_still_reachable = False
+            if existing_device.ip_address:
+                try:
+                    res = subprocess.run(
+                        ["ip", "neigh", "show", existing_device.ip_address],
+                        capture_output=True,
+                        text=True,
+                        timeout=2,
+                    )
+                    for line in res.stdout.splitlines():
+                        if any(st in line for st in ("REACHABLE", "DELAY", "PROBE", "STALE")):
+                            is_still_reachable = True
+                            break
+                except Exception:
+                    pass
+                if not is_still_reachable:
+                    preferred_iface = existing_device.network_interface or scanned_interface or "eth0"
+                    try:
+                        res = subprocess.run(
+                            ["arping", "-c", "2", "-w", "1.5", "-I", preferred_iface, existing_device.ip_address],
+                            capture_output=True,
+                            timeout=3,
+                        )
+                        if res.returncode == 0:
+                            is_still_reachable = True
+                    except Exception:
+                        pass
+
+            if not is_still_reachable:
+                existing_device.status = "offline"
+                create_event(
+                    db,
+                    "device_offline",
+                    (
+                        f"Device {existing_device.hostname or existing_device.ip_address or dev_mac} "
+                        f"({existing_device.mac_address}) went offline / disconnected from the LAN."
+                    ),
+                    existing_device.id,
+                )
 
     # ---------------------------------------------------------
     # Process discovered devices

@@ -1,3 +1,6 @@
+import subprocess
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
@@ -179,6 +182,27 @@ def get_devices(
     devices = db.scalars(
         select(Device).order_by(Device.id)
     ).all()
+
+    try:
+        res = subprocess.run(["ip", "neigh", "show"], capture_output=True, text=True, check=False, timeout=1)
+        active_entries = set()
+        for line in res.stdout.splitlines():
+            if any(st in line for st in ("REACHABLE", "DELAY", "PROBE", "STALE")) and "lladdr" in line:
+                parts = line.strip().split()
+                if len(parts) >= 1:
+                    active_entries.add(parts[0].strip())
+                if "lladdr" in parts:
+                    idx = parts.index("lladdr")
+                    if idx + 1 < len(parts):
+                        active_entries.add(parts[idx + 1].strip().replace(":", "").replace("-", "").upper())
+
+        for device in devices:
+            d_mac = device.mac_address.replace(":", "").replace("-", "").upper() if device.mac_address else None
+            if device.status == "offline" and ((d_mac and d_mac in active_entries) or (device.ip_address and device.ip_address in active_entries)):
+                device.status = "online"
+                device.last_seen = datetime.now()
+    except Exception:
+        pass
 
     attach_update_information(devices, db)
 
