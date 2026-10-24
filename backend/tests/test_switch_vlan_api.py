@@ -1,0 +1,285 @@
+from datetime import datetime, timezone
+from fastapi.testclient import TestClient
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from backend.app.database import Base, get_db
+from backend.app.main import app
+from backend.app.models.user import User
+from backend.app.models.switch_config import SwitchConfig
+from backend.app.models.vlan_config import VlanConfig
+from backend.app.services.auth_service import hash_password, create_access_token
+
+
+TEST_DB_URL = "sqlite:///:memory:"
+engine = create_engine(
+    TEST_DB_URL,
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool,
+)
+TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+
+@pytest.fixture
+def db_session():
+    Base.metadata.create_all(bind=engine)
+    db = TestingSessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
+
+
+@pytest.fixture
+def client(db_session):
+    def override_get_db():
+        try:
+            yield db_session
+        finally:
+            pass
+
+    app.dependency_overrides[get_db] = override_get_db
+    yield TestClient(app)
+    app.dependency_overrides.pop(get_db, None)
+
+
+def test_get_switch_vendors(client):
+    """List of supported enterprise and simulated switch vendors."""
+    res = client.get("/switches/vendors")
+    assert res.status_code == 200
+    vendors = res.json()
+    vendor_ids = [v["id"] for v in vendors]
+    assert "cisco_ios" in vendor_ids
+    assert "aruba" in vendor_ids
+    assert "mikrotik" in vendor_ids
+    assert "simulation" in vendor_ids
+
+
+def test_create_and_activate_switch_config(client, db_session):
+    """Admin registers a Cisco Catalyst switch profile and activates it."""
+    admin = User(
+        username="switch_admin",
+        email="switch_admin@netops.local",
+        hashed_password=hash_password("Admin@1234"),
+        role="admin",
+        is_active=True,
+        is_verified=True,
+    )
+    db_session.add(admin)
+    db_session.commit()
+
+    token = create_access_token({"sub": admin.username, "role": admin.role, "user_id": admin.id})
+
+    # 1. Create switch profile
+    create_res = client.post(
+        "/switches/configs",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "vendor": "cisco_ios",
+            "name": "Core Catalyst 2960-X",
+            "management_ip": "192.168.0.2",
+            "port": 22,
+            "username": "netops",
+            "password": "CiscoPassword123!",
+            "enable_secret": "CiscoSecret123!",
+            "is_active": True,
+            "model": "Catalyst 2960-X",
+            "total_ports": 24,
+            "description": "Building A Main Distribution Switch",
+        },
+    )
+    assert create_res.status_code == 200
+    data = create_res.json()
+    assert data["vendor"] == "cisco_ios"
+    assert data["management_ip"] == "192.168.0.2"
+
+    # 2. List switch configs
+    list_res = client.get("/switches/configs")
+    assert list_res.status_code == 200
+    configs = list_res.json()
+    assert len(configs) >= 1
+    assert configs[0]["name"] == "Core Catalyst 2960-X"
+    assert configs[0]["is_active"] is True
+
+
+def test_switch_connection_test(client, db_session):
+    """Admin tests reachability to a switch."""
+    admin = User(
+        username="net_engineer",
+        email="engineer@netops.local",
+        hashed_password=hash_password("Admin@1234"),
+        role="admin",
+        is_active=True,
+        is_verified=True,
+    )
+    db_session.add(admin)
+    db_session.commit()
+
+    token = create_access_token({"sub": admin.username, "role": admin.role, "user_id": admin.id})
+
+    res = client.post(
+        "/switches/test-connection",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "vendor": "simulation",
+            "management_ip": "192.168.0.2",
+            "port": 22,
+            "username": "admin",
+            "password": "Password123!",
+        },
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["success"] is True
+    assert "Simulated Switch" in data["message"]
+
+
+def test_list_and_create_vlan_on_switch(client, db_session):
+    """Admin provisions a new VLAN (e.g. VLAN 25 Finance) to the switch."""
+    admin = User(
+        username="sec_admin",
+        email="sec_admin@netops.local",
+        hashed_password=hash_password("Admin@1234"),
+        role="admin",
+        is_active=True,
+        is_verified=True,
+    )
+    db_session.add(admin)
+    db_session.commit()
+
+    token = create_access_token({"sub": admin.username, "role": admin.role, "user_id": admin.id})
+
+    # 1. List initial VLANs
+    list_res = client.get("/switches/vlans")
+    assert list_res.status_code == 200
+    vlans = list_res.json()
+    vlan_ids = [v["vlan_id"] for v in vlans]
+    assert 10 in vlan_ids  # VOIP
+    assert 20 in vlan_ids  # COMPUTERS
+    assert 90 in vlan_ids  # QUARANTINE
+
+    # 2. Provision new VLAN 25
+    create_res = client.post(
+        "/switches/vlans",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "vlan_id": 25,
+            "name": "Finance_Dept",
+            "description": "Financial records and payroll network",
+            "subnet": "192.168.25.0/24",
+        },
+    )
+    assert create_res.status_code == 200
+    res_data = create_res.json()
+    assert res_data["success"] is True
+    assert res_data["vlan_id"] == 25
+    assert res_data["name"] == "Finance_Dept"
+
+    # 3. Verify it appears in active VLANs
+    list_after = client.get("/switches/vlans").json()
+    after_ids = [v["vlan_id"] for v in list_after]
+    assert 25 in after_ids
+
+
+def test_delete_vlan_and_protect_reserved_vlans(client, db_session):
+    """Cannot delete default VLAN 1 or Quarantine VLAN 90, but can delete custom VLAN."""
+    admin = User(
+        username="vlan_admin",
+        email="vlan_admin@netops.local",
+        hashed_password=hash_password("Admin@1234"),
+        role="admin",
+        is_active=True,
+        is_verified=True,
+    )
+    db_session.add(admin)
+    db_session.commit()
+
+    token = create_access_token({"sub": admin.username, "role": admin.role, "user_id": admin.id})
+
+    # 1. Attempting to delete VLAN 1 fails
+    del_default = client.delete("/switches/vlans/1", headers={"Authorization": f"Bearer {token}"})
+    assert del_default.status_code == 400
+    assert "reserved" in del_default.json()["detail"].lower()
+
+    # 2. Attempting to delete Quarantine VLAN 90 fails
+    del_quarantine = client.delete("/switches/vlans/90", headers={"Authorization": f"Bearer {token}"})
+    assert del_quarantine.status_code == 400
+    assert "quarantine" in del_quarantine.json()["detail"].lower()
+
+    # 3. Create and delete custom VLAN 75
+    client.post(
+        "/switches/vlans",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"vlan_id": 75, "name": "Lab_Testing"},
+    )
+    del_custom = client.delete("/switches/vlans/75", headers={"Authorization": f"Bearer {token}"})
+    assert del_custom.status_code == 200
+    assert del_custom.json()["success"] is True
+
+
+def test_assign_switch_port_vlan(client, db_session):
+    """Admin reconfigures a physical switch port to a new VLAN without console cabling."""
+    admin = User(
+        username="port_admin",
+        email="port_admin@netops.local",
+        hashed_password=hash_password("Admin@1234"),
+        role="admin",
+        is_active=True,
+        is_verified=True,
+    )
+    db_session.add(admin)
+    db_session.commit()
+
+    token = create_access_token({"sub": admin.username, "role": admin.role, "user_id": admin.id})
+
+    # 1. Get initial port status
+    ports_res = client.get("/switches/ports")
+    assert ports_res.status_code == 200
+    ports = ports_res.json()
+    assert len(ports) >= 24
+
+    # 2. Assign GigabitEthernet0/5 to VLAN 30 (CCTV)
+    assign_res = client.post(
+        "/switches/ports/assign",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "port_name": "GigabitEthernet0/5",
+            "vlan_id": 30,
+            "mode": "access",
+        },
+    )
+    assert assign_res.status_code == 200
+    assign_data = assign_res.json()
+    assert assign_data["success"] is True
+    assert assign_data["vlan_id"] == 30
+
+    # 3. Verify in ports list
+    ports_after = client.get("/switches/ports").json()
+    p5 = next(p for p in ports_after if "0/5" in p["port"])
+    assert p5["vlan"] == 30
+
+
+def test_standard_user_forbidden_from_switch_configuration(client, db_session):
+    """Standard users cannot create VLANs or reconfigure switch ports."""
+    std_user = User(
+        username="standard_user",
+        email="standard@netops.local",
+        hashed_password=hash_password("UserPass@1234"),
+        role="user",
+        is_active=True,
+        is_verified=True,
+    )
+    db_session.add(std_user)
+    db_session.commit()
+
+    user_token = create_access_token({"sub": std_user.username, "role": std_user.role, "user_id": std_user.id})
+
+    res = client.post(
+        "/switches/vlans",
+        headers={"Authorization": f"Bearer {user_token}"},
+        json={"vlan_id": 88, "name": "Illegal_Vlan"},
+    )
+    assert res.status_code == 403

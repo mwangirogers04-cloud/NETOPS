@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import LoginPage from "./components/LoginPage";
 import UsersPage from "./components/UsersPage";
+import SwitchVlanPage from "./components/SwitchVlanPage";
 
 const API_URL =
   window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
@@ -9212,7 +9213,7 @@ const EndpointUpdatesPage = () => {
         return EndpointUpdatesPage();
 
       case "vlans":
-        return VLANPage();
+        return <SwitchVlanPage API_URL={API_URL} currentUser={currentUser} getAuthHeaders={getAuthHeaders} devices={devices} />;
 
       case "reports":
         return ReportsPage();
@@ -11867,8 +11868,8 @@ const EndpointUpdatesPage = () => {
                 </div>
 
                 <NavItem
-                  icon="V"
-                  label="VLAN Automation"
+                  icon="🔀"
+                  label="VLANs & Switches"
                   active={
                     activePage === "vlans"
                   }

@@ -13,6 +13,8 @@ from .models.endpoint_update import EndpointUpdate
 from .models.patch_job import PatchJob, UpdatePolicy
 from .models.user import PasswordResetOTP, User, UserSession
 from .models.firewall_config import FirewallConfig
+from .models.switch_config import SwitchConfig
+from .models.vlan_config import VlanConfig
 
 from .api.devices import router as devices_router
 from .api.events import router as events_router
@@ -26,6 +28,7 @@ from .api.firewall import router as firewall_router
 from .api.simulation import router as simulation_router
 from .api.auth import router as auth_router
 from .api.users import router as users_router
+from .api.switches import router as switches_router
 
 from .services.auth_service import seed_default_users
 
@@ -98,6 +101,7 @@ app.include_router(firewall_router)
 app.include_router(simulation_router)
 app.include_router(auth_router)
 app.include_router(users_router)
+app.include_router(switches_router)
 
 
 # ---------------------------------------------------------

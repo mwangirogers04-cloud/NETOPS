@@ -1,0 +1,195 @@
+import logging
+from typing import Any
+from .base import BaseSwitchDriver
+
+logger = logging.getLogger(__name__)
+
+# Pre-seeded default corporate VLANs
+DEFAULT_SIMULATED_VLANS = [
+    {"vlan_id": 1, "name": "default", "status": "active", "ports": "Gi0/21, Gi0/22, Gi0/23, Gi0/24"},
+    {"vlan_id": 10, "name": "VOIP_PHONES", "status": "active", "ports": "Gi0/1, Gi0/2, Gi0/3"},
+    {"vlan_id": 20, "name": "COMPUTERS", "status": "active", "ports": "Gi0/4, Gi0/5, Gi0/6, Gi0/7, Gi0/8"},
+    {"vlan_id": 30, "name": "CCTV_CAMERAS", "status": "active", "ports": "Gi0/9, Gi0/10"},
+    {"vlan_id": 40, "name": "PRINTERS", "status": "active", "ports": "Gi0/11, Gi0/12"},
+    {"vlan_id": 50, "name": "SERVERS", "status": "active", "ports": "Gi0/13, Gi0/14"},
+    {"vlan_id": 60, "name": "WIFI_ACCESS_POINTS", "status": "active", "ports": "Gi0/15, Gi0/16"},
+    {"vlan_id": 90, "name": "QUARANTINE", "status": "active", "ports": "Gi0/17, Gi0/18"},
+]
+
+
+class SimulationSwitchDriver(BaseSwitchDriver):
+    """
+    Simulated switch driver providing in-memory state for development,
+    demonstration, and environments where physical switch hardware is offline.
+    """
+
+    _vlans_cache: list[dict[str, Any]] = []
+    _ports_cache: list[dict[str, Any]] = []
+
+    def __init__(self, config: Any | None = None):
+        super().__init__(config)
+        self._init_state()
+
+    @classmethod
+    def _init_state(cls):
+        if not cls._vlans_cache:
+            cls._vlans_cache = [dict(v) for v in DEFAULT_SIMULATED_VLANS]
+
+        if not cls._ports_cache:
+            ports = []
+            for i in range(1, 25):
+                name = f"GigabitEthernet0/{i}"
+                short_name = f"Gi0/{i}"
+                vlan = 20
+                if i in (1, 2, 3):
+                    vlan = 10
+                elif i in (4, 5, 6, 7, 8):
+                    vlan = 20
+                elif i in (9, 10):
+                    vlan = 30
+                elif i in (11, 12):
+                    vlan = 40
+                elif i in (13, 14):
+                    vlan = 50
+                elif i in (15, 16):
+                    vlan = 60
+                elif i in (17, 18):
+                    vlan = 90
+                else:
+                    vlan = 1
+
+                status = "connected" if i <= 14 else "notconnect"
+                ports.append({
+                    "port": name,
+                    "short_name": short_name,
+                    "status": status,
+                    "vlan": vlan,
+                    "duplex": "a-full" if status == "connected" else "auto",
+                    "speed": "a-1000" if status == "connected" else "auto",
+                    "type": "10/100/1000BaseTX",
+                    "mode": "access",
+                    "connected_mac": f"AA:BB:CC:DD:EE:{i:02X}" if status == "connected" else None,
+                })
+            cls._ports_cache = ports
+
+    def get_vendor_id(self) -> str:
+        return "simulation"
+
+    def get_vendor_title(self) -> str:
+        return "Software Switch Simulator (Netmiko/Cisco Emulation)"
+
+    def test_connection(self) -> dict[str, Any]:
+        return {
+            "success": True,
+            "status": "connected",
+            "message": "Successfully connected to Simulated Switch (Cisco IOS-XE Emulation)",
+            "vendor": "simulation",
+            "switch_model": "Cisco Catalyst 2960-X (Simulated)",
+            "version": "15.2(7)E3",
+            "total_ports": 24,
+            "vlans_count": len(self._vlans_cache),
+        }
+
+    def get_vlans(self) -> list[dict[str, Any]]:
+        return list(self._vlans_cache)
+
+    def create_vlan(self, vlan_id: int, name: str) -> dict[str, Any]:
+        clean_name = name.strip().replace(" ", "_")
+        for v in self._vlans_cache:
+            if v["vlan_id"] == vlan_id:
+                v["name"] = clean_name
+                return {
+                    "success": True,
+                    "vlan_id": vlan_id,
+                    "name": clean_name,
+                    "action": "updated",
+                    "message": f"VLAN {vlan_id} ('{clean_name}') successfully updated on switch.",
+                    "commands_applied": [f"vlan {vlan_id}", f" name {clean_name}", "end", "write memory"],
+                }
+
+        new_vlan = {
+            "vlan_id": vlan_id,
+            "name": clean_name,
+            "status": "active",
+            "ports": "",
+        }
+        self._vlans_cache.append(new_vlan)
+        return {
+            "success": True,
+            "vlan_id": vlan_id,
+            "name": clean_name,
+            "action": "created",
+            "message": f"VLAN {vlan_id} ('{clean_name}') successfully created on switch.",
+            "commands_applied": [f"vlan {vlan_id}", f" name {clean_name}", "end", "write memory"],
+        }
+
+    def delete_vlan(self, vlan_id: int) -> dict[str, Any]:
+        if vlan_id in (1, 1002, 1003, 1004, 1005):
+            raise ValueError(f"Cannot delete reserved default VLAN {vlan_id}.")
+
+        before_len = len(self._vlans_cache)
+        self._vlans_cache = [v for v in self._vlans_cache if v["vlan_id"] != vlan_id]
+
+        # Reset any ports using this deleted VLAN back to VLAN 1
+        for p in self._ports_cache:
+            if p["vlan"] == vlan_id:
+                p["vlan"] = 1
+
+        return {
+            "success": len(self._vlans_cache) < before_len,
+            "vlan_id": vlan_id,
+            "message": f"VLAN {vlan_id} removed from switch configuration.",
+            "commands_applied": [f"no vlan {vlan_id}", "end", "write memory"],
+        }
+
+    def get_interfaces(self) -> list[dict[str, Any]]:
+        return list(self._ports_cache)
+
+    def set_port_vlan(
+        self,
+        port_name: str,
+        vlan_id: int,
+        mode: str = "access",
+    ) -> dict[str, Any]:
+        clean_port = port_name.strip()
+        matched = False
+        for p in self._ports_cache:
+            if (
+                p["port"].lower() == clean_port.lower()
+                or p["short_name"].lower() == clean_port.lower()
+                or clean_port.lower().endswith(p["short_name"].lower())
+            ):
+                p["vlan"] = vlan_id
+                p["mode"] = mode
+                matched = True
+                clean_port = p["port"]
+                break
+
+        if not matched:
+            # Add port dynamically if not found
+            self._ports_cache.append({
+                "port": clean_port,
+                "short_name": clean_port.split("/")[-1] if "/" in clean_port else clean_port,
+                "status": "connected",
+                "vlan": vlan_id,
+                "duplex": "a-full",
+                "speed": "a-1000",
+                "type": "10/100/1000BaseTX",
+                "mode": mode,
+                "connected_mac": None,
+            })
+
+        return {
+            "success": True,
+            "port": clean_port,
+            "vlan_id": vlan_id,
+            "mode": mode,
+            "message": f"Port {clean_port} configured for VLAN {vlan_id} ({mode} mode).",
+            "commands_applied": [
+                f"interface {clean_port}",
+                f" switchport mode {mode}",
+                f" switchport access vlan {vlan_id}",
+                "end",
+                "write memory",
+            ],
+        }
