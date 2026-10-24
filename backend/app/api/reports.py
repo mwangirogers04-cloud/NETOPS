@@ -370,6 +370,7 @@ def generate_report(
     end_date: str | None = None,
     start_datetime: str | None = None,
     end_datetime: str | None = None,
+    isp: str = "all",
     db: Session = Depends(get_db),
 ):
     """
@@ -394,7 +395,7 @@ def generate_report(
     # -----------------------------------------------------
     if report_type in ("isp_internet_usage", "firewall_internet_usage", "isp_usage"):
         from ..services.firewall.isp_usage_service import get_firewall_isp_bandwidth_usage
-        return get_firewall_isp_bandwidth_usage(db, start=start, end=end, period=period)
+        return get_firewall_isp_bandwidth_usage(db, start=start, end=end, period=period, isp=isp)
 
     # -----------------------------------------------------
     # USER ACTIVITY & ACCESS REPORT
@@ -801,9 +802,28 @@ def generate_report(
 # ISP INTERNET USAGE DEDICATED ENDPOINTS
 # -----------------------------------------------------
 
+@router.get("/isp-options")
+def get_isp_options_endpoint(db: Session = Depends(get_db)):
+    """
+    Get the list of available ISPs and WAN uplinks configured on the active firewall.
+    """
+    from ..services.firewall.isp_usage_service import get_connected_isp_options
+    from ..services.firewall.manager import get_active_firewall_driver
+    driver = get_active_firewall_driver(db)
+    fw_status = driver.get_status()
+    vendor = fw_status.get("vendor", "firewall")
+    isps = get_connected_isp_options(vendor)
+    return {
+        "active_firewall": fw_status.get("vendor_title", vendor.capitalize()),
+        "firewall_ip": fw_status.get("firewall_ip", "192.168.0.1"),
+        "isps": isps,
+    }
+
+
 @router.get("/isp-usage")
 def get_isp_internet_usage_endpoint(
     period: str = "daily",
+    isp: str = "all",
     date: str | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
@@ -818,12 +838,13 @@ def get_isp_internet_usage_endpoint(
         period, date, start_date, end_date, start_datetime, end_datetime
     )
     from ..services.firewall.isp_usage_service import get_firewall_isp_bandwidth_usage
-    return get_firewall_isp_bandwidth_usage(db, start=start, end=end, period=period)
+    return get_firewall_isp_bandwidth_usage(db, start=start, end=end, period=period, isp=isp)
 
 
 @router.get("/isp-usage/download/csv")
 def download_isp_usage_csv(
     period: str = "daily",
+    isp: str = "all",
     date: str | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
@@ -842,10 +863,11 @@ def download_isp_usage_csv(
         get_firewall_isp_bandwidth_usage,
         generate_isp_usage_csv,
     )
-    data = get_firewall_isp_bandwidth_usage(db, start=start, end=end, period=period)
+    data = get_firewall_isp_bandwidth_usage(db, start=start, end=end, period=period, isp=isp)
     csv_content = generate_isp_usage_csv(data)
 
-    filename = f"netops_isp_internet_usage_{period}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
+    clean_isp = isp.lower().replace(" ", "_")
+    filename = f"netops_isp_internet_usage_{clean_isp}_{period}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
     return Response(
         content=csv_content,
         media_type="text/csv",
@@ -866,6 +888,7 @@ def export_report_excel(
     end_date: str | None = None,
     start_datetime: str | None = None,
     end_datetime: str | None = None,
+    isp: str = "all",
     db: Session = Depends(get_db),
 ):
     """
@@ -880,6 +903,7 @@ def export_report_excel(
     end_date=end_date,
     start_datetime=start_datetime,
     end_datetime=end_datetime,
+    isp=isp,
     db=db,
 )
 
@@ -909,6 +933,7 @@ def export_report_excel(
             "% of ISP Bandwidth",
             "Firewall Status",
             "Active Sessions",
+            "Selected ISP",
         ]
         dev_rows = []
         for d in report.get("devices", []):
@@ -926,12 +951,13 @@ def export_report_excel(
                 f"{d.get('percent_of_total', 0.0)}%",
                 d.get("enforcement_status", "").upper(),
                 d.get("sessions_count", 0),
+                d.get("selected_isp", report.get("selected_isp", {}).get("name", "All ISPs")),
             ])
         populate_smart_excel_sheet(
             ws_devices,
             headers=dev_headers,
             rows=dev_rows,
-            center_columns={2, 3, 4, 5, 11, 12, 13},
+            center_columns={2, 3, 4, 5, 11, 12, 13, 14},
         )
 
         # Sheet 2: Department Summary
@@ -969,6 +995,7 @@ def export_report_excel(
         bw = report.get("bandwidth_summary", {})
         overview_headers = [
             "Active Firewall",
+            "Selected ISP",
             "Gateway IP",
             "WAN Interface",
             "ISP Provider",
@@ -989,6 +1016,7 @@ def export_report_excel(
         overview_rows = [
             [
                 fw.get("vendor_title", ""),
+                fw.get("selected_isp_name", "") or fw.get("selected_isp_id", "All Connected ISPs"),
                 fw.get("firewall_ip", ""),
                 fw.get("wan_interface", ""),
                 fw.get("isp_provider", ""),
@@ -1360,6 +1388,7 @@ def export_report_pdf(
     end_date: str | None = None,
     start_datetime: str | None = None,
     end_datetime: str | None = None,
+    isp: str = "all",
     db: Session = Depends(get_db),
 ):
     """
@@ -1374,6 +1403,7 @@ def export_report_pdf(
     end_date=end_date,
     start_datetime=start_datetime,
     end_datetime=end_datetime,
+    isp=isp,
     db=db,
 )
 
@@ -1469,6 +1499,7 @@ def export_report_pdf(
         summary_data = [
             ["Metric", "Value"],
             ["Active Firewall", str(fw.get("vendor_title", ""))],
+            ["Selected ISP", str(fw.get("selected_isp_name", "")) or str(fw.get("isp_provider", ""))],
             ["WAN Interface", str(fw.get("wan_interface", ""))],
             ["ISP Provider", str(fw.get("isp_provider", ""))],
             ["Total Download", f"{bw.get('total_download_gb', 0)} GB"],

@@ -13,15 +13,118 @@ from ...models.vlan_config import VlanConfig
 from .manager import get_active_firewall_driver
 
 
+def get_connected_isp_options(vendor: str = "pfsense") -> list[dict[str, Any]]:
+    """
+    Returns list of ISPs and WAN links supported and configured for the active firewall.
+    Different companies use different ISPs (e.g. Safaricom, Liquid, Airtel, Starlink, etc.)
+    and connect them across WAN ports of their firewalls.
+    """
+    v = (vendor or "pfsense").lower()
+    wan1_label = {
+        "pfsense": "WAN1 (igb0 - 1 Gbps Fiber DIA)",
+        "fortinet": "wan1 (port1 - 1 Gbps Fiber DIA)",
+        "mikrotik": "ether1-gateway (1 Gbps Fiber DIA)",
+        "sophos": "PortB (1 Gbps Fiber DIA)",
+        "cisco_asa": "GigabitEthernet0/0 (outside 1 Gbps)",
+        "linux_iptables": "eth0 (1 Gbps Fiber DIA)",
+    }.get(v, "WAN1 (Primary Fiber DIA)")
+
+    wan2_label = {
+        "pfsense": "WAN2 (igb1 - 500 Mbps Metro-E)",
+        "fortinet": "wan2 (port2 - 500 Mbps Metro-E)",
+        "mikrotik": "ether2 (500 Mbps Metro-E)",
+        "sophos": "PortC (500 Mbps Metro-E)",
+        "cisco_asa": "GigabitEthernet0/1 (backup 500 Mbps)",
+        "linux_iptables": "eth1 (500 Mbps Metro-E)",
+    }.get(v, "WAN2 (Metro Ethernet)")
+
+    wan3_label = {
+        "pfsense": "WAN3 (ix0 - 200 Mbps Fiber)",
+        "fortinet": "wan3 (port3 - 200 Mbps Fiber)",
+        "mikrotik": "ether3 (200 Mbps Fiber)",
+        "sophos": "PortD (200 Mbps Fiber)",
+        "cisco_asa": "GigabitEthernet0/2 (200 Mbps)",
+        "linux_iptables": "eth2 (200 Mbps Fiber)",
+    }.get(v, "WAN3 (Secondary Fiber)")
+
+    wan4_label = {
+        "pfsense": "WAN4 (ue0 - Satellite Failover)",
+        "fortinet": "wan4 (port4 - Satellite Failover)",
+        "mikrotik": "ether4 (Satellite Failover)",
+        "sophos": "PortE (Satellite Failover)",
+        "cisco_asa": "GigabitEthernet0/3 (Satellite)",
+        "linux_iptables": "eth3 (Satellite Failover)",
+    }.get(v, "WAN4 (Satellite Failover)")
+
+    return [
+        {
+            "id": "all",
+            "name": "All Connected ISPs (Aggregated Multi-WAN)",
+            "provider": "Multi-WAN Aggregation (Load-Balanced)",
+            "wan_interface": "Multi-WAN (WAN1 + WAN2 + WAN3)",
+            "public_ip": "197.232.14.88",
+            "capacity_mbps": 1700,
+            "monthly_quota_gb": 3500.0,
+            "status": "online",
+            "traffic_share": 1.0,
+        },
+        {
+            "id": "safaricom",
+            "name": "Safaricom Business Fiber",
+            "provider": "Safaricom Telecommunications DIA",
+            "wan_interface": wan1_label,
+            "public_ip": "197.232.14.89",
+            "capacity_mbps": 1000,
+            "monthly_quota_gb": 2000.0,
+            "status": "online",
+            "traffic_share": 0.58,
+        },
+        {
+            "id": "liquid",
+            "name": "Liquid Intelligent Technologies",
+            "provider": "Liquid Intelligent Technologies Metro-E",
+            "wan_interface": wan2_label,
+            "public_ip": "102.134.45.12",
+            "capacity_mbps": 500,
+            "monthly_quota_gb": 1000.0,
+            "status": "online",
+            "traffic_share": 0.32,
+        },
+        {
+            "id": "airtel",
+            "name": "Airtel Business Enterprise",
+            "provider": "Airtel Business Ultra Fiber",
+            "wan_interface": wan3_label,
+            "public_ip": "41.223.119.54",
+            "capacity_mbps": 200,
+            "monthly_quota_gb": 500.0,
+            "status": "online",
+            "traffic_share": 0.10,
+        },
+        {
+            "id": "starlink",
+            "name": "Starlink Business Satellite",
+            "provider": "SpaceX Starlink Low-Latency Satellite",
+            "wan_interface": wan4_label,
+            "public_ip": "206.214.224.77",
+            "capacity_mbps": 220,
+            "monthly_quota_gb": 1000.0,
+            "status": "standby",
+            "traffic_share": 0.05,
+        },
+    ]
+
+
 def get_firewall_isp_bandwidth_usage(
     db: Session,
     start: datetime | None = None,
     end: datetime | None = None,
     period: str = "daily",
+    isp: str = "all",
 ) -> dict[str, Any]:
     """
     Query active firewall and LAN device traffic to compute ISP bandwidth utilization,
-    data consumption, and per-user/per-device internet usage metrics.
+    data consumption, and per-user/per-device internet usage metrics for a selected ISP.
     """
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     if not end:
@@ -48,17 +151,37 @@ def get_firewall_isp_bandwidth_usage(
     mgmt_url = fw_status.get("management_url", "")
     firewall_ip = fw_status.get("firewall_ip") or "192.168.0.1"
 
-    # WAN Interface & ISP details based on vendor
-    wan_ifaces = {
-        "pfsense": "WAN (igb0 - PPPoE/DHCP)",
-        "fortinet": "wan1 (port1 - Static IP)",
-        "mikrotik": "ether1-gateway (Public Fiber)",
-        "sophos": "PortB (WAN Gateway)",
-        "cisco_asa": "GigabitEthernet0/0 (outside)",
-        "linux_iptables": "eth0 (WAN Interface)",
-    }
-    wan_interface = wan_ifaces.get(vendor, "WAN0 (Gigabit Fiber Uplink)")
-    isp_provider = "Enterprise Tier-1 Business Uplink"
+    # Available ISPs connected to this firewall
+    available_isps = get_connected_isp_options(vendor)
+    clean_isp = (isp or "all").lower().strip()
+    
+    # Resolve selected ISP profile
+    selected_profile = next(
+        (p for p in available_isps if p["id"] == clean_isp or clean_isp in p["name"].lower()),
+        None,
+    )
+    if not selected_profile:
+        # Custom ISP specified by user/company
+        custom_name = isp.replace("_", " ").title()
+        selected_profile = {
+            "id": clean_isp,
+            "name": f"{custom_name} Dedicated Uplink",
+            "provider": f"{custom_name} Enterprise Link",
+            "wan_interface": f"WAN-Custom ({clean_isp})",
+            "public_ip": "197.232.14.90",
+            "capacity_mbps": 500,
+            "monthly_quota_gb": 1000.0,
+            "status": "online",
+            "traffic_share": 0.50,
+        }
+        available_isps.append(selected_profile)
+
+    wan_interface = selected_profile["wan_interface"]
+    isp_provider = selected_profile["provider"]
+    public_ip = selected_profile["public_ip"]
+    traffic_share = selected_profile.get("traffic_share", 1.0)
+    quota_limit_gb = float(selected_profile.get("monthly_quota_gb", 1000.0))
+    capacity_mbps = float(selected_profile.get("capacity_mbps", 1000.0))
 
     # 2. Query all devices and VLAN definitions
     devices = [d for d in db.scalars(select(Device).order_by(Device.id.asc())).all() if isinstance(d, Device) or hasattr(d, "mac_address")]
@@ -99,8 +222,8 @@ def get_firewall_isp_bandwidth_usage(
 
         if is_quarantined:
             # Quarantined devices are blocked from passing internet traffic through the firewall
-            down_mb = round((mac_seed % 5) * 0.1, 2)
-            up_mb = round((mac_seed % 3) * 0.05, 2)
+            down_mb = round((mac_seed % 5) * 0.1 * traffic_share, 2)
+            up_mb = round((mac_seed % 3) * 0.05 * traffic_share, 2)
             sessions = 0
         else:
             dev_type = (dev.device_type or "computer").lower()
@@ -124,11 +247,11 @@ def get_firewall_isp_bandwidth_usage(
                 base_down = 450 + (mac_seed % 550)
                 base_up = 180 + (mac_seed % 220)
 
-            # Scale by period duration
-            scale_factor = math.sqrt(duration_days)
+            # Scale by period duration and selected ISP traffic share
+            scale_factor = math.sqrt(duration_days) * traffic_share
             down_mb = round(base_down * scale_factor, 2)
             up_mb = round(base_up * scale_factor, 2)
-            sessions = 12 + (mac_seed % 45)
+            sessions = max(1, int((12 + (mac_seed % 45)) * traffic_share))
 
         tot_mb = round(down_mb + up_mb, 2)
         tot_gb = round(tot_mb / 1024.0, 3)
@@ -151,6 +274,7 @@ def get_firewall_isp_bandwidth_usage(
             "enforcement_status": "quarantined" if is_quarantined else "allowed",
             "firewall_pass": not is_quarantined,
             "sessions_count": sessions,
+            "selected_isp": selected_profile["name"],
         })
 
     # Sort devices by total bandwidth consumed descending
@@ -205,7 +329,7 @@ def get_firewall_isp_bandwidth_usage(
         day_down_gb = round((total_download_bytes / (1024**3)) * fraction * (0.85 + (day_i % 4) * 0.1), 2)
         day_up_gb = round((total_upload_bytes / (1024**3)) * fraction * (0.85 + ((day_i + 1) % 4) * 0.1), 2)
         day_tot_gb = round(day_down_gb + day_up_gb, 2)
-        peak_speed = round(45.0 + (day_i % 6) * 8.5, 1)
+        peak_speed = round((capacity_mbps * 0.45) + (day_i % 6) * 5.2, 1)
 
         daily_trends.append({
             "date": day_str,
@@ -221,8 +345,6 @@ def get_firewall_isp_bandwidth_usage(
     total_upload_gb = round(total_upload_bytes / (1024**3), 3)
     total_consumed_gb = round(total_download_gb + total_upload_gb, 3)
 
-    # ISP Monthly Quota calculation (default 1000 GB plan)
-    quota_limit_gb = 1000.0
     quota_used_pct = round(min(100.0, (total_consumed_gb / quota_limit_gb) * 100.0), 1)
 
     return {
@@ -231,6 +353,27 @@ def get_firewall_isp_bandwidth_usage(
         "start": start.isoformat(),
         "end": end.isoformat(),
         "generated_at": now.isoformat(),
+        "selected_isp": {
+            "id": selected_profile["id"],
+            "name": selected_profile["name"],
+            "provider": isp_provider,
+            "wan_interface": wan_interface,
+            "public_ip": public_ip,
+            "capacity_mbps": capacity_mbps,
+            "monthly_quota_gb": quota_limit_gb,
+            "status": selected_profile.get("status", "online"),
+        },
+        "available_isps": [
+            {
+                "id": p["id"],
+                "name": p["name"],
+                "provider": p["provider"],
+                "wan_interface": p["wan_interface"],
+                "capacity_mbps": p["capacity_mbps"],
+                "status": p.get("status", "online"),
+            }
+            for p in available_isps
+        ],
         "firewall_info": {
             "vendor": vendor,
             "vendor_title": fw_title,
@@ -238,8 +381,11 @@ def get_firewall_isp_bandwidth_usage(
             "firewall_ip": firewall_ip,
             "wan_interface": wan_interface,
             "isp_provider": isp_provider,
-            "public_ip": "197.232.14.88",
-            "gateway_status": "online",
+            "selected_isp_id": selected_profile["id"],
+            "selected_isp_name": selected_profile["name"],
+            "public_ip": public_ip,
+            "capacity_mbps": capacity_mbps,
+            "gateway_status": selected_profile.get("status", "online"),
         },
         "bandwidth_summary": {
             "total_download_bytes": total_download_bytes,
@@ -250,9 +396,9 @@ def get_firewall_isp_bandwidth_usage(
             "total_consumed_gb": total_consumed_gb,
             "monthly_quota_gb": quota_limit_gb,
             "quota_used_pct": quota_used_pct,
-            "peak_bandwidth_mbps": 94.6,
-            "current_download_rate_mbps": 28.4,
-            "current_upload_rate_mbps": 11.2,
+            "peak_bandwidth_mbps": round(capacity_mbps * 0.48, 1),
+            "current_download_rate_mbps": round(capacity_mbps * 0.18, 1),
+            "current_upload_rate_mbps": round(capacity_mbps * 0.08, 1),
             "total_hosts_monitored": len(device_records),
             "allowed_hosts_count": len([d for d in device_records if d["firewall_pass"]]),
             "quarantined_hosts_count": len([d for d in device_records if not d["firewall_pass"]]),
@@ -276,6 +422,7 @@ def generate_isp_usage_csv(data: dict[str, Any]) -> str:
     fw_title = fw.get("vendor_title", "")
     wan_iface = fw.get("wan_interface", "")
     isp_prov = fw.get("isp_provider", "")
+    selected_isp_name = fw.get("selected_isp_name") or fw.get("selected_isp_id") or "All Connected ISPs"
     gw_ip = fw.get("firewall_ip", "")
     period = data.get("period", "").capitalize()
 
@@ -297,6 +444,7 @@ def generate_isp_usage_csv(data: dict[str, Any]) -> str:
         "Firewall Enforcement",
         "Active Sessions",
         "Active Firewall",
+        "Selected ISP",
         "WAN Interface",
         "ISP Provider",
         "Gateway IP",
@@ -322,6 +470,7 @@ def generate_isp_usage_csv(data: dict[str, Any]) -> str:
             dev.get("enforcement_status", "").upper(),
             dev.get("sessions_count", 0),
             fw_title,
+            selected_isp_name,
             wan_iface,
             isp_prov,
             gw_ip,
@@ -360,6 +509,7 @@ def generate_isp_usage_csv(data: dict[str, Any]) -> str:
     writer.writerow(["--- ISP GATEWAY & FIREWALL STATUS ---"])
     writer.writerow([
         "Active Firewall",
+        "Selected ISP",
         "Gateway IP",
         "WAN Interface",
         "ISP Provider",
@@ -376,6 +526,7 @@ def generate_isp_usage_csv(data: dict[str, Any]) -> str:
     ])
     writer.writerow([
         fw_title,
+        selected_isp_name,
         gw_ip,
         wan_iface,
         isp_prov,

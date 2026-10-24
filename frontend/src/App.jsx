@@ -5275,6 +5275,8 @@ const AccessPage = () => {
   const [reportData, setReportData] = useState(null);
   const [reportLoading, setReportLoading] = useState(false);
   const [reportError, setReportError] = useState("");
+  const [selectedIsp, setSelectedIsp] = useState("all");
+  const [customIspName, setCustomIspName] = useState("");
 
   const ReportsPage = () => {
   const ipPhoneDevices = devices.filter(
@@ -5398,6 +5400,11 @@ if (reportPeriod === "custom") {
   );
 } else {
   params.append("date", reportDate);
+}
+
+if (reportType === "isp_internet_usage") {
+  const ispVal = selectedIsp === "custom" && customIspName.trim() ? customIspName.trim() : selectedIsp;
+  params.append("isp", ispVal);
 }
       const response = await fetch(
         `${API_URL}/reports/generate?${params.toString()}`,
@@ -5753,6 +5760,46 @@ return (
             </select>
           </div>
 
+          {reportType === "isp_internet_usage" && (
+            <div className="settings-row">
+              <label>Select Connected ISP / WAN Link</label>
+              <select
+                value={selectedIsp}
+                onChange={(event) => setSelectedIsp(event.target.value)}
+                style={{
+                  fontWeight: 600,
+                  borderColor: "#2563eb",
+                  background: "#eff6ff",
+                }}
+              >
+                <option value="all">🌐 All Connected ISPs (Aggregated Multi-WAN)</option>
+                <option value="safaricom">🚀 Safaricom Business Fiber (WAN1 - 1 Gbps DIA)</option>
+                <option value="liquid">⚡ Liquid Intelligent Technologies (WAN2 - 500 Mbps Metro-E)</option>
+                <option value="airtel">📶 Airtel Business Enterprise (WAN3 - 200 Mbps)</option>
+                <option value="starlink">🛰️ Starlink Business Satellite (WAN4 - Failover)</option>
+                <option value="custom">✏️ Enter Custom Company ISP...</option>
+              </select>
+            </div>
+          )}
+
+          {reportType === "isp_internet_usage" && selectedIsp === "custom" && (
+            <div className="settings-row">
+              <label>Custom ISP Provider Name</label>
+              <input
+                type="text"
+                placeholder="e.g. AT&T Business, MTN, Vodacom, Tata, Orange"
+                value={customIspName}
+                onChange={(event) => setCustomIspName(event.target.value)}
+                style={{
+                  padding: "8px 12px",
+                  borderRadius: "6px",
+                  border: "1px solid #2563eb",
+                  fontWeight: 600,
+                }}
+              />
+            </div>
+          )}
+
 {reportPeriod === "custom" ? (
   <>
     <div className="settings-row">
@@ -5869,6 +5916,11 @@ return (
                     period: reportPeriod,
                   });
 
+                  if (reportType === "isp_internet_usage") {
+                    const activeIsp = selectedIsp === "custom" && customIspName.trim() ? customIspName.trim() : selectedIsp;
+                    params.append("isp", activeIsp);
+                  }
+
                   if (reportPeriod === "custom") {
   params.append(
     "start_datetime",
@@ -5923,6 +5975,11 @@ return (
                     report_type: reportType,
                     period: reportPeriod,
                   });
+
+                  if (reportType === "isp_internet_usage") {
+                    const activeIsp = selectedIsp === "custom" && customIspName.trim() ? customIspName.trim() : selectedIsp;
+                    params.append("isp", activeIsp);
+                  }
 
                   if (reportPeriod === "custom") {
                    params.append(
@@ -5984,6 +6041,9 @@ return (
                     period: reportPeriod,
                   });
 
+                  const activeIsp = selectedIsp === "custom" && customIspName.trim() ? customIspName.trim() : selectedIsp;
+                  params.append("isp", activeIsp);
+
                   if (reportPeriod === "custom") {
                     params.append(
                       "start_datetime",
@@ -6044,15 +6104,28 @@ return (
                       🌐
                     </div>
                     <div>
-                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                         <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "var(--text-color, #0f172a)" }}>
                           {reportData.firewall_info?.vendor_title || "Enterprise Firewall"}
                         </h3>
                         <span
                           style={{
+                            background: "#2563eb",
+                            color: "#ffffff",
+                            padding: "3px 10px",
+                            borderRadius: "12px",
+                            fontSize: "12px",
+                            fontWeight: 700,
+                            letterSpacing: "0.5px",
+                          }}
+                        >
+                          ISP: {reportData.firewall_info?.selected_isp_name || reportData.selected_isp?.name || "All Connected ISPs"}
+                        </span>
+                        <span
+                          style={{
                             background: "#10b981",
                             color: "#ffffff",
-                            padding: "2px 8px",
+                            padding: "3px 8px",
                             borderRadius: "12px",
                             fontSize: "11px",
                             fontWeight: 700,
@@ -6063,10 +6136,11 @@ return (
                           ● {reportData.firewall_info?.gateway_status || "ONLINE"}
                         </span>
                       </div>
-                      <div style={{ fontSize: "13px", color: "#64748b", marginTop: "4px" }}>
-                        <strong>ISP:</strong> {reportData.firewall_info?.isp_provider || "Dedicated Fiber Uplink"} &nbsp;·&nbsp;
+                      <div style={{ fontSize: "13px", color: "#64748b", marginTop: "6px" }}>
+                        <strong>Provider:</strong> {reportData.firewall_info?.isp_provider || "Dedicated Fiber Uplink"} &nbsp;·&nbsp;
                         <strong>WAN Interface:</strong> <code>{reportData.firewall_info?.wan_interface || "wan0"}</code> &nbsp;·&nbsp;
-                        <strong>Gateway IP:</strong> <code>{reportData.firewall_info?.firewall_ip || "192.168.0.1"}</code>
+                        <strong>Capacity:</strong> <strong>{reportData.selected_isp?.capacity_mbps || 1000} Mbps</strong> &nbsp;·&nbsp;
+                        <strong>Public IP:</strong> <code>{reportData.firewall_info?.public_ip || "197.232.14.88"}</code>
                       </div>
                     </div>
                   </div>
