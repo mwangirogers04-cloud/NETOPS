@@ -1465,6 +1465,10 @@ export default function LoginPage({
               </form>
           </div>
         )}
+
+        <div style={{ textAlign: "center", marginTop: "24px", paddingTop: "14px", borderTop: "1px solid #e2e8f0", fontSize: "12px", color: "#64748b" }}>
+          <strong style={{ color: "#0f172a" }}>NETOPS Version 2</strong> • copyright 2026
+        </div>
       </div>
     </div>
   );

@@ -2229,6 +2229,16 @@ def export_report_pdf(
         story.append(event_table)
 
     # -------------------------------------------------
+    # FOOTER
+    # -------------------------------------------------
+    story.append(Spacer(1, 18))
+    pdf_footer_style = styles["Normal"]
+    pdf_footer_style.fontSize = 8
+    pdf_footer_style.textColor = colors.HexColor("#64748b")
+    pdf_footer_style.alignment = 1  # Centered
+    story.append(Paragraph("NETOPS Version 2 copyright 2026", pdf_footer_style))
+
+    # -------------------------------------------------
     # BUILD PDF
     # -------------------------------------------------
 

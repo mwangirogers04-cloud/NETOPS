@@ -11160,6 +11160,50 @@ const EndpointUpdatesPage = () => {
           margin-left: 230px;
           width: calc(100% - 230px);
           min-height: 100vh;
+          display: flex;
+          flex-direction: column;
+        }
+
+        .main-content-wrapper {
+          flex: 1;
+        }
+
+        .netops-footer {
+          margin-top: auto;
+          border-top: 1px solid #e2e8f0;
+          background: #ffffff;
+          padding: 14px 28px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          color: #64748b;
+          font-size: 12px;
+          font-weight: 500;
+        }
+
+        .netops-footer-left {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+
+        .netops-footer-brand {
+          font-weight: 700;
+          color: #0f172a;
+        }
+
+        .netops-footer-dot {
+          color: #94a3b8;
+        }
+
+        .netops-footer-copy {
+          color: #64748b;
+        }
+
+        .netops-footer-right {
+          font-size: 11px;
+          color: #94a3b8;
+          font-weight: 500;
         }
 
         .topbar {
@@ -12570,6 +12614,9 @@ const EndpointUpdatesPage = () => {
               <span className="status-dot online" />
               NETOPS online
             </div>
+            <div style={{ marginTop: "6px", fontSize: "10px", color: "#64748b", fontWeight: 600 }}>
+              NETOPS Version 2 © 2026
+            </div>
           </div>
         </aside>
 
@@ -12675,9 +12722,22 @@ const EndpointUpdatesPage = () => {
             </div>
           </header>
 
-          <PageErrorBoundary>
-  {renderPage()}
-</PageErrorBoundary>
+          <div className="main-content-wrapper">
+            <PageErrorBoundary>
+              {renderPage()}
+            </PageErrorBoundary>
+          </div>
+
+          <footer className="netops-footer">
+            <div className="netops-footer-left">
+              <span className="netops-footer-brand">NETOPS Version 2</span>
+              <span className="netops-footer-dot">•</span>
+              <span className="netops-footer-copy">copyright 2026</span>
+            </div>
+            <div className="netops-footer-right">
+              Network Operations & Security
+            </div>
+          </footer>
         </main>
 
         {newDeviceAlert && (

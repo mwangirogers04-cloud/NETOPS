@@ -621,4 +621,10 @@ def generate_isp_usage_csv(data: dict[str, Any]) -> str:
             dt.get("peak_speed_mbps", 0.0),
         ])
 
+    # -------------------------------------------------------------
+    # FOOTER
+    # -------------------------------------------------------------
+    writer.writerow([])
+    writer.writerow([to_bold_header("NETOPS Version 2 copyright 2026")])
+
     return "\ufeff" + output.getvalue()
