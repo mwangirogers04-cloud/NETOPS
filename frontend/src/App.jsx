@@ -2547,7 +2547,7 @@ const DevicesPage = () => {
             style={deviceFilter === "needs_updates" ? { background: "#d97706", color: "#fff" } : { borderColor: "#f59e0b" }}
             onClick={() => setDeviceFilter("needs_updates")}
           >
-            ⚠️ Needs Updates ({devices.filter(d => d.update_status === "updates_available").length})
+            ⚠️ Needs Updates ({devices.filter(d => (d.update_status === "updates_available" || (d.pending_updates && d.pending_updates > 0)) && d.pending_updates !== 0).length})
           </button>
           <button
             type="button"
@@ -2563,7 +2563,7 @@ const DevicesPage = () => {
             style={deviceFilter === "up_to_date" ? { background: "#059669", color: "#fff" } : { borderColor: "#10b981" }}
             onClick={() => setDeviceFilter("up_to_date")}
           >
-            ✓ Up to Date ({devices.filter(d => d.update_status === "up_to_date").length})
+            ✓ Up to Date ({devices.filter(d => d.update_status === "up_to_date" || d.pending_updates === 0).length})
           </button>
           <button
             type="button"
@@ -2723,9 +2723,9 @@ const DevicesPage = () => {
           const inventoryFilteredDevices = scopedDevices.filter((device) => {
             if (deviceFilter === "online" && device.status !== "online") return false;
             if (deviceFilter === "offline" && device.status !== "offline") return false;
-            if (deviceFilter === "needs_updates" && device.update_status !== "updates_available") return false;
+            if (deviceFilter === "needs_updates" && (device.update_status !== "updates_available" || device.pending_updates === 0)) return false;
             if (deviceFilter === "queued" && !Boolean(getActiveJobForDevice(device))) return false;
-            if (deviceFilter === "up_to_date" && device.update_status !== "up_to_date") return false;
+            if (deviceFilter === "up_to_date" && device.update_status !== "up_to_date" && device.pending_updates !== 0) return false;
             if (deviceFilter === "unmonitored" && device.update_status && device.update_status !== "unmonitored") return false;
             if (deviceFilter === "pending" && device.approval_status !== "pending") return false;
             if (deviceFilter === "rejected" && device.approval_status !== "rejected") return false;
@@ -3173,7 +3173,7 @@ const DevicesPage = () => {
                           );
                         }
 
-                        if (device.update_status === "up_to_date") {
+                        if (device.update_status === "up_to_date" || device.pending_updates === 0) {
                           return (
                             <div>
                               <span className="status-badge allowed" title={`Last checked: ${device.last_update_check || 'recently'}`}>
@@ -3188,10 +3188,10 @@ const DevicesPage = () => {
                           );
                         }
 
-                        if (device.update_status === "updates_available") {
+                        if (device.update_status === "updates_available" && (device.pending_updates > 0 || device.pending_updates === null || device.pending_updates === undefined)) {
                           return (
                             <div>
-                              <span className="status-badge warning" title={`${device.pending_updates} updates pending`}>
+                              <span className="status-badge warning" title={`${device.pending_updates ?? "—"} updates pending`}>
                                 ⚠️ {device.pending_updates ?? "—"} UPDATES
                               </span>
                               {device.operating_system && (
@@ -8252,11 +8252,13 @@ const Dashboard = () => {
   };
 
   const dashboardUpdatesNeeded = dashboardEndpointUpdates.filter(
-    (endpoint) => endpoint.update_status === "updates_available"
+    (endpoint) =>
+      (endpoint.update_status === "updates_available" || (endpoint.pending_updates && endpoint.pending_updates > 0)) &&
+      endpoint.pending_updates !== 0
   ).length;
 
   const dashboardUpToDate = dashboardEndpointUpdates.filter(
-    (endpoint) => endpoint.update_status === "up_to_date"
+    (endpoint) => endpoint.update_status === "up_to_date" || endpoint.pending_updates === 0
   ).length;
 
   const dashboardPendingUpdates = dashboardEndpointUpdates.reduce(
@@ -8612,18 +8614,18 @@ const Dashboard = () => {
                           className={`status-badge ${
                             !isFresh && !isOnline
                               ? "blocked"
-                              : endpoint.update_status === "up_to_date"
+                              : endpoint.update_status === "up_to_date" || endpoint.pending_updates === 0
                               ? "allowed"
-                              : endpoint.update_status === "updates_available"
+                              : endpoint.update_status === "updates_available" && (endpoint.pending_updates > 0 || endpoint.pending_updates === null)
                               ? "warning"
                               : "blocked"
                           }`}
                         >
                           {!isFresh && !isOnline
                             ? "STALE / UNKNOWN"
-                            : endpoint.update_status === "up_to_date"
+                            : endpoint.update_status === "up_to_date" || endpoint.pending_updates === 0
                             ? "UP TO DATE"
-                            : endpoint.update_status === "updates_available"
+                            : endpoint.update_status === "updates_available" && (endpoint.pending_updates > 0 || endpoint.pending_updates === null)
                             ? "NEEDS UPDATES"
                             : endpoint.update_status || "UNKNOWN"}
                         </span>
@@ -9125,12 +9127,13 @@ const EndpointUpdatesPage = () => {
 
   const endpointsWithUpdates = freshEndpointUpdates.filter(
     (endpoint) =>
-      endpoint.update_status === "updates_available"
+      (endpoint.update_status === "updates_available" || (endpoint.pending_updates && endpoint.pending_updates > 0)) &&
+      endpoint.pending_updates !== 0
   ).length;
 
   const endpointsUpToDate = freshEndpointUpdates.filter(
     (endpoint) =>
-      endpoint.update_status === "up_to_date"
+      endpoint.update_status === "up_to_date" || endpoint.pending_updates === 0
   ).length;
 
   const totalPendingUpdates = freshEndpointUpdates.reduce(
@@ -9618,19 +9621,19 @@ const EndpointUpdatesPage = () => {
                           className={`status-badge ${
                             endpointFreshness(endpoint) !== "online"
                               ? "blocked"
-                              : endpoint.update_status === "up_to_date"
+                              : endpoint.update_status === "up_to_date" || endpoint.pending_updates === 0
                               ? "allowed"
-                              : endpoint.update_status === "updates_available"
+                              : endpoint.update_status === "updates_available" && (endpoint.pending_updates > 0 || endpoint.pending_updates === null)
                               ? "warning"
                               : "blocked"
                           }`}
                         >
                           {endpointFreshness(endpoint) !== "online"
                             ? "STALE / UNKNOWN"
-                            : endpoint.update_status === "updates_available"
-                            ? "Updates Available"
-                            : endpoint.update_status === "up_to_date"
+                            : endpoint.update_status === "up_to_date" || endpoint.pending_updates === 0
                             ? "Up to Date"
+                            : endpoint.update_status === "updates_available" && (endpoint.pending_updates > 0 || endpoint.pending_updates === null)
+                            ? "Updates Available"
                             : endpoint.update_status || "Unknown"}
                         </span>
                       </td>

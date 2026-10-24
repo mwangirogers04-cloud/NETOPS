@@ -624,5 +624,94 @@ def test_update_policy_and_bulk_schedule_off_hours(client, db_session):
     assert any(j["hostname"] == "BULK-OFF-HOURS-PC" and j["status"] == "SCHEDULED" for j in jobs)
 
 
+def test_orphaned_remote_job_at_70_percent_reconciles_to_completed(client, db_session):
+    """
+    If a remote machine update job is orphaned at 70% in-progress due to service restart,
+    reconciliation must complete it and synchronize the endpoint baseline to up_to_date.
+    """
+    dev = Device(
+        hostname="REMOTE-70PCT-PC",
+        mac_address="70:70:70:70:70:70",
+        ip_address="192.168.0.70",
+        device_type="computer",
+        approval_status="approved",
+        enforcement_status="allowed",
+        internet_access_authorized=True,
+        status="online",
+    )
+    db_session.add(dev)
+    db_session.commit()
+
+    past_time = datetime.now(timezone.utc) - timedelta(seconds=30)
+    job = PatchJob(
+        device_id=dev.id,
+        hostname=dev.hostname,
+        mac_address=dev.mac_address,
+        ip_address=dev.ip_address,
+        status="IN_PROGRESS",
+        progress_percent=70,
+        started_at=past_time,
+        log_output="[Log] Applying system patches and verifying integrity...",
+    )
+    db_session.add(job)
+
+    ep = EndpointUpdate(
+        hostname=dev.hostname,
+        mac_address=dev.mac_address,
+        ip_address=dev.ip_address,
+        operating_system="Linux",
+        os_version="Ubuntu 24.04",
+        architecture="x86_64",
+        update_status="updates_available",
+        pending_updates=3,
+        last_checked=datetime.now(timezone.utc),
+    )
+    db_session.add(ep)
+    db_session.commit()
+
+    # Run scheduled jobs reconciliation
+    dispatch_due_scheduled_jobs(db_session)
+    db_session.refresh(job)
+
+    assert job.status == "COMPLETED"
+    assert job.progress_percent == 100
+
+    # Query GET /endpoint-updates/
+    res = client.get("/endpoint-updates/")
+    assert res.status_code == 200
+    records = res.json()
+    matched = [r for r in records if r["mac_address"] == "70:70:70:70:70:70"]
+    assert len(matched) == 1
+    assert matched[0]["update_status"] == "up_to_date"
+    assert matched[0]["pending_updates"] == 0
+
+
+def test_endpoint_updates_zero_pending_is_not_updates_available(client, db_session):
+    """
+    An endpoint with 0 pending updates must report update_status='up_to_date',
+    never 'updates_available' (avoiding 'Needs Updates' with 0 pending).
+    """
+    dev = Device(
+        hostname="CLEAN-WORKSTATION",
+        mac_address="88:88:88:88:88:88",
+        ip_address="192.168.0.88",
+        device_type="computer",
+        approval_status="approved",
+        enforcement_status="allowed",
+        internet_access_authorized=True,
+        status="online",
+    )
+    db_session.add(dev)
+    db_session.commit()
+
+    res = client.get("/endpoint-updates/")
+    assert res.status_code == 200
+    records = res.json()
+    clean_rec = [r for r in records if r["mac_address"] == "88:88:88:88:88:88"][0]
+    assert clean_rec["pending_updates"] == 0
+    assert clean_rec["update_status"] == "up_to_date"
+
+
+
 
 

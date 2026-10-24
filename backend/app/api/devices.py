@@ -153,6 +153,8 @@ def attach_update_information(devices: list[Device], db: Session):
                 device.hostname = matched_report.hostname
             device.update_status = matched_report.update_status
             device.pending_updates = matched_report.pending_updates
+            if (device.pending_updates is not None and device.pending_updates == 0) and device.update_status == "updates_available":
+                device.update_status = "up_to_date"
             device.security_updates = matched_report.security_updates
             device.last_update_check = matched_report.last_checked
             device.operating_system = matched_report.operating_system

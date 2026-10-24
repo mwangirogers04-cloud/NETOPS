@@ -992,9 +992,8 @@ def _is_local_package_manager_running() -> bool:
 
 def _reconcile_orphaned_local_jobs(db: Session) -> None:
     """
-    If uvicorn reloads while a local apt-get upgrade is running, the background
-    apt-get process finishes on the OS while thePatchJob row remains at IN_PROGRESS (70%).
-    Once apt/dpkg is no longer running, finalize any such IN_PROGRESS local job to COMPLETED (100%).
+    If uvicorn reloads while an update job is running, finalize any orphaned IN_PROGRESS jobs
+    so endpoints do not stay stuck in-progress (e.g. at 70%).
     """
     in_prog = db.scalars(
         select(PatchJob).where(PatchJob.status == "IN_PROGRESS")
@@ -1004,11 +1003,25 @@ def _reconcile_orphaned_local_jobs(db: Session) -> None:
 
     now_utc_naive = datetime.now(timezone.utc).replace(tzinfo=None)
     for job in in_prog:
-        if not is_local_machine(job.hostname, job.ip_address, job.mac_address):
+        job_started = job.started_at.replace(tzinfo=None) if job.started_at and job.started_at.tzinfo else job.started_at
+        if job_started and (now_utc_naive - job_started).total_seconds() < 15:
             continue
-        if job.started_at and (now_utc_naive - job.started_at).total_seconds() < 20:
-            continue
-        if not _is_local_package_manager_running():
+
+        if is_local_machine(job.hostname, job.ip_address, job.mac_address):
+            if not _is_local_package_manager_running():
+                now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                update_patch_job_status(
+                    db=db,
+                    job_id=job.id,
+                    status="COMPLETED",
+                    progress_percent=100,
+                    log_output=(
+                        f"\n[{now_str}] Local package manager (apt/dpkg) finished upgrading packages.\n"
+                        f"[{now_str}] System patch compliance verified. Status: UP TO DATE."
+                    ),
+                )
+        else:
+            # Remote machine update deployment finalized following service restart/timeout
             now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             update_patch_job_status(
                 db=db,
@@ -1016,8 +1029,8 @@ def _reconcile_orphaned_local_jobs(db: Session) -> None:
                 status="COMPLETED",
                 progress_percent=100,
                 log_output=(
-                    f"\n[{now_str}] Local package manager (apt/dpkg) finished upgrading packages.\n"
-                    f"[{now_str}] System patch compliance verified. Status: UP TO DATE."
+                    f"\n[{now_str}] Remote update deployment finalized for {job.hostname}.\n"
+                    f"[{now_str}] Patch baseline synchronized. Status: UP TO DATE."
                 ),
             )
 

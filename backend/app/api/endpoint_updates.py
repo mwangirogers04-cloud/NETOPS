@@ -228,6 +228,7 @@ def get_endpoint_updates(
 
     seen_machine_ids = set()
     seen_macs = set()
+    seen_ips = set()
     seen_hostnames = set()
     results = []
 
@@ -238,22 +239,32 @@ def get_endpoint_updates(
             else None
         )
         norm_host = endpoint.hostname.lower().strip() if endpoint.hostname else None
+        norm_ip = endpoint.ip_address.strip() if endpoint.ip_address else None
 
-        is_seen = (
-            (endpoint.machine_id and endpoint.machine_id in seen_machine_ids)
-            or (norm_mac and norm_mac in seen_macs)
-            or (norm_host and norm_host in seen_hostnames)
-        )
-        if is_seen:
-            continue
+        if norm_mac:
+            if norm_mac in seen_macs:
+                continue
+            seen_macs.add(norm_mac)
+            if norm_ip:
+                seen_ips.add(norm_ip)
+            if endpoint.machine_id:
+                seen_machine_ids.add(endpoint.machine_id)
+        elif norm_ip:
+            if norm_ip in seen_ips:
+                continue
+            seen_ips.add(norm_ip)
+            if endpoint.machine_id:
+                seen_machine_ids.add(endpoint.machine_id)
+        elif endpoint.machine_id:
+            if endpoint.machine_id in seen_machine_ids:
+                continue
+            seen_machine_ids.add(endpoint.machine_id)
+        elif norm_host:
+            if norm_host in seen_hostnames:
+                continue
+            seen_hostnames.add(norm_host)
 
         results.append(endpoint)
-        if endpoint.machine_id:
-            seen_machine_ids.add(endpoint.machine_id)
-        if norm_mac:
-            seen_macs.add(norm_mac)
-        if norm_host:
-            seen_hostnames.add(norm_host)
 
     # ---------------------------------------------------------
     # Match endpoint reports to discovered LAN devices
@@ -302,8 +313,11 @@ def get_endpoint_updates(
 
         is_online = (device.status == "online") if device else False
         update_status = endpoint.update_status
-        if is_online and update_status in ("stale", "unknown"):
-            update_status = "updates_available" if (device and device.device_type == "computer") else "up_to_date"
+        pending_count = endpoint.pending_updates if endpoint.pending_updates is not None else 0
+        if pending_count == 0 and update_status == "updates_available":
+            update_status = "up_to_date"
+        elif is_online and update_status in ("stale", "unknown"):
+            update_status = "updates_available" if (device and device.device_type == "computer" and pending_count > 0) else "up_to_date"
 
         wh_info = get_device_working_hours_info(
             db=db,
@@ -370,6 +384,11 @@ def get_endpoint_updates(
             ip_address=device.ip_address,
         )
 
+        pend = getattr(device, "pending_updates", 0) or 0
+        dev_up = getattr(device, "update_status", None)
+        if not dev_up or (pend == 0 and dev_up == "updates_available"):
+            dev_up = "updates_available" if (device.device_type == "computer" and pend > 0) else "up_to_date"
+
         enriched_results.append({
             "id": f"dev-{device.id}",
             "hostname": device.hostname or f"HOST-{device.ip_address or device.id}",
@@ -379,8 +398,8 @@ def get_endpoint_updates(
             "operating_system": getattr(device, "operating_system", "Generic Network Device") or "Generic Network Device",
             "os_version": getattr(device, "os_version", "") or "Online",
             "architecture": "AMD64",
-            "update_status": getattr(device, "update_status", None) or ("updates_available" if device.device_type == "computer" else "up_to_date"),
-            "pending_updates": getattr(device, "pending_updates", 0) or 0,
+            "update_status": dev_up,
+            "pending_updates": pend,
             "security_updates": None,
             "last_checked": getattr(device, "last_update_check", None) or datetime.now(timezone.utc),
             "is_online": True,
