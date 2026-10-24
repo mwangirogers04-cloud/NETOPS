@@ -21,6 +21,13 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
   const [newVlanSubnet, setNewVlanSubnet] = useState("");
   const [creatingVlan, setCreatingVlan] = useState(false);
 
+  // Edit VLAN Modal (Custom Department Naming)
+  const [editingVlan, setEditingVlan] = useState(null);
+  const [editVlanName, setEditVlanName] = useState("");
+  const [editVlanDescription, setEditVlanDescription] = useState("");
+  const [editVlanSubnet, setEditVlanSubnet] = useState("");
+  const [savingEditVlan, setSavingEditVlan] = useState(false);
+
   // Assign Port Modal
   const [selectedPort, setSelectedPort] = useState(null);
   const [targetVlanId, setTargetVlanId] = useState("");
@@ -141,6 +148,60 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
       await loadAllData();
     } catch (err) {
       showStatus(err.message, "error");
+    }
+  };
+
+  // Department Presets for 1-Click Company Customization
+  const DEPARTMENT_PRESETS = [
+    { name: "HR_Management", desc: "Human Resources, Payroll & Staff Onboarding", subnet: "192.168.10.0/24" },
+    { name: "IT_Operations", desc: "IT Engineers, Infrastructure, Monitoring & NOC", subnet: "192.168.20.0/24" },
+    { name: "Finance_Accounting", desc: "Finance, Billing, Auditing & Accounting Systems", subnet: "192.168.30.0/24" },
+    { name: "Executive_Suite", desc: "C-Level Leadership, Boardroom & High-Priority Access", subnet: "192.168.40.0/24" },
+    { name: "Sales_Marketing", desc: "Sales Representatives, CRM & Marketing Workstations", subnet: "192.168.50.0/24" },
+    { name: "Customer_Support", desc: "Helpdesk, Call Center & Customer Relations", subnet: "192.168.60.0/24" },
+    { name: "Warehouse_Logistics", desc: "Inventory Scanning, Shipping & Logistics Barcodes", subnet: "192.168.70.0/24" },
+    { name: "Engineering_Lab", desc: "Research, Software Development & Testing Labs", subnet: "192.168.80.0/24" },
+    { name: "Guest_WiFi", desc: "Isolated Visitor & Contractor Internet Access", subnet: "192.168.100.0/24" },
+    { name: "CCTV_Security", desc: "Surveillance Cameras, Access Control & NVRs", subnet: "192.168.200.0/24" },
+  ];
+
+  // Open Edit VLAN Modal
+  const handleOpenEditVlan = (vlanObj) => {
+    setEditingVlan(vlanObj);
+    setEditVlanName(vlanObj.name || "");
+    setEditVlanDescription(vlanObj.description || "");
+    setEditVlanSubnet(vlanObj.subnet || "");
+  };
+
+  // Save Edit VLAN
+  const handleSaveEditVlan = async (e) => {
+    if (e) e.preventDefault();
+    if (!editingVlan || !editVlanName.trim()) {
+      showStatus("Please enter a valid VLAN name.", "error");
+      return;
+    }
+
+    setSavingEditVlan(true);
+    try {
+      const res = await fetch(`${API_URL}/switches/vlans/${editingVlan.vlan_id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        body: JSON.stringify({
+          name: editVlanName.trim(),
+          description: editVlanDescription.trim(),
+          subnet: editVlanSubnet.trim() || null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to update VLAN.");
+
+      showStatus(`VLAN ${editingVlan.vlan_id} updated to '${data.name}' successfully!`, "success");
+      setEditingVlan(null);
+      await loadAllData();
+    } catch (err) {
+      showStatus(err.message, "error");
+    } finally {
+      setSavingEditVlan(false);
     }
   };
 
@@ -522,9 +583,19 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                     {v.description || (v.subnet ? `Subnet: ${v.subnet}` : "Enterprise Segment")}
                   </div>
 
-                  <div style={{ marginTop: "10px", paddingTop: "8px", borderTop: `1px solid ${theme.border}44`, display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#475569" }}>
+                  <div style={{ marginTop: "10px", paddingTop: "8px", borderTop: `1px solid ${theme.border}44`, display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "11px", color: "#475569" }}>
                     <span>Devices: <strong>{matchingDevices.length}</strong></span>
-                    <span>Status: <strong style={{ color: "#059669" }}>Live</strong></span>
+                    {isAdmin && (
+                      <button
+                        type="button"
+                        className="secondary-button small"
+                        style={{ padding: "2px 8px", fontSize: "11px", height: "auto", borderColor: theme.border }}
+                        onClick={() => handleOpenEditVlan(v)}
+                        title="Customize VLAN name and department"
+                      >
+                        ✏️ Edit
+                      </button>
+                    )}
                   </div>
                 </div>
               );
@@ -593,21 +664,27 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                         </td>
                         {isAdmin && (
                           <td style={{ textAlign: "right" }}>
-                            {v.is_default || v.is_quarantine ? (
-                              <span style={{ fontSize: "11px", color: "#94a3b8", fontStyle: "italic" }}>
-                                System Protected
-                              </span>
-                            ) : (
+                            <div style={{ display: "flex", justifyContent: "flex-end", gap: "6px" }}>
                               <button
                                 type="button"
                                 className="secondary-button small"
-                                style={{ color: "#dc2626", borderColor: "#fca5a5" }}
-                                onClick={() => handleDeleteVlan(v.vlan_id, v.name)}
-                                title="Delete this VLAN from the switch"
+                                onClick={() => handleOpenEditVlan(v)}
+                                title="Customize department name, description, and subnet"
                               >
-                                🗑️ Delete
+                                ✏️ Edit
                               </button>
-                            )}
+                              {!v.is_default && !v.is_quarantine && (
+                                <button
+                                  type="button"
+                                  className="secondary-button small"
+                                  style={{ color: "#dc2626", borderColor: "#fca5a5" }}
+                                  onClick={() => handleDeleteVlan(v.vlan_id, v.name)}
+                                  title="Delete this VLAN from the switch"
+                                >
+                                  🗑️ Delete
+                                </button>
+                              )}
+                            </div>
                           </td>
                         )}
                       </tr>
@@ -1318,6 +1395,168 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                   disabled={creatingVlan}
                 >
                   {creatingVlan ? "Deploying to Switch..." : "🚀 Provision to Switch"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* MODAL: EDIT VLAN (CUSTOMIZE DEPARTMENT NAME & SUBNET)    */}
+      {/* ======================================================== */}
+      {editingVlan && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(15, 23, 42, 0.6)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 99999,
+            padding: "16px",
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: "#ffffff",
+              borderRadius: "12px",
+              width: "100%",
+              maxWidth: "520px",
+              padding: "24px",
+              boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
+              maxHeight: "90vh",
+              overflowY: "auto",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+              <div style={{ fontSize: "16px", fontWeight: "800", color: "#0f172a", display: "flex", alignItems: "center", gap: "8px" }}>
+                <span>✏️</span>
+                <span>Customize VLAN {editingVlan.vlan_id} Department Name</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingVlan(null)}
+                style={{ background: "transparent", border: "none", fontSize: "18px", color: "#64748b", cursor: "pointer" }}
+              >
+                ×
+              </button>
+            </div>
+
+            <div style={{ fontSize: "12px", color: "#64748b", marginBottom: "16px", lineHeight: "1.5" }}>
+              Rename this VLAN to match your company structure (e.g. <strong>HR Management</strong>, <strong>IT Operations</strong>, <strong>Finance</strong>). The new name will be updated live on the switch and NETOPS.
+            </div>
+
+            {/* QUICK DEPARTMENT PRESET BADGES */}
+            <div style={{ marginBottom: "16px" }}>
+              <label style={{ display: "block", fontSize: "11px", fontWeight: "700", color: "#475569", marginBottom: "6px", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                1-Click Department Presets
+              </label>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                {DEPARTMENT_PRESETS.map((dept) => (
+                  <button
+                    key={dept.name}
+                    type="button"
+                    onClick={() => {
+                      setEditVlanName(dept.name);
+                      setEditVlanDescription(dept.desc);
+                      if (dept.subnet) {
+                        setEditVlanSubnet(dept.subnet);
+                      }
+                    }}
+                    style={{
+                      background: editVlanName === dept.name ? "#eff6ff" : "#f8fafc",
+                      border: `1px solid ${editVlanName === dept.name ? "#2563eb" : "#cbd5e1"}`,
+                      color: editVlanName === dept.name ? "#1d4ed8" : "#334155",
+                      padding: "4px 10px",
+                      borderRadius: "6px",
+                      fontSize: "11px",
+                      fontWeight: "700",
+                      cursor: "pointer",
+                      transition: "all 0.15s ease",
+                    }}
+                  >
+                    {dept.name.replace(/_/g, " ")}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <form onSubmit={handleSaveEditVlan}>
+              <div style={{ marginBottom: "12px" }}>
+                <label style={{ display: "block", fontSize: "12px", fontWeight: "600", color: "#334155", marginBottom: "4px" }}>
+                  VLAN ID (Locked)
+                </label>
+                <input
+                  type="text"
+                  value={`VLAN ${editingVlan.vlan_id}`}
+                  disabled
+                  style={{ width: "100%", padding: "8px 12px", borderRadius: "6px", border: "1px solid #e2e8f0", background: "#f1f5f9", fontSize: "13px", fontWeight: "800", color: "#475569" }}
+                />
+              </div>
+
+              <div style={{ marginBottom: "12px" }}>
+                <label style={{ display: "block", fontSize: "12px", fontWeight: "600", color: "#334155", marginBottom: "4px" }}>
+                  Department / VLAN Name *
+                </label>
+                <input
+                  type="text"
+                  style={{ width: "100%", padding: "8px 12px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
+                  placeholder="e.g. HR_Management or IT_Operations"
+                  value={editVlanName}
+                  onChange={(e) => setEditVlanName(e.target.value)}
+                  disabled={savingEditVlan}
+                  required
+                />
+              </div>
+
+              <div style={{ marginBottom: "12px" }}>
+                <label style={{ display: "block", fontSize: "12px", fontWeight: "600", color: "#334155", marginBottom: "4px" }}>
+                  Subnet CIDR (Optional)
+                </label>
+                <input
+                  type="text"
+                  style={{ width: "100%", padding: "8px 12px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
+                  placeholder="e.g. 192.168.10.0/24"
+                  value={editVlanSubnet}
+                  onChange={(e) => setEditVlanSubnet(e.target.value)}
+                  disabled={savingEditVlan}
+                />
+              </div>
+
+              <div style={{ marginBottom: "16px" }}>
+                <label style={{ display: "block", fontSize: "12px", fontWeight: "600", color: "#334155", marginBottom: "4px" }}>
+                  Purpose / Department Description
+                </label>
+                <input
+                  type="text"
+                  style={{ width: "100%", padding: "8px 12px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
+                  placeholder="e.g. Human Resources staff, recruitment & onboarding"
+                  value={editVlanDescription}
+                  onChange={(e) => setEditVlanDescription(e.target.value)}
+                  disabled={savingEditVlan}
+                />
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
+                <button
+                  type="button"
+                  className="secondary-button small"
+                  onClick={() => setEditingVlan(null)}
+                  disabled={savingEditVlan}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="primary-button small"
+                  disabled={savingEditVlan}
+                >
+                  {savingEditVlan ? "Updating Switch..." : "💾 Save & Deploy to Switch"}
                 </button>
               </div>
             </form>

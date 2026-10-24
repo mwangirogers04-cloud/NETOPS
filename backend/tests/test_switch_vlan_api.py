@@ -454,4 +454,55 @@ def test_assign_port_trunk_and_uplinks(client, db_session):
     assert p24 is not None and p24["mode"] == "trunk"
 
 
+def test_update_vlan_custom_department(client, db_session):
+    """Test updating an existing VLAN to customize it for company departments (e.g., HR, IT Operations)."""
+    admin = User(
+        username="hr_admin",
+        email="hr_admin@netops.local",
+        hashed_password=hash_password("Admin@1234"),
+        role="admin",
+        is_active=True,
+        is_verified=True,
+    )
+    db_session.add(admin)
+    db_session.commit()
+
+    token = create_access_token({"sub": admin.username, "role": admin.role, "user_id": admin.id})
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # 1. Create VLAN 35
+    create_res = client.post(
+        "/switches/vlans",
+        headers=headers,
+        json={"vlan_id": 35, "name": "Temp_Segment", "description": "Old temp segment"},
+    )
+    assert create_res.status_code == 200
+
+    # 2. Update VLAN 35 to "HR_Management" with custom department description & subnet
+    update_res = client.put(
+        "/switches/vlans/35",
+        headers=headers,
+        json={
+            "name": "HR_Management",
+            "description": "Human Resources, Payroll and Staff Onboarding",
+            "subnet": "192.168.35.0/24",
+        },
+    )
+    assert update_res.status_code == 200
+    data = update_res.json()
+    assert data["success"] is True
+    assert data["vlan_id"] == 35
+    assert data["name"] == "HR_Management"
+    assert data["subnet"] == "192.168.35.0/24"
+
+    # 3. Verify in GET /switches/vlans list
+    vlans_list = client.get("/switches/vlans").json()
+    v35 = next((v for v in vlans_list if v["vlan_id"] == 35), None)
+    assert v35 is not None
+    assert v35["name"] == "HR_Management"
+    assert v35["description"] == "Human Resources, Payroll and Staff Onboarding"
+    assert v35["subnet"] == "192.168.35.0/24"
+
+
+
 

@@ -61,6 +61,12 @@ class CreateVlanRequest(BaseModel):
     subnet: str | None = None
 
 
+class UpdateVlanRequest(BaseModel):
+    name: str = Field(..., description="VLAN name, e.g. 'HR_Management' or 'IT_Operations'")
+    description: str | None = None
+    subnet: str | None = None
+
+
 class AssignPortVlanRequest(BaseModel):
     port_name: str = Field(..., description="Switch physical port, e.g. 'GigabitEthernet0/1'")
     vlan_id: int = Field(1, ge=1, le=4094, description="Target VLAN ID (or Native VLAN for Trunk)")
@@ -390,6 +396,71 @@ def create_switch_vlan(
         "vlan_id": req.vlan_id,
         "name": clean_name,
         "message": f"VLAN {req.vlan_id} ('{clean_name}') successfully provisioned on switch.",
+        "commands_applied": result.get("commands_applied", []),
+    }
+
+
+@router.put("/vlans/{vlan_id}")
+def update_switch_vlan(
+    vlan_id: int,
+    req: UpdateVlanRequest,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Update an existing VLAN name, description, and subnet on both switch and database.
+    Allows companies to configure custom department VLANs (e.g. HR Management, IT Operations, Finance).
+    """
+    clean_name = req.name.strip().replace(" ", "_")
+    driver = get_active_switch_driver(db)
+
+    # 1. Update on live switch
+    result = driver.create_vlan(vlan_id, clean_name)
+
+    # 2. Persist in database
+    existing = db.scalar(select(VlanConfig).where(VlanConfig.vlan_id == vlan_id))
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    if existing:
+        existing.name = clean_name
+        existing.description = req.description
+        existing.subnet = req.subnet
+        existing.updated_at = now
+    else:
+        existing = VlanConfig(
+            vlan_id=vlan_id,
+            name=clean_name,
+            description=req.description,
+            subnet=req.subnet,
+            is_quarantine=vlan_id == 90,
+            created_by=current_user.username,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(existing)
+
+    db.commit()
+
+    # 3. Audit log
+    create_event(
+        db=db,
+        event_type="vlan_updated",
+        message=(
+            f"VLAN {vlan_id} updated to '{clean_name}' ({req.description or 'Custom department'}) "
+            f"by {current_user.role} '{current_user.username}'."
+        ),
+        device_id=None,
+        actor=current_user.username,
+    )
+    db.commit()
+
+    return {
+        "success": True,
+        "vlan_id": vlan_id,
+        "name": clean_name,
+        "description": req.description,
+        "subnet": req.subnet,
+        "message": f"VLAN {vlan_id} successfully updated to '{clean_name}' on switch and database.",
         "commands_applied": result.get("commands_applied", []),
     }
 
