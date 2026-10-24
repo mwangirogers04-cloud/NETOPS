@@ -201,7 +201,7 @@ async def event_broadcaster():
 
 
 async def scheduled_patch_loop():
-    """Evaluate scheduled patch remediation jobs and auto off-hours policy every 10 seconds."""
+    """Evaluate scheduled patch remediation jobs and auto off-hours policy every 3 seconds."""
     while True:
         db = SessionLocal()
         try:
@@ -212,7 +212,7 @@ async def scheduled_patch_loop():
             print(f"[PATCH-SCHEDULER] Error in patch scheduler loop: {err}")
         finally:
             db.close()
-        await asyncio.sleep(10)
+        await asyncio.sleep(3)
 
 
 @app.on_event("startup")

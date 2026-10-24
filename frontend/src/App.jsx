@@ -1007,19 +1007,51 @@ const loadEvents = async () => {
     loadDetectedSubnets();
   }, [currentUser]);
 
+  // ------------------------------------------------------------
+  // REAL-TIME BACKGROUND AUTO-REFRESH & DATA SYNCHRONIZATION
+  // Continuously refreshes devices, pending approvals, patch jobs,
+  // access schedules, and events in the background so pending items
+  // update automatically without requiring manual page reloads.
+  // ------------------------------------------------------------
   useEffect(() => {
     if (!currentUser) return;
 
+    let cycle = 0;
     const timer = setInterval(() => {
-      const hasActiveJob = patchJobs.some((j) => j.status === "PENDING" || j.status === "IN_PROGRESS");
-      if (hasActiveJob) {
-        loadPatchJobs();
-      }
+      cycle += 1;
+      // Core devices & patch jobs refresh every 3 seconds
       loadDevices();
-    }, 4000);
+      loadPatchJobs();
 
-    return () => clearInterval(timer);
-  }, [currentUser, patchJobs]);
+      // Schedules & events refresh every 6 seconds
+      if (cycle % 2 === 0) {
+        loadAccessSchedules();
+        loadEvents();
+      }
+
+      // Subnets refresh every 15 seconds
+      if (cycle % 5 === 0) {
+        loadDetectedSubnets();
+      }
+    }, 3000);
+
+    const onWindowActive = () => {
+      loadDevices();
+      loadPatchJobs();
+      loadAccessSchedules();
+      loadEvents();
+      window.dispatchEvent(new CustomEvent("netops:refresh"));
+    };
+
+    window.addEventListener("focus", onWindowActive);
+    window.addEventListener("online", onWindowActive);
+
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("focus", onWindowActive);
+      window.removeEventListener("online", onWindowActive);
+    };
+  }, [currentUser]);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -1086,6 +1118,7 @@ const loadEvents = async () => {
         loadUpdatePolicy(),
         loadDetectedSubnets(),
       ]);
+      window.dispatchEvent(new CustomEvent("netops:refresh"));
     } finally {
       setRefreshingAll(false);
     }
@@ -1131,6 +1164,7 @@ const loadEvents = async () => {
     if (event.event_type.startsWith("patch_job_")) {
       loadPatchJobs();
       loadDevices();
+      window.dispatchEvent(new CustomEvent("netops:refresh"));
     }
 
     if (
@@ -1139,6 +1173,8 @@ const loadEvents = async () => {
       event.event_type === "device_online"
     ) {
       loadDevices();
+      loadAccessSchedules();
+      window.dispatchEvent(new CustomEvent("netops:refresh"));
 
       // Only notify while the device is still awaiting approval.
       let stillPending = false;
@@ -1165,14 +1201,12 @@ const loadEvents = async () => {
         setHighlightedDeviceId(event.device_id);
       }
       playLanNotificationChime();
-    } else if (
-      event.event_type === "device_offline" ||
-      event.event_type === "ip_address_changed" ||
-      event.event_type === "access_enforcement" ||
-      event.event_type === "scheduled_access_allowed" ||
-      event.event_type === "scheduled_access_quarantined"
-    ) {
+    } else {
+      // Any other connection, access, isolation, or schedule transition event
       loadDevices();
+      loadPatchJobs();
+      loadAccessSchedules();
+      window.dispatchEvent(new CustomEvent("netops:refresh"));
     }
   };
 
@@ -8237,10 +8271,19 @@ return (
 
     const refreshInterval = setInterval(() => {
       loadDashboardEndpointUpdates();
-    }, 60000);
+    }, 3500);
+
+    const onSyncTrigger = () => {
+      loadDashboardEndpointUpdates();
+    };
+
+    window.addEventListener("netops:refresh", onSyncTrigger);
+    window.addEventListener("focus", onSyncTrigger);
 
     return () => {
       clearInterval(refreshInterval);
+      window.removeEventListener("netops:refresh", onSyncTrigger);
+      window.removeEventListener("focus", onSyncTrigger);
     };
   }, [currentUser]);
 
@@ -9074,10 +9117,19 @@ const Dashboard = () => {
 
     const refreshInterval = setInterval(() => {
       loadEndpointUpdates(true);
-    }, 30000);
+    }, 3500);
+
+    const onSyncTrigger = () => {
+      loadEndpointUpdates(true);
+    };
+
+    window.addEventListener("netops:refresh", onSyncTrigger);
+    window.addEventListener("focus", onSyncTrigger);
 
     return () => {
       clearInterval(refreshInterval);
+      window.removeEventListener("netops:refresh", onSyncTrigger);
+      window.removeEventListener("focus", onSyncTrigger);
     };
   }, [currentUser]);
 
@@ -12630,9 +12682,14 @@ const EndpointUpdatesPage = () => {
             </div>
 
             <div className="topbar-right" style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-              <div className="live-indicator">
+              <div
+                className="live-indicator"
+                style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px" }}
+                onClick={refreshAll}
+                title="System automatically synchronizes in the background every 3 seconds. Click to trigger instant refresh."
+              >
                 <span className="live-dot" />
-                Live monitoring
+                <span>{refreshingAll ? "Syncing..." : "Auto-Refresh Active"}</span>
               </div>
 
               <button
