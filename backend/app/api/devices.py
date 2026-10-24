@@ -26,6 +26,9 @@ from ..services.network_enforcement import enforce_device_access
 from ..services.vlan_automation import automate_vlan_assignment
 from ..services.event_service import create_event
 from ..services.auth_service import get_optional_current_user
+from ..services.firewall.manager import get_active_firewall_driver
+from ..services.l2_quarantine import quarantine_device_l2
+from ..services.sophos_enforcement import is_sophos_configured, sophos_block_device
 
 
 router = APIRouter(
@@ -51,11 +54,11 @@ def add_access_information(device: Device):
     if device.enforcement_status == "isolated":
         device.access_decision = "isolated"
 
-    elif device.enforcement_status == "allowed":
-        device.access_decision = "allowed"
-
     elif device.approval_status in {"pending", "rejected"}:
         device.access_decision = "quarantine"
+
+    elif device.enforcement_status == "allowed":
+        device.access_decision = "allowed"
 
     else:
         device.access_decision = "quarantine"
@@ -69,11 +72,6 @@ def add_access_information(device: Device):
     if device.enforcement_status == "isolated":
         device.access_reason = (
             "Device is explicitly isolated from the network (VLAN 90)"
-        )
-
-    elif device.enforcement_status == "allowed" and device.approval_status == "rejected":
-        device.access_reason = (
-            "Device rejected by policy, but currently allowed internet access via active schedule"
         )
 
     elif device.approval_status in {"pending", "rejected"}:
@@ -298,8 +296,9 @@ def approve_device(
     # explicitly clicks "Allow Internet".
     device.enforcement_status = "quarantined"
 
-    actor_username = current_user.username if current_user else "administrator"
-    actor_label = f"{current_user.role} '{current_user.username}'" if current_user else "administrator"
+    has_user = isinstance(current_user, User) or (current_user and hasattr(current_user, "username") and not hasattr(current_user, "dependency"))
+    actor_username = current_user.username if has_user else "administrator"
+    actor_label = f"{current_user.role} '{current_user.username}'" if has_user else "administrator"
 
     create_event(
         db,
@@ -375,8 +374,9 @@ def reject_device(
         force=True,
     )
 
-    actor_username = current_user.username if current_user else "administrator"
-    actor_label = f"{current_user.role} '{current_user.username}'" if current_user else "administrator"
+    has_user = isinstance(current_user, User) or (current_user and hasattr(current_user, "username") and not hasattr(current_user, "dependency"))
+    actor_username = current_user.username if has_user else "administrator"
+    actor_label = f"{current_user.role} '{current_user.username}'" if has_user else "administrator"
 
     create_event(
         db,
@@ -1133,8 +1133,45 @@ def reset_device_for_experiment(
 # PERMANENTLY DELETE DEVICE
 # ------------------------------------------------------------
 
+def _quarantine_and_block_device_on_network(db: Session, device: Device):
+    """
+    Ensure a deleted device is strictly denied internet access across all
+    live network controls (firewall drivers, live Layer 2 quarantine, and Sophos).
+    """
+    ip_address = device.ip_address
+    mac_address = device.mac_address
+    hostname = device.hostname or "Deleted Host"
+    dev_iface = getattr(device, "network_interface", None)
+    clean_iface = dev_iface if isinstance(dev_iface, str) else None
+
+    # 1. Layer 2 ARP quarantine / port isolation
+    if ip_address and mac_address:
+        try:
+            quarantine_device_l2(
+                ip_address,
+                mac_address,
+                burst=3,
+                interface=clean_iface,
+            )
+        except Exception:
+            pass
+
+    # 2. Live Firewall blocking
+    try:
+        active_driver = get_active_firewall_driver(db)
+        if active_driver.vendor != "sophos" and active_driver.is_configured() and ip_address:
+            active_driver.block_device(ip_address, hostname, mac_address)
+        elif is_sophos_configured() and ip_address:
+            sophos_block_device(ip_address, hostname)
+    except Exception:
+        pass
+
+
 def _purge_device_records(db: Session, device: Device):
     """Purge all foreign key dependencies and state related to a device."""
+    # Block and quarantine device on firewall & switch before database removal
+    _quarantine_and_block_device_on_network(db, device)
+
     device_id = device.id
     mac = device.mac_address
     hostname = device.hostname
@@ -1191,8 +1228,9 @@ def delete_device_permanently(
 
     _purge_device_records(db, device)
 
-    actor_username = current_user.username if current_user else "administrator"
-    actor_label = f"{current_user.role} '{current_user.username}'" if current_user else "administrator"
+    has_user = isinstance(current_user, User) or (current_user and hasattr(current_user, "username") and not hasattr(current_user, "dependency"))
+    actor_username = current_user.username if has_user else "administrator"
+    actor_label = f"{current_user.role} '{current_user.username}'" if has_user else "administrator"
 
     # Log permanent deletion event
     create_event(
@@ -1200,7 +1238,8 @@ def delete_device_permanently(
         "device_permanently_deleted",
         (
             f"Machine permanently deleted from inventory by {actor_label}: {hostname} ({ip_address} / {mac_address}). "
-            f"All telemetry, schedules, and history cleared. Future connections will be treated as a brand new device."
+            f"Internet access immediately denied and device quarantined across firewalls and switches. "
+            f"Future connections will be treated as new devices requiring full approval procedure."
         ),
         None,
         actor=actor_username,
@@ -1209,7 +1248,7 @@ def delete_device_permanently(
 
     return {
         "status": "deleted",
-        "message": f"Device '{hostname}' ({mac_address}) permanently deleted. It will be treated as a new machine upon reconnecting.",
+        "message": f"Device '{hostname}' ({mac_address}) permanently deleted and denied internet access. It will be treated as a new machine upon reconnecting.",
         "device_id": device_id,
         "mac_address": mac_address,
     }
@@ -1241,8 +1280,9 @@ def bulk_delete_devices_permanently(
         _purge_device_records(db, device)
         deleted_count += 1
 
-    actor_username = current_user.username if current_user else "administrator"
-    actor_label = f"{current_user.role} '{current_user.username}'" if current_user else "administrator"
+    has_user = isinstance(current_user, User) or (current_user and hasattr(current_user, "username") and not hasattr(current_user, "dependency"))
+    actor_username = current_user.username if has_user else "administrator"
+    actor_label = f"{current_user.role} '{current_user.username}'" if has_user else "administrator"
 
     create_event(
         db,

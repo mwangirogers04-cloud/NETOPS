@@ -1009,15 +1009,20 @@ def save_discovered_devices(
                 status="online",
                 approval_status="pending",
                 ip_assignment="dhcp",
-                vlan_id=get_vlan_for_device_type(
-                    detected_type
-                ),
+                vlan_id=90,
+                enforcement_status="quarantined",
+                internet_access_authorized=False,
             )
 
             db.add(new_device)
             db.flush()
 
             saved_devices.append(new_device)
+
+            try:
+                enforce_device_access(new_device, db, force=True)
+            except Exception:
+                pass
 
             create_event(
                 db,

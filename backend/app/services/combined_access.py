@@ -52,26 +52,51 @@ def get_combined_access_decision(
     # ---------------------------------------------------------
     if has_active_schedule:
         if schedule_allows_access:
+            if device.approval_status == "rejected":
+                return {
+                    "device_id": device.id,
+                    "ip_address": device.ip_address,
+                    "mac_address": device.mac_address,
+                    "approval_status": device.approval_status,
+                    "schedule_allows_access": True,
+                    "decision": "quarantine",
+                    "reason": "schedule_active_waiting_for_admin_approval",
+                    "action": "quarantine",
+                    "mode": "simulation",
+                }
             current_appr = (
-                device.approval_status
-                if device.approval_status == "rejected"
-                else ("approved" if recognized_type else device.approval_status)
+                "approved"
+                if (recognized_type or device.approval_status == "approved")
+                else device.approval_status
             )
-            return {
-                "device_id": device.id,
-                "ip_address": device.ip_address,
-                "mac_address": device.mac_address,
-                "approval_status": current_appr,
-                "schedule_allows_access": True,
-                "decision": "allowed",
-                "reason": (
-                    "approved_and_within_schedule"
-                    if current_appr == "approved"
-                    else "scheduled_access_allowed"
-                ),
-                "action": "allow",
-                "mode": "simulation",
-            }
+            if current_appr == "approved":
+                return {
+                    "device_id": device.id,
+                    "ip_address": device.ip_address,
+                    "mac_address": device.mac_address,
+                    "approval_status": current_appr,
+                    "schedule_allows_access": True,
+                    "decision": "allowed",
+                    "reason": (
+                        "approved_and_within_schedule"
+                        if device.approval_status == "approved"
+                        else "scheduled_access_allowed"
+                    ),
+                    "action": "allow",
+                    "mode": "simulation",
+                }
+            else:
+                return {
+                    "device_id": device.id,
+                    "ip_address": device.ip_address,
+                    "mac_address": device.mac_address,
+                    "approval_status": device.approval_status,
+                    "schedule_allows_access": True,
+                    "decision": "quarantine",
+                    "reason": "device_not_approved",
+                    "action": "quarantine",
+                    "mode": "simulation",
+                }
         else:
             return {
                 "device_id": device.id,

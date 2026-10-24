@@ -569,17 +569,19 @@ def test_delete_last_access_schedule_removes_device_from_quarantine(db_session):
         mock_restore_l2.assert_called_once()
 
 
-def test_rejected_device_remains_scheduled_leaves_quarantine_zone_on_schedule_and_returns_unless_reset(db_session):
+def test_rejected_device_scheduled_waits_for_admin_until_given_internet_access(db_session):
     """
-    When a new device is detected and rejected:
-    1. Outside schedule, it remains scheduled, quarantined since it is rejected (VLAN 90, quarantined).
-    2. During its active schedule window, it removes itself from quarantine zone (VLAN 90 -> VLAN 20)
-       and accesses internet (enforcement_status='allowed').
-    3. It remains in the schedule and retains approval_status='rejected'.
-    4. Outside schedule hours, it moves back to quarantine (VLAN 90).
-    5. It stays in the schedule cycle unless the schedule is reset.
+    1. A new device is detected and rejected: denied internet and quarantined in VLAN 90.
+    2. An access schedule is set for it.
+    3. Outside scheduled time: no internet, quarantined.
+    4. When scheduled time arrives: it does NOT get internet automatically; it MUST STILL WAIT
+       for the admin or developer to give it internet access since it is a new/rejected device.
+    5. Once the admin or developer approves/allows internet access:
+       - During active schedule window: leaves quarantine and accesses internet on VLAN 20.
+       - Outside schedule window: returns to quarantine.
+    6. When schedule is reset: schedule is cleared without auto-approving if rejected.
     """
-    from backend.app.api.devices import add_access_information
+    from backend.app.api.devices import add_access_information, allow_device, approve_device
     from backend.app.api.access_schedules import reset_device_schedules
 
     dev = Device(
@@ -609,49 +611,66 @@ def test_rejected_device_remains_scheduled_leaves_quarantine_zone_on_schedule_an
     db_session.commit()
     db_session.refresh(schedule)
 
-    # 1. During active schedule window: leaves quarantine zone and accesses internet
-    with (
-        patch("backend.app.services.network_enforcement.is_access_allowed", return_value=True),
-        patch("backend.app.services.network_enforcement.is_sophos_configured", return_value=False),
-        patch("backend.app.services.network_enforcement.restore_device_l2") as mock_restore,
-    ):
-        res = enforce_device_access(dev, db_session, force=True)
-
-        assert res["decision"] == "allowed"
-        assert dev.enforcement_status == "allowed"
-        assert dev.vlan_id == 20  # Removed itself from quarantine zone (VLAN 90 -> VLAN 20)
-        assert dev.internet_access_authorized is True
-        assert dev.approval_status == "rejected"  # Retains rejected status
-        mock_restore.assert_called_once()
-
-        # Check API access information
-        add_access_information(dev)
-        assert dev.access_decision == "allowed"
-        assert "schedule" in dev.access_reason.lower()
-
-    # 2. Outside schedule window: automatically moves back to quarantine on VLAN 90
+    # 1. Outside scheduled time: denied internet and quarantined in VLAN 90
     with (
         patch("backend.app.services.network_enforcement.is_access_allowed", return_value=False),
         patch("backend.app.services.network_enforcement.is_sophos_configured", return_value=False),
         patch("backend.app.services.network_enforcement.quarantine_device_l2") as mock_quar,
     ):
         res_outside = enforce_device_access(dev, db_session, force=True)
-
         assert res_outside["decision"] == "quarantine"
         assert dev.enforcement_status == "quarantined"
-        assert dev.vlan_id == 90  # Back in quarantine zone
+        assert dev.vlan_id == 90
         assert dev.internet_access_authorized is False
-        assert dev.approval_status == "rejected"  # Still rejected and still scheduled
-        mock_quar.assert_called_once()
 
-        # Schedule remains active
-        active_scheds = db_session.query(AccessSchedule).filter(
-            AccessSchedule.device_id == dev.id,
-            AccessSchedule.enabled.is_(True),
-        ).all()
-        assert len(active_scheds) == 1
+    # 2. When scheduled time reaches: STILL WAITS for admin/developer to give it internet access
+    with (
+        patch("backend.app.services.network_enforcement.is_access_allowed", return_value=True),
+        patch("backend.app.services.network_enforcement.is_sophos_configured", return_value=False),
+        patch("backend.app.services.network_enforcement.quarantine_device_l2"),
+    ):
+        res_sched = enforce_device_access(dev, db_session, force=True)
+        # Even though schedule allows access, rejected device must wait for admin/dev
+        assert res_sched["decision"] == "quarantine"
+        assert dev.enforcement_status == "quarantined"
+        assert dev.vlan_id == 90
+        assert dev.internet_access_authorized is False
+        assert dev.approval_status == "rejected"
 
-    # 3. When schedule is reset: schedule is removed
+        add_access_information(dev)
+        assert dev.access_decision == "quarantine"
+        assert dev.access_reason == "Rejected by administrator"
+
+    # 3. Admin gives it internet access (approve and allow)
+    dev.approval_status = "approved"
+    dev.internet_access_authorized = True
+    db_session.commit()
+
+    # Now when scheduled time is reached, it leaves quarantine and accesses internet
+    with (
+        patch("backend.app.services.network_enforcement.is_access_allowed", return_value=True),
+        patch("backend.app.services.network_enforcement.is_sophos_configured", return_value=False),
+        patch("backend.app.services.network_enforcement.restore_device_l2") as mock_restore,
+    ):
+        res_allowed = enforce_device_access(dev, db_session, force=True)
+        assert res_allowed["decision"] == "allowed"
+        assert dev.enforcement_status == "allowed"
+        assert dev.vlan_id == 20
+        assert dev.internet_access_authorized is True
+        mock_restore.assert_called_once()
+
+    # Outside schedule window: returns to quarantine
+    with (
+        patch("backend.app.services.network_enforcement.is_access_allowed", return_value=False),
+        patch("backend.app.services.network_enforcement.is_sophos_configured", return_value=False),
+        patch("backend.app.services.network_enforcement.quarantine_device_l2"),
+    ):
+        res_back = enforce_device_access(dev, db_session, force=True)
+        assert res_back["decision"] == "quarantine"
+        assert dev.enforcement_status == "quarantined"
+        assert dev.vlan_id == 90
+
+    # 4. Resetting the schedule clears the schedule
     with (
         patch("backend.app.services.network_enforcement.is_sophos_configured", return_value=False),
         patch("backend.app.services.network_enforcement.restore_device_l2"),
@@ -663,6 +682,82 @@ def test_rejected_device_remains_scheduled_leaves_quarantine_zone_on_schedule_an
             AccessSchedule.device_id == dev.id
         ).all()
         assert len(remaining_scheds) == 0
+
+
+def test_deleted_device_denied_internet_access_and_quarantined_until_procedure(db_session):
+    """
+    If an existing device is deleted from the system:
+    1. It is immediately denied internet access (firewall blocked and L2 quarantined).
+    2. Its records are purged from the inventory.
+    3. If it reconnects or is re-discovered, it is placed in Quarantine VLAN 90
+       with pending approval and denied internet access until it goes through the procedure.
+    """
+    from backend.app.api.devices import delete_device_permanently
+    from backend.app.services.discovery import save_discovered_devices
+
+    dev = Device(
+        mac_address="AA:BB:CC:DD:EE:99",
+        ip_address="192.168.0.99",
+        hostname="CORP-LAPTOP-99",
+        vendor="Dell Inc.",
+        device_type="computer",
+        approval_status="approved",
+        enforcement_status="allowed",
+        internet_access_authorized=True,
+        vlan_id=20,
+        status="online",
+    )
+    db_session.add(dev)
+    db_session.commit()
+    db_session.refresh(dev)
+
+    dev_id = dev.id
+    mac = dev.mac_address
+    ip = dev.ip_address
+
+    with (
+        patch("backend.app.api.devices.quarantine_device_l2") as mock_l2_quar,
+        patch("backend.app.api.devices.get_active_firewall_driver") as mock_fw_driver,
+    ):
+        mock_driver_instance = MagicMock()
+        mock_fw_driver.return_value = mock_driver_instance
+        mock_driver_instance.vendor = "simulation"
+        mock_driver_instance.is_configured.return_value = True
+
+        res = delete_device_permanently(dev_id, db=db_session)
+        assert res["status"] == "deleted"
+
+        # 1. Device was immediately denied internet access via L2 quarantine & firewall
+        mock_l2_quar.assert_called_once_with(ip, mac, burst=3, interface=None)
+        mock_driver_instance.block_device.assert_called_once_with(ip, "CORP-LAPTOP-99", mac)
+
+        # 2. Record purged from DB
+        assert db_session.get(Device, dev_id) is None
+
+    # 3. Deleted device reconnects and is detected by discovery
+    discovered_packet = [
+        {
+            "ip_address": ip,
+            "mac_address": mac,
+            "hostname": "CORP-LAPTOP-99",
+            "vendor": "Dell Inc.",
+        }
+    ]
+
+    with (
+        patch("backend.app.services.discovery.classify_device", return_value="computer"),
+        patch("backend.app.services.discovery.enforce_device_access") as mock_enf,
+    ):
+        saved = save_discovered_devices(discovered_packet, db_session)
+        assert len(saved) == 1
+        reconnected_dev = saved[0]
+
+        # Reconnecting device is treated as brand new: pending, quarantined in VLAN 90, no internet
+        assert reconnected_dev.approval_status == "pending"
+        assert reconnected_dev.enforcement_status == "quarantined"
+        assert reconnected_dev.vlan_id == 90
+        assert reconnected_dev.internet_access_authorized is False
+        mock_enf.assert_called_once()
 
 
 

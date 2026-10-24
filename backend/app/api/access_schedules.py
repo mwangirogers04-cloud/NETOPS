@@ -190,7 +190,7 @@ def delete_access_schedule(
                 if recognized_type:
                     device.device_type = recognized_type
 
-            if recognized_type:
+            if recognized_type and device.approval_status != "rejected":
                 device.approval_status = "approved"
                 device.internet_access_authorized = True
                 if getattr(device, "vlan_id", None) == 90 or not getattr(device, "vlan_id", None):
@@ -254,7 +254,7 @@ def reset_device_schedules(
         if recognized_type:
             device.device_type = recognized_type
 
-    if recognized_type:
+    if recognized_type and device.approval_status != "rejected":
         device.approval_status = "approved"
         device.internet_access_authorized = True
         if getattr(device, "vlan_id", None) == 90 or not getattr(device, "vlan_id", None):
