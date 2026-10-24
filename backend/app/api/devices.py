@@ -198,7 +198,10 @@ def get_devices(
 
         for device in devices:
             d_mac = device.mac_address.replace(":", "").replace("-", "").upper() if device.mac_address else None
-            if device.status == "offline" and ((d_mac and d_mac in active_entries) or (device.ip_address and device.ip_address in active_entries)):
+            # Quarantined or isolated devices must read offline until authorized for internet
+            if device.enforcement_status in ("quarantined", "isolated") or not getattr(device, "internet_access_authorized", True):
+                device.status = "offline"
+            elif device.status == "offline" and ((d_mac and d_mac in active_entries) or (device.ip_address and device.ip_address in active_entries)):
                 device.status = "online"
                 device.last_seen = datetime.now()
     except Exception:
@@ -245,7 +248,7 @@ def create_device(
         **device_data.model_dump(
             exclude={"vlan_id"}
         ),
-        status="online",
+        status="offline",
         approval_status="pending",
         classification_status="normal",
 
@@ -254,6 +257,7 @@ def create_device(
 
         # New devices are blocked until explicitly allowed.
         enforcement_status="quarantined",
+        internet_access_authorized=False,
     )
 
     db.add(device)

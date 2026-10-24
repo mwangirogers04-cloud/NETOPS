@@ -43,8 +43,7 @@ async def schedule_enforcement_loop():
                     db.commit()
 
                     if (
-                        device.status == "online"
-                        and device.ip_address
+                        device.ip_address
                         and device.mac_address
                         and device.enforcement_status in ("quarantined", "isolated")
                     ):

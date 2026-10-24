@@ -835,10 +835,11 @@ def test_disconnected_quarantined_device_scheduled_remains_quarantined_until_sta
         assert dev.enforcement_status == "allowed"
         assert dev.vlan_id == 20
         assert dev.internet_access_authorized is True
+        assert dev.status == "online"
         mock_restore.assert_called_once()
 
     # 4. Time reaches 18:30:01 (window closes)
-    # It automatically quarantines itself back to VLAN 90 until next cycle
+    # It automatically quarantines itself back to VLAN 90 until next cycle and changes status to offline
     with (
         patch("backend.app.services.network_enforcement.is_sophos_configured", return_value=False),
         patch("backend.app.services.network_enforcement.quarantine_device_l2") as mock_quar2,
@@ -853,7 +854,64 @@ def test_disconnected_quarantined_device_scheduled_remains_quarantined_until_sta
         assert dev.enforcement_status == "quarantined"
         assert dev.vlan_id == 90
         assert dev.internet_access_authorized is False
+        assert dev.status == "offline"
         mock_quar2.assert_called_once()
+
+
+def test_device_isolation_and_quarantine_enforce_offline_until_allowed(db_session):
+    """
+    When a device is isolated or quarantined, its connection status must immediately
+    change to offline until it is granted internet access (online).
+    """
+    dev = Device(
+        mac_address="50:65:F3:11:22:33",
+        ip_address="192.168.0.77",
+        hostname="OFFICE-PC",
+        vendor="Lenovo",
+        device_type="computer",
+        approval_status="approved",
+        enforcement_status="allowed",
+        internet_access_authorized=True,
+        vlan_id=20,
+        status="online",
+    )
+    db_session.add(dev)
+    db_session.commit()
+    db_session.refresh(dev)
+
+    # 1. Device is isolated -> immediately status becomes offline
+    dev.enforcement_status = "isolated"
+    dev.internet_access_authorized = False
+    with (
+        patch("backend.app.services.network_enforcement.is_sophos_configured", return_value=False),
+        patch("backend.app.services.network_enforcement.quarantine_device_l2"),
+    ):
+        enforce_device_access(dev, db_session, force=True)
+        assert dev.status == "offline"
+        assert dev.enforcement_status == "isolated"
+
+    # 2. Device unisolated to quarantined -> remains offline
+    dev.enforcement_status = "quarantined"
+    with (
+        patch("backend.app.services.network_enforcement.is_sophos_configured", return_value=False),
+        patch("backend.app.services.network_enforcement.quarantine_device_l2"),
+    ):
+        enforce_device_access(dev, db_session, force=True)
+        assert dev.status == "offline"
+        assert dev.enforcement_status == "quarantined"
+
+    # 3. Device granted internet access (allowed) -> immediately status becomes online
+    dev.internet_access_authorized = True
+    dev.enforcement_status = "quarantined"
+    dev.vlan_id = 20
+    with (
+        patch("backend.app.services.network_enforcement.is_sophos_configured", return_value=False),
+        patch("backend.app.services.network_enforcement.restore_device_l2"),
+    ):
+        enforce_device_access(dev, db_session, force=True)
+        assert dev.status == "online"
+        assert dev.enforcement_status == "allowed"
+
 
 
 

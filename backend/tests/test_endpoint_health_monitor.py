@@ -223,6 +223,9 @@ def test_offline_device_reconnected_transitions_to_online(monkeypatch):
         ip_address="192.168.0.12",
         hostname="HOST-192-168-0-12",
         status="offline",
+        approval_status="approved",
+        enforcement_status="allowed",
+        internet_access_authorized=True,
     )
     # Use a dummy non-mock class for db so is_mock_env is False
     class RealDbSession:
@@ -353,5 +356,66 @@ def test_endpoint_health_monitor_dhcp_ip_change_treated_as_new_machine(monkeypat
     assert "Treated as new machine" in new_dev_calls[0].kwargs["message"]
     assert "192.168.0.10" in new_dev_calls[0].kwargs["message"]
     assert "192.168.0.88" in new_dev_calls[0].kwargs["message"]
+
+
+def test_endpoint_health_monitor_quarantined_device_remains_offline(monkeypatch):
+    from unittest.mock import patch
+    from backend.app.models.device import Device
+
+    dev = Device(
+        id=47,
+        mac_address="F0:1F:AF:4C:6A:F1",
+        ip_address="192.168.0.15",
+        hostname="QUARANTINED-HOST",
+        status="offline",
+        approval_status="pending",
+        enforcement_status="quarantined",
+        internet_access_authorized=False,
+    )
+
+    class RealDbSession:
+        def __init__(self):
+            self.committed = False
+            self.closed = False
+        def scalars(self, query):
+            mock_res = MagicMock()
+            q_str = str(query).lower()
+            if "device" in q_str:
+                mock_res.all.return_value = [dev]
+            else:
+                mock_res.all.return_value = []
+            mock_res.first.return_value = None
+            return mock_res
+        def commit(self):
+            self.committed = True
+        def close(self):
+            self.closed = True
+        def rollback(self):
+            pass
+
+    db_instance = RealDbSession()
+    monkeypatch.setattr(monitor, "SessionLocal", lambda: db_instance)
+    event_mock = MagicMock()
+    monkeypatch.setattr(monitor, "create_event", event_mock)
+
+    async def stop_after_one_cycle(_seconds):
+        raise RuntimeError("stop test loop")
+
+    monkeypatch.setattr(monitor.asyncio, "sleep", stop_after_one_cycle)
+
+    with patch("backend.app.services.endpoint_health_monitor.subprocess.run") as mock_subproc:
+        fake_res = MagicMock()
+        fake_res.stdout = "192.168.0.15\tF0:1F:AF:4C:6A:F1\tDell Inc."
+        fake_res.returncode = 0
+        mock_subproc.return_value = fake_res
+
+        try:
+            asyncio.run(monitor.endpoint_health_monitor_loop())
+        except RuntimeError as err:
+            assert str(err) == "stop test loop"
+
+    # Even though seen via arp scan, device is quarantined/not internet authorized, so status must remain offline
+    assert dev.status == "offline"
+
 
 

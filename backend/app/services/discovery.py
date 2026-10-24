@@ -982,20 +982,27 @@ def save_discovered_devices(
                         "normal"
                     )
 
-            was_offline = (existing_device.status != "online")
-            existing_device.status = "online"
+            # Quarantined or isolated devices must read offline until authorized for internet
+            is_quarantined_or_isolated = (
+                existing_device.enforcement_status in ("quarantined", "isolated")
+                or not getattr(existing_device, "internet_access_authorized", True)
+            )
+            if is_quarantined_or_isolated:
+                existing_device.status = "offline"
+            else:
+                was_offline = (existing_device.status != "online")
+                existing_device.status = "online"
+                if was_offline:
+                    create_event(
+                        db,
+                        "device_online",
+                        (
+                            f"Device {existing_device.hostname or existing_device.ip_address} "
+                            f"({existing_device.mac_address}) reconnected and is back online on the LAN."
+                        ),
+                        existing_device.id,
+                    )
             saved_devices.append(existing_device)
-
-            if was_offline:
-                create_event(
-                    db,
-                    "device_online",
-                    (
-                        f"Device {existing_device.hostname or existing_device.ip_address} "
-                        f"({existing_device.mac_address}) reconnected and is back online on the LAN."
-                    ),
-                    existing_device.id,
-                )
 
             if ip_changed:
                 try:
@@ -1036,7 +1043,7 @@ def save_discovered_devices(
                 device_type=device_type,
                 network_interface=discovered.get("interface") or scanned_interface,
                 classification_status="normal",
-                status="online",
+                status="offline",
                 approval_status="pending",
                 ip_assignment="dhcp",
                 vlan_id=90,

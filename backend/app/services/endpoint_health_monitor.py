@@ -314,25 +314,35 @@ async def endpoint_health_monitor_loop():
 
                             if live_info.get("interface"):
                                 d.network_interface = live_info["interface"]
-                        if d.status != "online":
-                            d.status = "online"
-                            ev_type = "new_device" if d.approval_status == "pending" else "device_online"
-                            create_event(
-                                db=db,
-                                event_type=ev_type,
-                                message=(
-                                    f"Machine connected to LAN ({d.network_interface or 'eth0'}): "
-                                    f"{d.hostname or d.ip_address} ({d.ip_address or 'LAN'} / {d.mac_address}) "
-                                    f"[{d.vendor or 'LAN Device'}] — "
-                                    + (
-                                        f"Placed in VLAN {d.vlan_id or 90} Quarantine, awaiting administrator review."
-                                        if d.approval_status == "pending"
-                                        else f"Online on VLAN {d.vlan_id or 20} ({d.enforcement_status})."
-                                    )
-                                ),
-                                device_id=d.id,
-                            )
-                        online_devices.append(d)
+
+                        # Quarantined or isolated devices must read offline until authorized for internet
+                        is_quarantined_or_isolated = (
+                            d.enforcement_status in ("quarantined", "isolated")
+                            or not getattr(d, "internet_access_authorized", True)
+                        )
+                        expected_status = "offline" if is_quarantined_or_isolated else "online"
+
+                        if d.status != expected_status:
+                            d.status = expected_status
+                            if expected_status == "online":
+                                ev_type = "new_device" if d.approval_status == "pending" else "device_online"
+                                create_event(
+                                    db=db,
+                                    event_type=ev_type,
+                                    message=(
+                                        f"Machine connected to LAN ({d.network_interface or 'eth0'}): "
+                                        f"{d.hostname or d.ip_address} ({d.ip_address or 'LAN'} / {d.mac_address}) "
+                                        f"[{d.vendor or 'LAN Device'}] — "
+                                        + (
+                                            f"Placed in VLAN {d.vlan_id or 90} Quarantine, awaiting administrator review."
+                                            if d.approval_status == "pending"
+                                            else f"Online on VLAN {d.vlan_id or 20} ({d.enforcement_status})."
+                                        )
+                                    ),
+                                    device_id=d.id,
+                                )
+                        if expected_status == "online":
+                            online_devices.append(d)
                     else:
                         if d.status == "online":
                             misses = _consecutive_misses.get(d_key, 0) + 1
