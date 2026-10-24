@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models.user import User
-from .auth import clear_failed_login_attempts
+from .auth import clear_failed_login_attempts, get_password_expiry_info
 from ..services.event_service import create_event
 from ..services.auth_service import (
     check_user_conflicts,
@@ -114,6 +114,8 @@ class UserResponse(BaseModel):
     created_at: datetime
     created_by: str | None = None
     activation_link: str | None = None
+    password_changed_at: datetime | None = None
+    password_expiry: dict | None = None
 
 
 # -------------------------------------------------------------
@@ -152,6 +154,8 @@ def list_users(
                 created_at=u.created_at,
                 created_by=u.created_by,
                 activation_link=link,
+                password_changed_at=getattr(u, "password_changed_at", None),
+                password_expiry=get_password_expiry_info(u),
             )
         )
     return results
@@ -221,6 +225,7 @@ def create_user(
         is_verified=False,
         activation_token=token,
         created_by=current_user.username,
+        password_changed_at=datetime.now(timezone.utc).replace(tzinfo=None),
     )
     db.add(new_user)
     db.commit()
@@ -364,6 +369,7 @@ def update_user(
                 detail=str(exc),
             )
         user.hashed_password = hash_password(req.password)
+        user.password_changed_at = datetime.now(timezone.utc).replace(tzinfo=None)
         password_changed = True
 
     # Active status

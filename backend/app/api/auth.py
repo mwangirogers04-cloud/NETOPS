@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr, field_validator
@@ -51,6 +51,67 @@ def mask_string(val: str | None, is_email: bool = False) -> str | None:
         if len(clean) <= 4:
             return "***" + clean[-1:]
         return clean[:3] + "***" + clean[-3:]
+
+
+PASSWORD_EXPIRY_DAYS = 90  # Passwords expire after 3 months (90 days)
+
+
+def is_password_expired(user: User, current_datetime: datetime | None = None) -> bool:
+    """
+    Check if a user's password has expired (policy: every 3 months / 90 days).
+    Policy Rules:
+      1. Developers ('super_admin'): Password NEVER expires.
+      2. Administrators ('admin'): Expires after 3 months (admins are permitted to reset their own passwords).
+      3. Standard Users ('user'): Expires after 3 months (standard users cannot self-reset; must contact admin/developer).
+    """
+    if user.role == "super_admin":
+        return False
+
+    now = current_datetime or datetime.now(timezone.utc).replace(tzinfo=None)
+    changed_at = getattr(user, "password_changed_at", None) or getattr(user, "created_at", None) or now
+
+    return (now - changed_at).total_seconds() > (PASSWORD_EXPIRY_DAYS * 86400)
+
+
+def get_password_expiry_info(user: User, current_datetime: datetime | None = None) -> dict:
+    """Return comprehensive password expiration metadata for a given user."""
+    if user.role == "super_admin":
+        return {
+            "expires": False,
+            "is_expired": False,
+            "days_remaining": None,
+            "expires_at": None,
+            "must_change": False,
+            "can_self_reset": True,
+            "policy": "Developer passwords do not expire",
+            "message": "Developer passwords do not expire.",
+        }
+
+    now = current_datetime or datetime.now(timezone.utc).replace(tzinfo=None)
+    changed_at = getattr(user, "password_changed_at", None) or getattr(user, "created_at", None) or now
+    age_seconds = (now - changed_at).total_seconds()
+    expiry_seconds = PASSWORD_EXPIRY_DAYS * 86400
+    is_expired = age_seconds > expiry_seconds
+    remaining_seconds = max(0, expiry_seconds - age_seconds)
+    days_remaining = int(remaining_seconds // 86400)
+    expires_at = changed_at + timedelta(days=PASSWORD_EXPIRY_DAYS)
+
+    can_self_reset = user.role in ("admin", "super_admin")
+
+    return {
+        "expires": True,
+        "is_expired": is_expired,
+        "days_remaining": days_remaining if not is_expired else 0,
+        "expires_at": expires_at.isoformat(),
+        "must_change": is_expired,
+        "can_self_reset": can_self_reset,
+        "policy": "Passwords expire every 3 months (90 days)",
+        "message": (
+            "Password has expired after 3 months."
+            if is_expired
+            else f"Password expires in {days_remaining} day{'s' if days_remaining != 1 else ''}."
+        ),
+    }
 
 
 def _find_user_by_identifier(db: Session, identifier: str) -> User | None:
@@ -160,6 +221,17 @@ class AdminDirectResetPasswordRequest(BaseModel):
         return clean
 
 
+class ChangeExpiredPasswordRequest(BaseModel):
+    identifier: str
+    current_password: str
+    new_password: str
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
 # -------------------------------------------------------------
 # CHECK EMAIL / PHONE / USERNAME AVAILABILITY & SELF-REGISTER
 # -------------------------------------------------------------
@@ -238,6 +310,7 @@ def register_account(
         is_active=True,
         is_verified=True,
         activation_token=None,
+        password_changed_at=datetime.now(timezone.utc).replace(tzinfo=None),
     )
     db.add(new_user)
     db.commit()
@@ -327,6 +400,25 @@ def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
             detail="Account is currently deactivated. Contact your administrator.",
         )
 
+    # 3-Month Password Expiration Policy (90 Days)
+    # Policy rules:
+    #   1. Developers ('super_admin'): Password NEVER expires.
+    #   2. Administrators ('admin'): Expires after 3 months; admins can reset their own password.
+    #   3. Standard Users ('user'): Expires after 3 months; standard users cannot self-reset and must contact an administrator or developer.
+    if is_password_expired(user):
+        if user.role == "user":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Your password has expired after 3 months. Standard users are required to contact the Administrator or Developer to reset the password.",
+                headers={"X-Password-Expired": "user"},
+            )
+        elif user.role == "admin":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Your Administrator password has expired after 3 months. Please reset or update your password to continue.",
+                headers={"X-Password-Expired": "admin"},
+            )
+
     # Success: reset failed attempts counter
     clear_failed_login_attempts(ident)
     if user.username:
@@ -378,6 +470,7 @@ def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
             "phone_number": user.phone_number,
             "role": user.role,
             "is_verified": user.is_verified,
+            "password_expiry": get_password_expiry_info(user),
         },
     }
 
@@ -420,6 +513,7 @@ def get_my_profile(
         "phone_number": current_user.phone_number,
         "role": current_user.role,
         "is_verified": current_user.is_verified,
+        "password_expiry": get_password_expiry_info(current_user),
     }
 
 
@@ -497,6 +591,7 @@ def activate_account(req: ActivateRequest, db: Session = Depends(get_db)):
 
     user.is_verified = True
     user.activation_token = None
+    user.password_changed_at = datetime.now(timezone.utc).replace(tzinfo=None)
     db.commit()
 
     return {
@@ -736,7 +831,9 @@ def reset_password(
     verify_and_consume_otp(db, user, req.otp_code)
 
     # Update password
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     user.hashed_password = hash_password(req.new_password)
+    user.password_changed_at = now
     user.is_verified = True  # Verified via OTP
     db.commit()
 
@@ -845,7 +942,9 @@ def admin_direct_reset_password(
             detail=str(exc),
         )
 
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     target_user.hashed_password = hash_password(req.new_password)
+    target_user.password_changed_at = now
     target_user.is_verified = True
     db.commit()
 
@@ -879,4 +978,199 @@ def admin_direct_reset_password(
             f"{role_label} '{authorizer.username}' (no OTP required). "
             f"'{target_user.username}' can now sign in with the new password."
         ),
+    }
+
+
+# -------------------------------------------------------------
+# CHANGE EXPIRED PASSWORD (ADMIN SELF-SERVICE ON EXPIRATION)
+# -------------------------------------------------------------
+
+@router.post("/change-expired-password")
+def change_expired_password(
+    req: ChangeExpiredPasswordRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """
+    Allow an Administrator (or Developer) to reset their expired password (policy: every 3 months)
+    by confirming their current password and providing a new compliant password.
+    Standard users are prohibited from self-resetting: they must contact an administrator or developer.
+    """
+    ident = req.identifier.strip().lower()
+    user = _find_user_by_identifier(db, ident)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Account not found. Please check your username or email.",
+        )
+
+    if not verify_password(req.current_password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Current password is incorrect.",
+        )
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is currently deactivated. Contact your administrator.",
+        )
+
+    # Policy enforcement: Standard users cannot reset their own password when expired
+    if user.role not in ("admin", "super_admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Standard users cannot reset their own password. "
+                "Please contact an Administrator or Developer to reset your password."
+            ),
+        )
+
+    try:
+        validate_password_complexity(req.new_password)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+
+    if verify_password(req.new_password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="New password must be different from your current password.",
+        )
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    user.hashed_password = hash_password(req.new_password)
+    user.password_changed_at = now
+    user.is_verified = True
+    db.commit()
+
+    role_label = (
+        "Developer (Super Admin)"
+        if user.role == "super_admin"
+        else "Administrator"
+    )
+
+    create_event(
+        db=db,
+        event_type="password_reset",
+        message=f"Expired password for {role_label} '{user.username}' successfully reset by user '{user.username}'.",
+        device_id=None,
+        actor=user.username,
+    )
+    db.commit()
+
+    clear_failed_login_attempts(user.username)
+    clear_failed_login_attempts(user.email)
+
+    # Establish an active session and access token
+    client_ip = (
+        request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+        or (request.client.host if request.client else "127.0.0.1")
+    )
+    user_agent = request.headers.get("user-agent", "Unknown")[:250]
+
+    session = UserSession(
+        user_id=user.id,
+        username=user.username,
+        role=user.role,
+        ip_address=client_ip,
+        user_agent=user_agent,
+        login_at=now,
+        last_activity_at=now,
+        duration_seconds=0,
+        is_active=True,
+    )
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+
+    access_token = create_access_token(
+        data={
+            "sub": user.username,
+            "role": user.role,
+            "user_id": user.id,
+            "email": user.email,
+            "session_id": session.id,
+        }
+    )
+
+    return {
+        "status": "password_reset_success",
+        "message": "Password successfully updated! You are now logged in.",
+        "access_token": access_token,
+        "token_type": "bearer",
+        "session_id": session.id,
+        "user": {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "phone_number": user.phone_number,
+            "role": user.role,
+            "is_verified": user.is_verified,
+            "password_expiry": get_password_expiry_info(user),
+        },
+    }
+
+
+# -------------------------------------------------------------
+# CHANGE PASSWORD (AUTHENTICATED SESSIONS)
+# -------------------------------------------------------------
+
+@router.post("/change-password")
+def change_my_password(
+    req: ChangePasswordRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Allow an authenticated user to change their password."""
+    if not verify_password(req.current_password, current_user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current password is incorrect.",
+        )
+
+    # Standard users whose passwords have already expired cannot self-change
+    if current_user.role == "user" and is_password_expired(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Your password has expired after 3 months. "
+                "Standard users must contact an Administrator or Developer to reset the password."
+            ),
+        )
+
+    try:
+        validate_password_complexity(req.new_password)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+
+    if verify_password(req.new_password, current_user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="New password must be different from your current password.",
+        )
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    current_user.hashed_password = hash_password(req.new_password)
+    current_user.password_changed_at = now
+    db.commit()
+
+    create_event(
+        db=db,
+        event_type="password_reset",
+        message=f"Password for user '{current_user.username}' updated by user '{current_user.username}'.",
+        device_id=None,
+        actor=current_user.username,
+    )
+    db.commit()
+
+    return {
+        "status": "success",
+        "message": "Password changed successfully.",
+        "password_expiry": get_password_expiry_info(current_user),
     }

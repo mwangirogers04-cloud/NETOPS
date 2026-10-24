@@ -95,6 +95,14 @@ export default function LoginPage({
   const [adminConfirmPassword, setAdminConfirmPassword] = useState("");
   const [showAdminNewPassword, setShowAdminNewPassword] = useState(false);
 
+  // 3-Month Password Expiration states
+  const [expiredAdminIdentifier, setExpiredAdminIdentifier] = useState("");
+  const [expiredAdminCurrentPassword, setExpiredAdminCurrentPassword] = useState("");
+  const [expiredAdminNewPassword, setExpiredAdminNewPassword] = useState("");
+  const [expiredAdminConfirmPassword, setExpiredAdminConfirmPassword] = useState("");
+  const [showExpiredAdminPasswords, setShowExpiredAdminPasswords] = useState(false);
+  const [expiredUserNotice, setExpiredUserNotice] = useState("");
+
   // Handle auto-activation when URL has ?activation_token=...
   useEffect(() => {
     if (!initialActivationToken) return;
@@ -212,6 +220,7 @@ export default function LoginPage({
     }
     setLoading(true);
     setErrorMessage("");
+    setExpiredUserNotice("");
     try {
       const response = await fetch(`${API_URL}/auth/login`, {
         method: "POST",
@@ -223,13 +232,43 @@ export default function LoginPage({
       });
       const data = await response.json();
       if (!response.ok) {
+        const detailMsg =
+          typeof data.detail === "string"
+            ? data.detail
+            : data.detail?.message || "Authentication failed. Check your credentials.";
+        const expiredHeader = response.headers.get("x-password-expired");
+        const isAdminExpired =
+          expiredHeader === "admin" ||
+          detailMsg.toLowerCase().includes("administrator password has expired");
+        const isUserExpired =
+          expiredHeader === "user" ||
+          detailMsg.toLowerCase().includes("standard users are required to contact the administrator");
+
+        // Admin expired password: allow direct password reset
+        if (isAdminExpired) {
+          setExpiredAdminIdentifier(identifier.trim());
+          setExpiredAdminCurrentPassword(password);
+          setExpiredAdminNewPassword("");
+          setExpiredAdminConfirmPassword("");
+          setMode("admin_expired_reset");
+          setErrorMessage("");
+          setExpiredUserNotice("");
+          return;
+        }
+
+        // Standard user expired password: require administrator / developer contact
+        if (isUserExpired) {
+          setExpiredUserNotice(detailMsg);
+          setErrorMessage("");
+          return;
+        }
+
         const nextAttempts = failedAttempts + 1;
         setFailedAttempts(nextAttempts);
         try {
           sessionStorage.setItem("netops_failed_login_attempts", String(nextAttempts));
         } catch (_) {}
 
-        const detailMsg = data.detail || "Authentication failed. Check your credentials.";
         const isContactAdmin =
           nextAttempts >= 3 ||
           detailMsg.toLowerCase().includes("contact the administrator");
@@ -255,6 +294,51 @@ export default function LoginPage({
       onLoginSuccess(data.user, data.access_token);
     } catch (err) {
       setErrorMessage(err.message || "Sign in failed.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Admin Expired Password Reset handler (Policy: every 3 months)
+  const handleAdminExpiredReset = async (e) => {
+    if (e) e.preventDefault();
+    if (!expiredAdminNewPassword) {
+      setErrorMessage("Please enter a new password.");
+      return;
+    }
+    const complexityErr = validatePasswordComplexity(expiredAdminNewPassword);
+    if (complexityErr) {
+      setErrorMessage(complexityErr);
+      return;
+    }
+    if (expiredAdminNewPassword !== expiredAdminConfirmPassword) {
+      setErrorMessage("Passwords do not match.");
+      return;
+    }
+    if (expiredAdminNewPassword === expiredAdminCurrentPassword) {
+      setErrorMessage("New password must be different from your current password.");
+      return;
+    }
+
+    setLoading(true);
+    setErrorMessage("");
+    try {
+      const res = await fetch(`${API_URL}/auth/change-expired-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          identifier: expiredAdminIdentifier.trim(),
+          current_password: expiredAdminCurrentPassword,
+          new_password: expiredAdminNewPassword,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || "Failed to update expired password.");
+      }
+      onLoginSuccess(data.user, data.access_token);
+    } catch (err) {
+      setErrorMessage(err.message || "Failed to reset administrator password.");
     } finally {
       setLoading(false);
     }
@@ -906,6 +990,63 @@ export default function LoginPage({
           </div>
         ) : null}
 
+        {/* 3-MONTH PASSWORD EXPIRATION NOTICE (STANDARD USERS) */}
+        {expiredUserNotice && (
+          <div
+            className="login-alert warning"
+            style={{
+              background: "#fef2f2",
+              border: "1px solid #f87171",
+              color: "#991b1b",
+              padding: "14px 16px",
+              borderRadius: "10px",
+              marginBottom: "18px",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "flex-start", gap: "10px" }}>
+              <span style={{ fontSize: "20px", lineHeight: "1" }}>🔒</span>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: "800", fontSize: "14px", marginBottom: "4px", color: "#991b1b" }}>
+                  Password Expired (3 Months)
+                </div>
+                <div style={{ fontSize: "12px", lineHeight: "1.5", color: "#7f1d1d" }}>
+                  {expiredUserNotice}
+                </div>
+                <div style={{ marginTop: "12px", display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    className="secondary-button small"
+                    style={{
+                      background: "#dc2626",
+                      color: "#ffffff",
+                      borderColor: "#b91c1c",
+                      fontWeight: "700",
+                      cursor: "pointer",
+                    }}
+                    onClick={() => {
+                      setAdminTargetUser(identifier);
+                      setMode("forgot");
+                      setResetMethod("admin");
+                      setExpiredUserNotice("");
+                      setErrorMessage("");
+                    }}
+                  >
+                    🛡️ Request Administrator / Developer Reset →
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button small"
+                    style={{ background: "#ffffff", borderColor: "#fca5a5", color: "#991b1b" }}
+                    onClick={() => setExpiredUserNotice("")}
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ======================================================== */}
         {/* VIEW 1: SIGN IN                                          */}
         {/* ======================================================== */}
@@ -1046,6 +1187,114 @@ export default function LoginPage({
               </div>
             </div>
           </form>
+        )}
+
+        {/* ======================================================== */}
+        {/* VIEW: ADMIN EXPIRED PASSWORD RESET (POLICY: 3 MONTHS)     */}
+        {/* ======================================================== */}
+        {mode === "admin_expired_reset" && (
+          <div>
+            <div
+              style={{
+                background: "#eff6ff",
+                border: "1px solid #93c5fd",
+                borderRadius: "10px",
+                padding: "14px 16px",
+                marginBottom: "18px",
+              }}
+            >
+              <div style={{ fontSize: "14px", fontWeight: "800", color: "#1d4ed8", display: "flex", alignItems: "center", gap: "8px" }}>
+                <span>🛡️</span>
+                <span>Administrator Password Expired (3 Months)</span>
+              </div>
+              <div style={{ fontSize: "12px", color: "#334155", marginTop: "5px", lineHeight: "1.5" }}>
+                By system security policy, passwords must be changed every 3 months. As an <strong>Administrator</strong>, you can reset your password now to continue to the console.
+              </div>
+            </div>
+
+            <form onSubmit={handleAdminExpiredReset}>
+              <div className="form-group">
+                <label className="form-label">Administrator Account</label>
+                <input
+                  type="text"
+                  className="login-input"
+                  value={expiredAdminIdentifier}
+                  onChange={(e) => setExpiredAdminIdentifier(e.target.value)}
+                  disabled={loading}
+                  required
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Current Password *</label>
+                <input
+                  type={showExpiredAdminPasswords ? "text" : "password"}
+                  className="login-input"
+                  placeholder="Enter your current password"
+                  value={expiredAdminCurrentPassword}
+                  onChange={(e) => setExpiredAdminCurrentPassword(e.target.value)}
+                  disabled={loading}
+                  required
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">New Password *</label>
+                <input
+                  type={showExpiredAdminPasswords ? "text" : "password"}
+                  className="login-input"
+                  placeholder="Enter new strong password"
+                  value={expiredAdminNewPassword}
+                  onChange={(e) => setExpiredAdminNewPassword(e.target.value)}
+                  disabled={loading}
+                  required
+                />
+                {renderComplexityChecklist(expiredAdminNewPassword)}
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Confirm New Password *</label>
+                <input
+                  type={showExpiredAdminPasswords ? "text" : "password"}
+                  className="login-input"
+                  placeholder="Re-enter new password"
+                  value={expiredAdminConfirmPassword}
+                  onChange={(e) => setExpiredAdminConfirmPassword(e.target.value)}
+                  disabled={loading}
+                  required
+                />
+              </div>
+
+              <div style={{ marginBottom: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
+                <input
+                  type="checkbox"
+                  id="show_expired_admin_pw"
+                  checked={showExpiredAdminPasswords}
+                  onChange={(e) => setShowExpiredAdminPasswords(e.target.checked)}
+                />
+                <label htmlFor="show_expired_admin_pw" style={{ fontSize: "12px", color: "#475569", cursor: "pointer" }}>
+                  Show passwords
+                </label>
+              </div>
+
+              <button type="submit" className="login-submit-btn" disabled={loading}>
+                {loading ? "Updating Password & Signing In..." : "🔑 Reset Administrator Password & Sign In →"}
+              </button>
+
+              <div style={{ textAlign: "center", marginTop: "16px" }}>
+                <button
+                  type="button"
+                  className="login-link-btn"
+                  onClick={() => {
+                    setMode("signin");
+                    setErrorMessage("");
+                  }}
+                >
+                  ← Back to Sign In
+                </button>
+              </div>
+            </form>
+          </div>
         )}
 
         {/* ======================================================== */}

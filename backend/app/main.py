@@ -49,6 +49,7 @@ try:
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE events ADD COLUMN IF NOT EXISTS actor VARCHAR(100);"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS created_by VARCHAR(100);"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;"))
 except Exception:
     pass
 

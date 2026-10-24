@@ -645,6 +645,7 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                 <th>User</th>
                 <th>Contact Details</th>
                 <th>Role & Privileges</th>
+                <th>Password Expiry (3 Mo)</th>
                 <th>Activation Status</th>
                 <th>Created</th>
                 <th style={{ textAlign: "right" }}>Actions</th>
@@ -653,7 +654,7 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
             <tbody>
               {usersList.length === 0 ? (
                 <tr>
-                  <td colSpan="6" style={{ textAlign: "center", padding: "28px", color: "#64748b" }}>
+                  <td colSpan="7" style={{ textAlign: "center", padding: "28px", color: "#64748b" }}>
                     {loading ? "Loading users..." : "No users found."}
                   </td>
                 </tr>
@@ -689,6 +690,63 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                         )}
                         {u.role === "user" && (
                           <span className="role-chip user">👤 Standard User</span>
+                        )}
+                      </td>
+
+                      <td>
+                        {u.role === "super_admin" ? (
+                          <span
+                            style={{
+                              background: "#ecfdf5",
+                              color: "#065f46",
+                              border: "1px solid #a7f3d0",
+                              padding: "3px 8px",
+                              borderRadius: "6px",
+                              fontSize: "11px",
+                              fontWeight: "700",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "4px",
+                            }}
+                          >
+                            👑 Never Expires
+                          </span>
+                        ) : u.password_expiry?.is_expired ? (
+                          <span
+                            style={{
+                              background: "#fef2f2",
+                              color: "#991b1b",
+                              border: "1px solid #fecaca",
+                              padding: "3px 8px",
+                              borderRadius: "6px",
+                              fontSize: "11px",
+                              fontWeight: "700",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "4px",
+                            }}
+                          >
+                            ⚠️ Expired (3 Months)
+                          </span>
+                        ) : (
+                          <div>
+                            <span
+                              style={{
+                                background: "#eff6ff",
+                                color: "#1e40af",
+                                border: "1px solid #bfdbfe",
+                                padding: "3px 8px",
+                                borderRadius: "6px",
+                                fontSize: "11px",
+                                fontWeight: "600",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "4px",
+                              }}
+                            >
+                              ⏱️ {u.password_expiry?.days_remaining ?? 90}d remaining
+                            </span>
+                          </div>
                         )}
                       </td>
 

@@ -747,6 +747,7 @@ def seed_default_users(db: Session):
         select(User).where(User.role == "super_admin")
     )
     if not super_admin:
+        now_dt = datetime.now(timezone.utc).replace(tzinfo=None)
         dev_user = User(
             username="developer",
             email="developer@netops.local",
@@ -755,6 +756,7 @@ def seed_default_users(db: Session):
             role="super_admin",
             is_active=True,
             is_verified=True,
+            password_changed_at=now_dt,
         )
         db.add(dev_user)
         logger.info("Created default Super Admin (Developer): developer / Admin@1234")
@@ -763,6 +765,7 @@ def seed_default_users(db: Session):
         select(User).where(User.username == "admin")
     )
     if not admin_user:
+        now_dt = datetime.now(timezone.utc).replace(tzinfo=None)
         adm = User(
             username="admin",
             email="admin@netops.local",
@@ -771,6 +774,7 @@ def seed_default_users(db: Session):
             role="admin",
             is_active=True,
             is_verified=True,
+            password_changed_at=now_dt,
         )
         db.add(adm)
         logger.info("Created default Admin: admin / Admin@1234")

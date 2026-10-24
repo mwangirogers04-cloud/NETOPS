@@ -62,6 +62,68 @@ function App() {
   });
   const [inactivitySecondsLeft, setInactivitySecondsLeft] = useState(null);
 
+  // Authenticated Change Password modal state
+  const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
+  const [currentPw, setCurrentPw] = useState("");
+  const [newPw, setNewPw] = useState("");
+  const [confirmPw, setConfirmPw] = useState("");
+  const [pwChangeError, setPwChangeError] = useState("");
+  const [pwChangeSuccess, setPwChangeSuccess] = useState("");
+  const [pwChangeLoading, setPwChangeLoading] = useState(false);
+
+  const handleChangePassword = async (e) => {
+    if (e) e.preventDefault();
+    if (!currentPw || !newPw || !confirmPw) {
+      setPwChangeError("Please fill in all fields.");
+      return;
+    }
+    if (newPw !== confirmPw) {
+      setPwChangeError("New passwords do not match.");
+      return;
+    }
+    if (newPw.length < 8) {
+      setPwChangeError("Password must be at least 8 characters long.");
+      return;
+    }
+    if (!/[A-Z]/.test(newPw) || !/[a-z]/.test(newPw) || !/[!@#$%^&*(),.?":{}|<>]/.test(newPw)) {
+      setPwChangeError("Password must include uppercase, lowercase, and a special character.");
+      return;
+    }
+
+    setPwChangeLoading(true);
+    setPwChangeError("");
+    setPwChangeSuccess("");
+    try {
+      const res = await fetch(`${API_URL}/auth/change-password`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify({
+          current_password: currentPw,
+          new_password: newPw,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || "Failed to update password.");
+      }
+      setPwChangeSuccess("Password changed successfully!");
+      setCurrentPw("");
+      setNewPw("");
+      setConfirmPw("");
+      setTimeout(() => {
+        setShowChangePasswordModal(false);
+        setPwChangeSuccess("");
+      }, 1500);
+    } catch (err) {
+      setPwChangeError(err.message || "Failed to change password.");
+    } finally {
+      setPwChangeLoading(false);
+    }
+  };
+
   const handleLoginSuccess = (user, token) => {
     localStorage.setItem("netops_token", token);
     localStorage.setItem("netops_user", JSON.stringify(user));
@@ -11921,6 +11983,40 @@ const EndpointUpdatesPage = () => {
                       {isSuperAdmin ? "👑 Developer (Super Admin)" : isAdmin ? "🛡️ Administrator" : "👤 Standard User"}
                     </div>
                   </div>
+                  {currentUser?.password_expiry?.days_remaining !== null && currentUser?.password_expiry?.days_remaining !== undefined && currentUser?.password_expiry?.days_remaining <= 14 && !isSuperAdmin && (
+                    <span
+                      style={{
+                        fontSize: "10px",
+                        background: "#fef3c7",
+                        color: "#b45309",
+                        border: "1px solid #fde68a",
+                        padding: "2px 6px",
+                        borderRadius: "4px",
+                        fontWeight: "700",
+                        marginLeft: "6px",
+                      }}
+                      title="Password expires every 3 months. Please change your password before it expires."
+                    >
+                      ⏱️ {currentUser.password_expiry.days_remaining}d left
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowChangePasswordModal(true);
+                      setPwChangeError("");
+                      setPwChangeSuccess("");
+                      setCurrentPw("");
+                      setNewPw("");
+                      setConfirmPw("");
+                    }}
+                    style={{ background: "transparent", border: "none", color: "#475569", fontSize: "12px", cursor: "pointer", padding: "4px 6px", borderRadius: "4px", marginLeft: "6px" }}
+                    onMouseEnter={(e) => { e.currentTarget.style.color = "#2563eb"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.color = "#475569"; }}
+                    title="Change Account Password"
+                  >
+                    🔑 Password
+                  </button>
                   <button
                     type="button"
                     onClick={() => handleLogout()}
@@ -12064,6 +12160,132 @@ const EndpointUpdatesPage = () => {
 
         {renderAutomationResult()}
         {renderPatchModals()}
+
+        {showChangePasswordModal && (
+          <div
+            style={{
+              position: "fixed",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: "rgba(15, 23, 42, 0.6)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 99999,
+              padding: "16px",
+            }}
+          >
+            <div
+              style={{
+                backgroundColor: "#ffffff",
+                borderRadius: "12px",
+                width: "100%",
+                maxWidth: "420px",
+                padding: "24px",
+                boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+                <div style={{ fontSize: "16px", fontWeight: "800", color: "#0f172a", display: "flex", alignItems: "center", gap: "8px" }}>
+                  <span>🔑</span>
+                  <span>Change Password</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowChangePasswordModal(false)}
+                  style={{ background: "transparent", border: "none", fontSize: "18px", color: "#64748b", cursor: "pointer" }}
+                >
+                  ×
+                </button>
+              </div>
+
+              <div style={{ fontSize: "12px", color: "#64748b", marginBottom: "16px", lineHeight: "1.5" }}>
+                {isSuperAdmin
+                  ? "Developer passwords do not expire, but you can change your password anytime."
+                  : "Passwords expire every 3 months. Enter your current password and a new strong password."}
+              </div>
+
+              {pwChangeError && (
+                <div style={{ background: "#fef2f2", border: "1px solid #fecaca", color: "#dc2626", padding: "10px 12px", borderRadius: "8px", fontSize: "12px", marginBottom: "14px" }}>
+                  ⚠️ {pwChangeError}
+                </div>
+              )}
+
+              {pwChangeSuccess && (
+                <div style={{ background: "#ecfdf5", border: "1px solid #a7f3d0", color: "#059669", padding: "10px 12px", borderRadius: "8px", fontSize: "12px", marginBottom: "14px" }}>
+                  ✓ {pwChangeSuccess}
+                </div>
+              )}
+
+              <form onSubmit={handleChangePassword}>
+                <div style={{ marginBottom: "12px" }}>
+                  <label style={{ display: "block", fontSize: "12px", fontWeight: "600", color: "#334155", marginBottom: "4px" }}>
+                    Current Password *
+                  </label>
+                  <input
+                    type="password"
+                    style={{ width: "100%", padding: "8px 12px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
+                    placeholder="Enter current password"
+                    value={currentPw}
+                    onChange={(e) => setCurrentPw(e.target.value)}
+                    disabled={pwChangeLoading}
+                    required
+                  />
+                </div>
+
+                <div style={{ marginBottom: "12px" }}>
+                  <label style={{ display: "block", fontSize: "12px", fontWeight: "600", color: "#334155", marginBottom: "4px" }}>
+                    New Password *
+                  </label>
+                  <input
+                    type="password"
+                    style={{ width: "100%", padding: "8px 12px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
+                    placeholder="Min 8 chars, uppercase, lowercase, special"
+                    value={newPw}
+                    onChange={(e) => setNewPw(e.target.value)}
+                    disabled={pwChangeLoading}
+                    required
+                  />
+                </div>
+
+                <div style={{ marginBottom: "16px" }}>
+                  <label style={{ display: "block", fontSize: "12px", fontWeight: "600", color: "#334155", marginBottom: "4px" }}>
+                    Confirm New Password *
+                  </label>
+                  <input
+                    type="password"
+                    style={{ width: "100%", padding: "8px 12px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
+                    placeholder="Re-enter new password"
+                    value={confirmPw}
+                    onChange={(e) => setConfirmPw(e.target.value)}
+                    disabled={pwChangeLoading}
+                    required
+                  />
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
+                  <button
+                    type="button"
+                    className="secondary-button small"
+                    onClick={() => setShowChangePasswordModal(false)}
+                    disabled={pwChangeLoading}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="primary-button small"
+                    disabled={pwChangeLoading}
+                  >
+                    {pwChangeLoading ? "Updating..." : "Update Password"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
       </div>
     </>
   );
