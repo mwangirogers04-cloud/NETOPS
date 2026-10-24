@@ -157,25 +157,43 @@ class CiscoSwitchDriver(BaseSwitchDriver):
     ) -> dict[str, Any]:
         params = self._get_connection_params()
         clean_port = port_name.strip()
-        commands = [
-            f"interface {clean_port}",
-            f" switchport mode {mode}",
-            f" switchport access vlan {vlan_id}",
-            "end",
-            "write memory",
-        ]
+        is_trunk = (mode.lower() == "trunk")
+
+        if is_trunk:
+            commands = [
+                f"interface {clean_port}",
+                " switchport trunk encapsulation dot1q",
+                " switchport mode trunk",
+                f" switchport trunk native vlan {vlan_id}",
+                " switchport trunk allowed vlan all",
+                "end",
+                "write memory",
+            ]
+        else:
+            commands = [
+                f"interface {clean_port}",
+                " switchport mode access",
+                f" switchport access vlan {vlan_id}",
+                "end",
+                "write memory",
+            ]
         try:
             with ConnectHandler(**params) as conn:
                 conn.enable()
-                output = conn.send_config_set(commands[:3])
+                output = conn.send_config_set(commands[:-2])
                 conn.send_command("write memory", read_timeout=15)
                 self.fallback.set_port_vlan(clean_port, vlan_id, mode)
                 return {
                     "success": True,
                     "port": clean_port,
                     "vlan_id": vlan_id,
-                    "mode": mode,
-                    "message": f"Port {clean_port} configured for VLAN {vlan_id} on Cisco switch {params['host']}.",
+                    "mode": "trunk" if is_trunk else "access",
+                    "is_uplink": is_trunk,
+                    "message": (
+                        f"Port {clean_port} configured as 802.1Q Trunk Uplink on Cisco switch {params['host']}."
+                        if is_trunk
+                        else f"Port {clean_port} configured for VLAN {vlan_id} on Cisco switch {params['host']}."
+                    ),
                     "commands_applied": commands,
                     "cli_output": output,
                 }

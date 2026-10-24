@@ -58,7 +58,10 @@ class SimulationSwitchDriver(BaseSwitchDriver):
                 else:
                     vlan = 1
 
-                status = "connected" if i <= 14 else "notconnect"
+                # Last two ports (23 and 24) default as Uplink Trunk ports
+                is_uplink = (i in (23, 24))
+                mode = "trunk" if is_uplink else "access"
+                status = "connected" if (i <= 14 or is_uplink) else "notconnect"
                 ports.append({
                     "port": name,
                     "short_name": short_name,
@@ -67,7 +70,9 @@ class SimulationSwitchDriver(BaseSwitchDriver):
                     "duplex": "a-full" if status == "connected" else "auto",
                     "speed": "a-1000" if status == "connected" else "auto",
                     "type": "10/100/1000BaseTX",
-                    "mode": "access",
+                    "mode": mode,
+                    "is_uplink": is_uplink,
+                    "allowed_vlans": "ALL (1-4094)" if is_uplink else f"VLAN {vlan}",
                     "connected_mac": f"AA:BB:CC:DD:EE:{i:02X}" if status == "connected" else None,
                 })
             cls._ports_cache = ports
@@ -152,6 +157,7 @@ class SimulationSwitchDriver(BaseSwitchDriver):
         mode: str = "access",
     ) -> dict[str, Any]:
         clean_port = port_name.strip()
+        is_trunk = (mode.lower() == "trunk")
         matched = False
         for p in self._ports_cache:
             if (
@@ -160,7 +166,9 @@ class SimulationSwitchDriver(BaseSwitchDriver):
                 or clean_port.lower().endswith(p["short_name"].lower())
             ):
                 p["vlan"] = vlan_id
-                p["mode"] = mode
+                p["mode"] = "trunk" if is_trunk else "access"
+                p["is_uplink"] = is_trunk or p.get("is_uplink", False)
+                p["allowed_vlans"] = "ALL (1-4094)" if is_trunk else f"VLAN {vlan_id}"
                 matched = True
                 clean_port = p["port"]
                 break
@@ -175,21 +183,39 @@ class SimulationSwitchDriver(BaseSwitchDriver):
                 "duplex": "a-full",
                 "speed": "a-1000",
                 "type": "10/100/1000BaseTX",
-                "mode": mode,
+                "mode": "trunk" if is_trunk else "access",
+                "is_uplink": is_trunk,
+                "allowed_vlans": "ALL (1-4094)" if is_trunk else f"VLAN {vlan_id}",
                 "connected_mac": None,
             })
+
+        if is_trunk:
+            cmds = [
+                f"interface {clean_port}",
+                " switchport trunk encapsulation dot1q",
+                " switchport mode trunk",
+                f" switchport trunk native vlan {vlan_id}",
+                " switchport trunk allowed vlan all",
+                "end",
+                "write memory",
+            ]
+            msg = f"Port {clean_port} configured as 802.1Q Trunk Uplink (Native VLAN {vlan_id}, all VLANs allowed)."
+        else:
+            cmds = [
+                f"interface {clean_port}",
+                " switchport mode access",
+                f" switchport access vlan {vlan_id}",
+                "end",
+                "write memory",
+            ]
+            msg = f"Port {clean_port} configured as Access port for VLAN {vlan_id}."
 
         return {
             "success": True,
             "port": clean_port,
             "vlan_id": vlan_id,
-            "mode": mode,
-            "message": f"Port {clean_port} configured for VLAN {vlan_id} ({mode} mode).",
-            "commands_applied": [
-                f"interface {clean_port}",
-                f" switchport mode {mode}",
-                f" switchport access vlan {vlan_id}",
-                "end",
-                "write memory",
-            ],
+            "mode": "trunk" if is_trunk else "access",
+            "is_uplink": is_trunk,
+            "message": msg,
+            "commands_applied": cmds,
         }

@@ -24,7 +24,9 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
   // Assign Port Modal
   const [selectedPort, setSelectedPort] = useState(null);
   const [targetVlanId, setTargetVlanId] = useState("");
+  const [isTrunk, setIsTrunk] = useState(false);
   const [assigningPort, setAssigningPort] = useState(false);
+  const [configuringUplinks, setConfiguringUplinks] = useState(false);
 
   // Switch Config Form
   const [switchForm, setSwitchForm] = useState({
@@ -142,10 +144,10 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
     }
   };
 
-  // Handle Assign Port VLAN
+  // Handle Assign Port VLAN (Access or 802.1Q Trunk)
   const handleAssignPort = async (e) => {
     if (e) e.preventDefault();
-    if (!selectedPort || !targetVlanId) return;
+    if (!selectedPort) return;
 
     setAssigningPort(true);
     try {
@@ -154,20 +156,49 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
         headers: { "Content-Type": "application/json", ...getAuthHeaders() },
         body: JSON.stringify({
           port_name: selectedPort.port,
-          vlan_id: parseInt(targetVlanId, 10),
-          mode: "access",
+          vlan_id: parseInt(targetVlanId || "1", 10),
+          mode: isTrunk ? "trunk" : "access",
+          is_trunk: isTrunk,
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "Failed to assign port VLAN.");
+      if (!res.ok) throw new Error(data.detail || "Failed to assign port.");
 
-      showStatus(`Port ${selectedPort.port} reconfigured to VLAN ${targetVlanId} successfully!`, "success");
+      showStatus(
+        isTrunk
+          ? `Port ${selectedPort.port} successfully configured as 802.1Q Trunk Uplink!`
+          : `Port ${selectedPort.port} reconfigured to VLAN ${targetVlanId} successfully!`,
+        "success"
+      );
       setSelectedPort(null);
       await loadAllData();
     } catch (err) {
       showStatus(err.message, "error");
     } finally {
       setAssigningPort(false);
+    }
+  };
+
+  // Handle Quick Configuration of Last Two Ports as Trunk Uplinks
+  const handleConfigureUplinks = async () => {
+    if (!window.confirm("Configure the last two ports of this switch as 802.1Q Trunk Uplinks? This will configure them to carry all active VLANs.")) {
+      return;
+    }
+    setConfiguringUplinks(true);
+    try {
+      const res = await fetch(`${API_URL}/switches/ports/configure-uplinks`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        body: JSON.stringify({ native_vlan: 1, mode: "trunk" }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to configure trunk uplinks.");
+      showStatus(data.message || "Trunk uplinks configured successfully!", "success");
+      await loadAllData();
+    } catch (err) {
+      showStatus(err.message, "error");
+    } finally {
+      setConfiguringUplinks(false);
     }
   };
 
@@ -604,7 +635,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                   Live port visualization. Click any port to change its VLAN assignment without console login.
                 </div>
               </div>
-              <div style={{ display: "flex", gap: "12px", alignItems: "center", fontSize: "12px" }}>
+              <div style={{ display: "flex", gap: "12px", alignItems: "center", fontSize: "12px", flexWrap: "wrap" }}>
                 <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
                   <span style={{ width: "10px", height: "10px", borderRadius: "50%", background: "#10b981", display: "inline-block" }}></span> Connected
                 </span>
@@ -612,8 +643,33 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                   <span style={{ width: "10px", height: "10px", borderRadius: "50%", background: "#94a3b8", display: "inline-block" }}></span> Idle / Disconnected
                 </span>
                 <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                  <span style={{ width: "10px", height: "10px", borderRadius: "50%", background: "#a855f7", display: "inline-block" }}></span> 🔀 Trunk Uplink
+                </span>
+                <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
                   <span style={{ width: "10px", height: "10px", borderRadius: "50%", background: "#ef4444", display: "inline-block" }}></span> Quarantine (90)
                 </span>
+
+                {isAdmin && (
+                  <button
+                    type="button"
+                    className="secondary-button small"
+                    onClick={handleConfigureUplinks}
+                    disabled={configuringUplinks}
+                    style={{
+                      background: "#f5f3ff",
+                      color: "#6d28d9",
+                      borderColor: "#c4b5fd",
+                      fontWeight: "700",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      marginLeft: "8px",
+                    }}
+                    title="Automatically configure the last 2 ports of this switch chassis as 802.1Q Trunk Uplinks"
+                  >
+                    <span>🔀</span> {configuringUplinks ? "Configuring Uplinks..." : "Set Last 2 Ports as Trunk Uplinks"}
+                  </button>
+                )}
               </div>
             </div>
 
@@ -627,8 +683,9 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                 border: "2px solid #334155",
               }}
             >
-              <div style={{ display: "flex", justifyContent: "space-between", color: "#94a3b8", fontSize: "11px", marginBottom: "12px", fontWeight: "700", letterSpacing: "1px" }}>
-                <span>CISCO CATALYST 2960-X SERIES 24-PORT GIGABIT</span>
+              <div style={{ display: "flex", justifyContent: "space-between", color: "#94a3b8", fontSize: "11px", marginBottom: "12px", fontWeight: "700", letterSpacing: "1px", flexWrap: "wrap", gap: "8px" }}>
+                <span>SWITCH CHASSIS 24-PORT GIGABIT PANEL</span>
+                <span style={{ color: "#a855f7" }}>LAST 2 PORTS (23 & 24) = RECOMMENDED TRUNK UPLINKS</span>
                 <span style={{ color: "#38bdf8" }}>MANAGEMENT: {activeSwitch?.config?.management_ip || "192.168.0.2"}</span>
               </div>
 
@@ -637,6 +694,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                 {ports.map((p, idx) => {
                   const isUp = p.status === "connected";
                   const isQuarantine = p.vlan === 90;
+                  const isTrunkPort = p.mode === "trunk" || !!p.is_uplink;
                   const theme = getVlanColor(p.vlan);
 
                   return (
@@ -645,17 +703,19 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                       onClick={() => {
                         if (isAdmin) {
                           setSelectedPort(p);
-                          setTargetVlanId(String(p.vlan));
+                          setTargetVlanId(String(p.vlan || 1));
+                          setIsTrunk(p.mode === "trunk" || !!p.is_uplink);
                         }
                       }}
                       style={{
-                        background: "#1e293b",
-                        border: `2px solid ${isQuarantine ? "#ef4444" : isUp ? theme.border : "#334155"}`,
+                        background: isTrunkPort ? "#2e1065" : "#1e293b",
+                        border: `2px solid ${isQuarantine ? "#ef4444" : isTrunkPort ? "#8b5cf6" : isUp ? theme.border : "#334155"}`,
                         borderRadius: "8px",
                         padding: "8px 4px",
                         textAlign: "center",
                         cursor: isAdmin ? "pointer" : "default",
                         transition: "all 0.15s ease",
+                        boxShadow: isTrunkPort ? "0 0 8px rgba(139, 92, 246, 0.4)" : "none",
                       }}
                       onMouseEnter={(e) => {
                         e.currentTarget.style.transform = "translateY(-2px)";
@@ -663,9 +723,9 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                       }}
                       onMouseLeave={(e) => {
                         e.currentTarget.style.transform = "none";
-                        e.currentTarget.style.boxShadow = "none";
+                        e.currentTarget.style.boxShadow = isTrunkPort ? "0 0 8px rgba(139, 92, 246, 0.4)" : "none";
                       }}
-                      title={`Click to reassign ${p.port} (Current: VLAN ${p.vlan})`}
+                      title={`Click to reassign ${p.port} (${isTrunkPort ? "TRUNK UPLINK" : `VLAN ${p.vlan}`})`}
                     >
                       {/* LINK LED */}
                       <div style={{ display: "flex", justifyContent: "center", marginBottom: "4px" }}>
@@ -674,8 +734,8 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                             width: "8px",
                             height: "8px",
                             borderRadius: "50%",
-                            background: isUp ? "#10b981" : "#475569",
-                            boxShadow: isUp ? "0 0 6px #10b981" : "none",
+                            background: isTrunkPort ? "#a855f7" : isUp ? "#10b981" : "#475569",
+                            boxShadow: isTrunkPort ? "0 0 6px #a855f7" : isUp ? "0 0 6px #10b981" : "none",
                             display: "inline-block",
                           }}
                         />
@@ -686,19 +746,20 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                         {p.short_name || `P${idx + 1}`}
                       </div>
 
-                      {/* CURRENT VLAN BADGE */}
+                      {/* CURRENT VLAN / TRUNK BADGE */}
                       <div
                         style={{
                           marginTop: "6px",
-                          fontSize: "10px",
+                          fontSize: isTrunkPort ? "9px" : "10px",
                           fontWeight: "800",
-                          background: isQuarantine ? "#ef4444" : theme.chip,
+                          background: isQuarantine ? "#ef4444" : isTrunkPort ? "#7c3aed" : theme.chip,
                           color: "#ffffff",
                           borderRadius: "4px",
                           padding: "1px 2px",
+                          letterSpacing: isTrunkPort ? "0.5px" : "normal",
                         }}
                       >
-                        V{p.vlan}
+                        {isTrunkPort ? "TRUNK" : `V${p.vlan}`}
                       </div>
                     </div>
                   );
@@ -731,9 +792,18 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                 <tbody>
                   {ports.map((p) => {
                     const theme = getVlanColor(p.vlan);
+                    const isTrunkPort = p.mode === "trunk" || !!p.is_uplink;
+
                     return (
                       <tr key={p.port}>
-                        <td><strong>{p.port}</strong></td>
+                        <td>
+                          <strong>{p.port}</strong>
+                          {isTrunkPort && (
+                            <span style={{ marginLeft: "6px", fontSize: "10px", background: "#f5f3ff", color: "#6d28d9", border: "1px solid #c4b5fd", padding: "1px 5px", borderRadius: "4px", fontWeight: "800" }}>
+                              UPLINK
+                            </span>
+                          )}
+                        </td>
                         <td>
                           {p.status === "connected" ? (
                             <span className="status-badge online" style={{ fontSize: "10px" }}>🟢 connected</span>
@@ -742,21 +812,37 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                           )}
                         </td>
                         <td>
-                          <span
-                            style={{
-                              background: theme.bg,
-                              border: `1px solid ${theme.border}`,
-                              color: theme.text,
-                              fontWeight: "800",
-                              fontSize: "12px",
-                              padding: "2px 8px",
-                              borderRadius: "6px",
-                            }}
-                          >
-                            VLAN {p.vlan}
-                          </span>
+                          {isTrunkPort ? (
+                            <span style={{ fontSize: "12px", color: "#6d28d9", fontWeight: "700" }}>
+                              Native: VLAN {p.vlan} (Allowed: ALL)
+                            </span>
+                          ) : (
+                            <span
+                              style={{
+                                background: theme.bg,
+                                border: `1px solid ${theme.border}`,
+                                color: theme.text,
+                                fontWeight: "800",
+                                fontSize: "12px",
+                                padding: "2px 8px",
+                                borderRadius: "6px",
+                              }}
+                            >
+                              VLAN {p.vlan}
+                            </span>
+                          )}
                         </td>
-                        <td><code>{p.mode || "access"}</code></td>
+                        <td>
+                          {isTrunkPort ? (
+                            <span style={{ background: "#f5f3ff", color: "#6d28d9", border: "1px solid #c4b5fd", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: "800" }}>
+                              🔀 TRUNK (802.1Q)
+                            </span>
+                          ) : (
+                            <span style={{ background: "#f1f5f9", color: "#475569", border: "1px solid #cbd5e1", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: "600" }}>
+                              ACCESS
+                            </span>
+                          )}
+                        </td>
                         <td>{p.speed || "1Gbps"} / {p.duplex || "full"}</td>
                         <td>
                           {p.connected_mac ? (
@@ -773,12 +859,13 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                                 className="secondary-button small"
                                 onClick={() => {
                                   setSelectedPort(p);
-                                  setTargetVlanId(String(p.vlan));
+                                  setTargetVlanId(String(p.vlan || 1));
+                                  setIsTrunk(p.mode === "trunk" || !!p.is_uplink);
                                 }}
                               >
-                                ✏️ Assign VLAN
+                                ✏️ Configure Port
                               </button>
-                              {p.vlan !== 90 && (
+                              {p.vlan !== 90 && !isTrunkPort && (
                                 <button
                                   type="button"
                                   className="secondary-button small"
@@ -1229,13 +1316,45 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
             </div>
 
             <div style={{ fontSize: "12px", color: "#64748b", marginBottom: "16px" }}>
-              Select target VLAN to configure on interface <strong>{selectedPort.port}</strong>.
+              Configure VLAN and port mode for interface <strong>{selectedPort.port}</strong>.
             </div>
 
             <form onSubmit={handleAssignPort}>
+              {/* TRUNK CHECKBOX / TOGGLE */}
+              <div
+                style={{
+                  background: isTrunk ? "#f5f3ff" : "#f8fafc",
+                  border: `1.5px solid ${isTrunk ? "#8b5cf6" : "#cbd5e1"}`,
+                  borderRadius: "8px",
+                  padding: "12px",
+                  marginBottom: "16px",
+                  transition: "all 0.15s ease",
+                }}
+              >
+                <label style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", fontWeight: "700", color: isTrunk ? "#6d28d9" : "#334155", fontSize: "13px" }}>
+                  <input
+                    type="checkbox"
+                    checked={isTrunk}
+                    onChange={(e) => setIsTrunk(e.target.checked)}
+                    style={{ width: "18px", height: "18px", cursor: "pointer", accentColor: "#7c3aed" }}
+                  />
+                  <span>🔀 Tick to Configure as Trunk Port (802.1Q Uplink)</span>
+                </label>
+                {isTrunk ? (
+                  <div style={{ fontSize: "11px", color: "#6d28d9", marginTop: "6px", marginLeft: "28px", lineHeight: "1.4" }}>
+                    ✓ <strong>802.1Q Trunk Uplink Enabled:</strong> Carries multiple tagged VLANs between switches or to a firewall/router uplink.
+                  </div>
+                ) : (
+                  <div style={{ fontSize: "11px", color: "#64748b", marginTop: "4px", marginLeft: "28px" }}>
+                    Standard Access port mode for individual workstations, VoIP phones, or printers.
+                  </div>
+                )}
+              </div>
+
+              {/* TARGET / NATIVE VLAN SELECTOR */}
               <div style={{ marginBottom: "16px" }}>
                 <label style={{ display: "block", fontSize: "12px", fontWeight: "600", color: "#334155", marginBottom: "4px" }}>
-                  Target VLAN *
+                  {isTrunk ? "Native / Untagged VLAN (Default: VLAN 1) *" : "Target Access VLAN *"}
                 </label>
                 <select
                   style={{ width: "100%", padding: "8px 12px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
@@ -1246,10 +1365,15 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                 >
                   {vlans.map((v) => (
                     <option key={v.vlan_id} value={v.vlan_id}>
-                      VLAN {v.vlan_id} — {v.name} {v.vlan_id === 90 ? "(Quarantine)" : ""}
+                      VLAN {v.vlan_id} — {v.name} {v.vlan_id === 90 ? "(Quarantine)" : (v.vlan_id === 1 ? "(Default Native)" : "")}
                     </option>
                   ))}
                 </select>
+                {isTrunk && (
+                  <div style={{ fontSize: "11px", color: "#6d28d9", marginTop: "4px", fontWeight: "600" }}>
+                    Allowed VLANs: <strong>ALL Active VLANs (1 – 4094)</strong>
+                  </div>
+                )}
               </div>
 
               <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
@@ -1265,8 +1389,9 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                   type="submit"
                   className="primary-button small"
                   disabled={assigningPort}
+                  style={isTrunk ? { background: "#7c3aed", borderColor: "#6d28d9" } : {}}
                 >
-                  {assigningPort ? "Applying..." : "Apply Port VLAN"}
+                  {assigningPort ? "Applying..." : (isTrunk ? "🔀 Apply Trunk Uplink" : "Apply Access VLAN")}
                 </button>
               </div>
             </form>

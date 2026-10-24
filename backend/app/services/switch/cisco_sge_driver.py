@@ -167,12 +167,14 @@ class CiscoSgeSwitchDriver(BaseSwitchDriver):
     ) -> dict[str, Any]:
         params = self._get_connection_params()
         normalized_port = self._normalize_port_name(port_name)
+        is_trunk = (mode.lower() == "trunk")
 
-        if mode.lower() == "trunk":
+        if is_trunk:
             commands = [
                 f"interface {normalized_port}",
                 " switchport mode trunk",
-                f" switchport trunk allowed vlan add {vlan_id}",
+                f" switchport trunk native vlan {vlan_id}",
+                " switchport trunk allowed vlan add 1-4094",
                 "exit",
             ]
         else:
@@ -193,8 +195,13 @@ class CiscoSgeSwitchDriver(BaseSwitchDriver):
                     "success": True,
                     "port": normalized_port,
                     "vlan_id": vlan_id,
-                    "mode": mode,
-                    "message": f"Port {normalized_port} configured for VLAN {vlan_id} on Cisco SGE2000 switch {params['host']}.",
+                    "mode": "trunk" if is_trunk else "access",
+                    "is_uplink": is_trunk,
+                    "message": (
+                        f"Port {normalized_port} configured as 802.1Q Trunk Uplink on Cisco SGE2000 switch {params['host']}."
+                        if is_trunk
+                        else f"Port {normalized_port} configured for VLAN {vlan_id} on Cisco SGE2000 switch {params['host']}."
+                    ),
                     "commands_applied": commands,
                     "cli_output": output,
                 }

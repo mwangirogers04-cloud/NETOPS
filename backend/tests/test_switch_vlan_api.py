@@ -398,3 +398,60 @@ def test_multi_vendor_switch_drivers(client, db_session):
     assert res_arista["success"] is True
 
 
+def test_assign_port_trunk_and_uplinks(client, db_session):
+    """Test assigning individual trunk ports and auto-configuring the last 2 ports as uplinks."""
+    admin = User(
+        username="trunk_admin",
+        email="trunk_admin@netops.local",
+        hashed_password=hash_password("Admin@1234"),
+        role="admin",
+        is_active=True,
+        is_verified=True,
+    )
+    db_session.add(admin)
+    db_session.commit()
+
+    token = create_access_token({"sub": admin.username, "role": admin.role, "user_id": admin.id})
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # 1. Assign single port as Trunk with tick box (is_trunk=True)
+    res_single = client.post(
+        "/switches/ports/assign",
+        headers=headers,
+        json={
+            "port_name": "GigabitEthernet0/22",
+            "vlan_id": 1,
+            "mode": "access",  # mode field overridden by is_trunk=True
+            "is_trunk": True,
+        },
+    )
+    assert res_single.status_code == 200
+    data_single = res_single.json()
+    assert data_single["success"] is True
+    assert data_single["mode"] == "trunk"
+    assert data_single["is_uplink"] is True
+
+    # 2. Automatically configure the last two ports as Trunk Uplinks
+    res_uplinks = client.post(
+        "/switches/ports/configure-uplinks",
+        headers=headers,
+        json={"native_vlan": 1, "mode": "trunk"},
+    )
+    assert res_uplinks.status_code == 200
+    data_uplinks = res_uplinks.json()
+    assert data_uplinks["success"] is True
+    assert len(data_uplinks["ports"]) == 2
+    assert "23" in data_uplinks["ports"][0] or "24" in data_uplinks["ports"][0]
+    assert "24" in data_uplinks["ports"][1] or "23" in data_uplinks["ports"][1]
+
+    # 3. Verify in ports list that ports 23 and 24 are marked trunk uplinks
+    ports_res = client.get("/switches/ports")
+    assert ports_res.status_code == 200
+    ports = ports_res.json()
+    p23 = next((p for p in ports if "23" in p["port"]), None)
+    p24 = next((p for p in ports if "24" in p["port"]), None)
+    assert p23 is not None and p23["mode"] == "trunk"
+    assert p24 is not None and p24["mode"] == "trunk"
+
+
+

@@ -63,8 +63,15 @@ class CreateVlanRequest(BaseModel):
 
 class AssignPortVlanRequest(BaseModel):
     port_name: str = Field(..., description="Switch physical port, e.g. 'GigabitEthernet0/1'")
-    vlan_id: int = Field(..., ge=1, le=4094, description="Target VLAN ID")
+    vlan_id: int = Field(1, ge=1, le=4094, description="Target VLAN ID (or Native VLAN for Trunk)")
     mode: str = Field("access", description="'access' or 'trunk'")
+    is_trunk: bool = Field(False, description="Tick to configure as 802.1Q trunk uplink port")
+
+
+class ConfigureUplinksRequest(BaseModel):
+    ports: list[str] | None = None
+    native_vlan: int = Field(1, ge=1, le=4094)
+    mode: str = Field("trunk")
 
 
 # -------------------------------------------------------------
@@ -452,21 +459,22 @@ def assign_port_vlan(
     db: Session = Depends(get_db),
 ):
     """
-    Assign a physical switch interface to a specific VLAN.
-    Directly applies 'switchport access vlan <id>' without console cabling.
+    Assign a physical switch interface to a specific VLAN or configure as Trunk Uplink.
+    Directly applies 'switchport access vlan <id>' or 'switchport mode trunk' without console cabling.
     """
+    effective_mode = "trunk" if (req.is_trunk or req.mode.lower() == "trunk") else "access"
     driver = get_active_switch_driver(db)
     res = driver.set_port_vlan(
         port_name=req.port_name,
         vlan_id=req.vlan_id,
-        mode=req.mode,
+        mode=effective_mode,
     )
 
     create_event(
         db=db,
         event_type="switch_port_configured",
         message=(
-            f"Switch port '{req.port_name}' assigned to VLAN {req.vlan_id} ({req.mode} mode) "
+            f"Switch port '{req.port_name}' configured with VLAN {req.vlan_id} ({effective_mode.upper()} mode) "
             f"by {current_user.role} '{current_user.username}'."
         ),
         device_id=None,
@@ -475,3 +483,64 @@ def assign_port_vlan(
     db.commit()
 
     return res
+
+
+@router.post("/ports/configure-uplinks")
+def configure_switch_uplinks(
+    req: ConfigureUplinksRequest | None = None,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Automatically configure the last two ports of the switch chassis as 802.1Q Trunk Uplinks.
+    Carries all active VLANs to another switch or core router.
+    """
+    native_vlan = req.native_vlan if req else 1
+    mode = req.mode if req else "trunk"
+    driver = get_active_switch_driver(db)
+    interfaces = driver.get_interfaces()
+
+    if not interfaces:
+        raise HTTPException(status_code=400, detail="No interfaces available on active switch.")
+
+    # Target the last two ports of the switch (e.g. Ports 23 & 24 on a 24-port switch)
+    if req and req.ports:
+        target_ports = req.ports
+    else:
+        def get_port_num(p: dict[str, Any]) -> int:
+            import re
+            m = re.search(r"(\d+)$", p.get("port", ""))
+            return int(m.group(1)) if m else 0
+
+        sorted_interfaces = sorted(interfaces, key=get_port_num)
+        if len(sorted_interfaces) >= 2:
+            target_ports = [sorted_interfaces[-2]["port"], sorted_interfaces[-1]["port"]]
+        else:
+            target_ports = [sorted_interfaces[-1]["port"]]
+
+    results = []
+    for p_name in target_ports:
+        r = driver.set_port_vlan(port_name=p_name, vlan_id=native_vlan, mode=mode)
+        results.append(r)
+
+    port_names_str = ", ".join(target_ports)
+    create_event(
+        db=db,
+        event_type="switch_uplinks_configured",
+        message=(
+            f"Switch uplink trunk ports ({port_names_str}) configured as 802.1Q Trunks "
+            f"by {current_user.role} '{current_user.username}'."
+        ),
+        device_id=None,
+        actor=current_user.username,
+    )
+    db.commit()
+
+    return {
+        "success": True,
+        "ports": target_ports,
+        "mode": mode,
+        "native_vlan": native_vlan,
+        "message": f"Ports {port_names_str} successfully configured as Trunk Uplinks.",
+        "results": results,
+    }
