@@ -531,9 +531,12 @@ def disallow_device(
 
     # --------------------------------------------------------
     # REMOVE INTERNET ACCESS WITHOUT REJECTING DEVICE
+    # Disconnected device automatically moves to Quarantine VLAN 90
     # --------------------------------------------------------
 
     device.internet_access_authorized = False
+    device.enforcement_status = "quarantined"
+    device.vlan_id = 90
 
     # When manually disconnected, disable active access schedules so the manual
     # disconnect is respected

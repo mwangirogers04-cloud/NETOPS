@@ -142,6 +142,7 @@ def enforce_device_access(
 
         elif not device.internet_access_authorized:
             # Without active schedule, honor administrator manual disallow/disconnect
+            device.vlan_id = 90
             decision = "quarantine"
 
         else:
