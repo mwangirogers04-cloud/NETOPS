@@ -1467,7 +1467,17 @@ export default function LoginPage({
         )}
 
         <div style={{ textAlign: "center", marginTop: "24px", paddingTop: "14px", borderTop: "1px solid #e2e8f0", fontSize: "12px", color: "#64748b" }}>
-          <strong style={{ color: "#0f172a" }}>NETOPS Version 2</strong> • copyright 2026
+          <div><strong style={{ color: "#0f172a" }}>NETOPS Version 2</strong> • copyright 2026</div>
+          <div style={{ marginTop: "8px", fontSize: "11px", color: "#475569", display: "flex", justifyContent: "center", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+            <span style={{ fontWeight: 600, color: "#334155" }}>Support &amp; Inquiries:</span>
+            <a href="tel:+254704393504" style={{ color: "#2563eb", textDecoration: "none", fontWeight: 700 }}>
+              📞 +254704393504
+            </a>
+            <span style={{ color: "#cbd5e1" }}>•</span>
+            <a href="mailto:rogersiru@gmail.com" style={{ color: "#2563eb", textDecoration: "none", fontWeight: 700 }}>
+              ✉️ rogersiru@gmail.com
+            </a>
+          </div>
         </div>
       </div>
     </div>

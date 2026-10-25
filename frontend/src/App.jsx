@@ -65,6 +65,7 @@ function App() {
 
   // Authenticated Change Password modal state
   const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
+  const [showContactModal, setShowContactModal] = useState(false);
   const [currentPw, setCurrentPw] = useState("");
   const [newPw, setNewPw] = useState("");
   const [confirmPw, setConfirmPw] = useState("");
@@ -7670,6 +7671,51 @@ return (
                 <code>{detectedSubnet}</code>
               </div>
             </div>
+
+            {/* TECHNICAL SUPPORT & DEVELOPER CONTACT */}
+            <div className="panel" style={{ gridColumn: "span 2", background: "linear-gradient(180deg, #f8fafc 0%, #ffffff 100%)", borderColor: "#3b82f6" }}>
+              <div className="panel-header">
+                <div>
+                  <div className="panel-title" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <span>📞</span> Technical Support &amp; Developer Inquiries
+                  </div>
+                  <div className="panel-subtitle">
+                    Direct developer assistance, incident escalations, and administrator onboarding
+                  </div>
+                </div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "16px", padding: "8px 0" }}>
+                <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "8px", padding: "14px 18px" }}>
+                  <div style={{ fontSize: "11px", color: "#1e40af", fontWeight: "700", textTransform: "uppercase", marginBottom: "4px" }}>
+                    Phone / WhatsApp Hotline
+                  </div>
+                  <a
+                    href="tel:+254704393504"
+                    style={{ fontSize: "16px", fontWeight: "800", color: "#1d4ed8", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "6px" }}
+                  >
+                    📞 +254704393504
+                  </a>
+                  <div style={{ fontSize: "11px", color: "#64748b", marginTop: "4px" }}>
+                    Available 24/7 for urgent network operations, enforcement, and quarantine support
+                  </div>
+                </div>
+
+                <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "8px", padding: "14px 18px" }}>
+                  <div style={{ fontSize: "11px", color: "#166534", fontWeight: "700", textTransform: "uppercase", marginBottom: "4px" }}>
+                    Email Address
+                  </div>
+                  <a
+                    href="mailto:rogersiru@gmail.com?subject=NETOPS%20Version%202%20Support"
+                    style={{ fontSize: "16px", fontWeight: "800", color: "#15803d", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "6px" }}
+                  >
+                    ✉️ rogersiru@gmail.com
+                  </a>
+                  <div style={{ fontSize: "11px", color: "#64748b", marginTop: "4px" }}>
+                    Official developer email for technical feedback, bug reports &amp; system integrations
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         )}
 
@@ -11234,12 +11280,15 @@ const EndpointUpdatesPage = () => {
           color: #64748b;
           font-size: 12px;
           font-weight: 500;
+          flex-wrap: wrap;
+          gap: 12px;
         }
 
         .netops-footer-left {
           display: flex;
           align-items: center;
           gap: 8px;
+          flex-wrap: wrap;
         }
 
         .netops-footer-brand {
@@ -11248,11 +11297,23 @@ const EndpointUpdatesPage = () => {
         }
 
         .netops-footer-dot {
-          color: #94a3b8;
+          color: #cbd5e1;
         }
 
         .netops-footer-copy {
           color: #64748b;
+        }
+
+        .netops-footer-contact-link {
+          color: #2563eb;
+          text-decoration: none;
+          font-weight: 600;
+          transition: color 0.15s ease;
+        }
+
+        .netops-footer-contact-link:hover {
+          color: #1d4ed8;
+          text-decoration: underline;
         }
 
         .netops-footer-right {
@@ -12672,6 +12733,15 @@ const EndpointUpdatesPage = () => {
             <div style={{ marginTop: "6px", fontSize: "10px", color: "#64748b", fontWeight: 600 }}>
               NETOPS Version 2 © 2026
             </div>
+            <div style={{ marginTop: "8px", paddingTop: "8px", borderTop: "1px solid #334155", fontSize: "11px", display: "flex", flexDirection: "column", gap: "3px" }}>
+              <div style={{ fontSize: "10px", color: "#94a3b8", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>Support &amp; Inquiries</div>
+              <a href="tel:+254704393504" style={{ color: "#60a5fa", textDecoration: "none", fontSize: "11px", display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                <span>📞</span> +254704393504
+              </a>
+              <a href="mailto:rogersiru@gmail.com" style={{ color: "#60a5fa", textDecoration: "none", fontSize: "11px", display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                <span>✉️</span> rogersiru@gmail.com
+              </a>
+            </div>
           </div>
         </aside>
 
@@ -12691,6 +12761,30 @@ const EndpointUpdatesPage = () => {
                 <span className="live-dot" />
                 <span>{refreshingAll ? "Syncing..." : "Auto-Refresh Active"}</span>
               </div>
+
+              <button
+                type="button"
+                onClick={() => setShowContactModal(true)}
+                className="sound-toggle-btn"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "5px 12px",
+                  borderRadius: "20px",
+                  border: "1px solid #cbd5e1",
+                  background: "#f8fafc",
+                  color: "#1e293b",
+                  fontSize: "12px",
+                  fontWeight: "700",
+                  cursor: "pointer",
+                  transition: "all 0.15s ease",
+                  userSelect: "none",
+                }}
+                title="View Support & Developer Contact Information (+254704393504 • rogersiru@gmail.com)"
+              >
+                <span>📞</span> Contact Us
+              </button>
 
               <button
                 type="button"
@@ -12793,9 +12887,18 @@ const EndpointUpdatesPage = () => {
               <span className="netops-footer-brand">NETOPS Version 2</span>
               <span className="netops-footer-dot">•</span>
               <span className="netops-footer-copy">copyright 2026</span>
+              <span className="netops-footer-dot">•</span>
+              <span style={{ color: "#334155", fontWeight: 600 }}>Support &amp; Inquiries:</span>
+              <a href="tel:+254704393504" className="netops-footer-contact-link" title="Call or WhatsApp Developer">
+                📞 +254704393504
+              </a>
+              <span className="netops-footer-dot">•</span>
+              <a href="mailto:rogersiru@gmail.com" className="netops-footer-contact-link" title="Email Developer">
+                ✉️ rogersiru@gmail.com
+              </a>
             </div>
             <div className="netops-footer-right">
-              Network Operations & Security
+              Network Operations &amp; Security Console
             </div>
           </footer>
         </main>
@@ -13046,6 +13149,116 @@ const EndpointUpdatesPage = () => {
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        )}
+
+        {showContactModal && (
+          <div
+            style={{
+              position: "fixed",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: "rgba(15, 23, 42, 0.6)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 99999,
+              padding: "16px",
+            }}
+            onClick={() => setShowContactModal(false)}
+          >
+            <div
+              style={{
+                backgroundColor: "#ffffff",
+                borderRadius: "12px",
+                width: "100%",
+                maxWidth: "460px",
+                padding: "24px",
+                boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
+                border: "1px solid #cbd5e1",
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "14px" }}>
+                <div>
+                  <div style={{ fontSize: "17px", fontWeight: "800", color: "#0f172a", display: "flex", alignItems: "center", gap: "8px" }}>
+                    <span>📞</span>
+                    <span>Contact Support &amp; Developer</span>
+                  </div>
+                  <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
+                    NETOPS Version 2 • Technical Support &amp; Inquiries
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowContactModal(false)}
+                  style={{ background: "transparent", border: "none", fontSize: "18px", color: "#64748b", cursor: "pointer", padding: "4px" }}
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div style={{ fontSize: "13px", color: "#334155", lineHeight: "1.5", marginBottom: "18px" }}>
+                Need technical assistance, want to report an issue, or have questions about NETOPS network management and access control? Reach out directly to us:
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: "12px", marginBottom: "20px" }}>
+                <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Phone / WhatsApp</div>
+                    <a href="tel:+254704393504" style={{ fontSize: "15px", fontWeight: "800", color: "#2563eb", textDecoration: "none" }}>
+                      +254704393504
+                    </a>
+                  </div>
+                  <div style={{ display: "flex", gap: "6px" }}>
+                    <a
+                      href="tel:+254704393504"
+                      className="primary-button small"
+                      style={{ textDecoration: "none", padding: "4px 10px", fontSize: "11px", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                    >
+                      <span>📞</span> Call
+                    </a>
+                    <a
+                      href="https://wa.me/254704393504"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="secondary-button small"
+                      style={{ textDecoration: "none", padding: "4px 10px", fontSize: "11px", borderColor: "#10b981", color: "#059669", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                    >
+                      <span>💬</span> WhatsApp
+                    </a>
+                  </div>
+                </div>
+
+                <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Email Address</div>
+                    <a href="mailto:rogersiru@gmail.com?subject=NETOPS%20Support%20Inquiry" style={{ fontSize: "14px", fontWeight: "800", color: "#2563eb", textDecoration: "none" }}>
+                      rogersiru@gmail.com
+                    </a>
+                  </div>
+                  <a
+                    href="mailto:rogersiru@gmail.com?subject=NETOPS%20Support%20Inquiry"
+                    className="primary-button small"
+                    style={{ textDecoration: "none", padding: "4px 10px", fontSize: "11px", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                  >
+                    <span>✉️</span> Email
+                  </a>
+                </div>
+              </div>
+
+              <div style={{ textAlign: "right" }}>
+                <button
+                  type="button"
+                  className="secondary-button small"
+                  onClick={() => setShowContactModal(false)}
+                >
+                  Close
+                </button>
+              </div>
             </div>
           </div>
         )}
