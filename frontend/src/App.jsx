@@ -7715,6 +7715,50 @@ return (
                   </div>
                 </div>
               </div>
+
+              {/* SERVICES WE OFFER IN SETTINGS */}
+              <div style={{ marginTop: "20px", paddingTop: "18px", borderTop: "1px solid #e2e8f0" }}>
+                <div style={{ fontSize: "12px", fontWeight: "700", color: "#0f172a", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "12px", display: "flex", alignItems: "center", gap: "6px" }}>
+                  <span>🛠️</span> Services We Offer
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "12px" }}>
+                  <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "12px 14px", display: "flex", gap: "12px", alignItems: "flex-start" }}>
+                    <span style={{ fontSize: "20px", background: "#e0f2fe", padding: "6px", borderRadius: "6px", lineHeight: 1 }}>📹</span>
+                    <div>
+                      <div style={{ fontWeight: "700", fontSize: "13px", color: "#0f172a" }}>CCTV Installation</div>
+                      <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>Commercial &amp; residential IP/analog surveillance setups, NVR configuration, and remote live feeds</div>
+                    </div>
+                  </div>
+                  <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "12px 14px", display: "flex", gap: "12px", alignItems: "flex-start" }}>
+                    <span style={{ fontSize: "20px", background: "#ecfdf5", padding: "6px", borderRadius: "6px", lineHeight: 1 }}>🔌</span>
+                    <div>
+                      <div style={{ fontWeight: "700", fontSize: "13px", color: "#0f172a" }}>Structured Cabling</div>
+                      <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>Cat6/Fiber optic trunking, network rack dressing, patch panel termination &amp; cable testing</div>
+                    </div>
+                  </div>
+                  <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "12px 14px", display: "flex", gap: "12px", alignItems: "flex-start" }}>
+                    <span style={{ fontSize: "20px", background: "#f5f3ff", padding: "6px", borderRadius: "6px", lineHeight: 1 }}>🌐</span>
+                    <div>
+                      <div style={{ fontWeight: "700", fontSize: "13px", color: "#0f172a" }}>Websites Maintenance</div>
+                      <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>Full-stack site maintenance, uptime monitoring, security hardening, SSL management &amp; backups</div>
+                    </div>
+                  </div>
+                  <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "12px 14px", display: "flex", gap: "12px", alignItems: "flex-start" }}>
+                    <span style={{ fontSize: "20px", background: "#eff6ff", padding: "6px", borderRadius: "6px", lineHeight: 1 }}>💻</span>
+                    <div>
+                      <div style={{ fontWeight: "700", fontSize: "13px", color: "#0f172a" }}>Software Installations and Updates</div>
+                      <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>OS deployment, patch baseline rollouts, enterprise software packaging &amp; license setup</div>
+                    </div>
+                  </div>
+                  <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "12px 14px", display: "flex", gap: "12px", alignItems: "flex-start" }}>
+                    <span style={{ fontSize: "20px", background: "#fff7ed", padding: "6px", borderRadius: "6px", lineHeight: 1 }}>⚙️</span>
+                    <div>
+                      <div style={{ fontWeight: "700", fontSize: "13px", color: "#0f172a" }}>Hardware Performance Maintenance</div>
+                      <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>Component diagnostic testing, thermal servicing, dust cleaning &amp; hardware tuning</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -12896,6 +12940,26 @@ const EndpointUpdatesPage = () => {
               <a href="mailto:rogersiru@gmail.com" className="netops-footer-contact-link" title="Email Developer">
                 ✉️ rogersiru@gmail.com
               </a>
+              <span className="netops-footer-dot">•</span>
+              <button
+                type="button"
+                onClick={() => setShowContactModal(true)}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  padding: 0,
+                  cursor: "pointer",
+                  color: "#2563eb",
+                  fontWeight: 600,
+                  fontSize: "11px",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "4px"
+                }}
+                title="View Services We Offer & Contact Information"
+              >
+                🛠️ Services We Offer
+              </button>
             </div>
             <div className="netops-footer-right">
               Network Operations &amp; Security Console
@@ -13175,10 +13239,12 @@ const EndpointUpdatesPage = () => {
                 backgroundColor: "#ffffff",
                 borderRadius: "12px",
                 width: "100%",
-                maxWidth: "460px",
+                maxWidth: "560px",
                 padding: "24px",
                 boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
                 border: "1px solid #cbd5e1",
+                maxHeight: "90vh",
+                overflowY: "auto",
               }}
               onClick={(e) => e.stopPropagation()}
             >
@@ -13189,7 +13255,7 @@ const EndpointUpdatesPage = () => {
                     <span>Contact Support &amp; Developer</span>
                   </div>
                   <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
-                    NETOPS Version 2 • Technical Support &amp; Inquiries
+                    NETOPS Version 2 • Technical Support, Services &amp; Inquiries
                   </div>
                 </div>
                 <button
@@ -13201,11 +13267,11 @@ const EndpointUpdatesPage = () => {
                 </button>
               </div>
 
-              <div style={{ fontSize: "13px", color: "#334155", lineHeight: "1.5", marginBottom: "18px" }}>
-                Need technical assistance, want to report an issue, or have questions about NETOPS network management and access control? Reach out directly to us:
+              <div style={{ fontSize: "13px", color: "#334155", lineHeight: "1.5", marginBottom: "16px" }}>
+                Need technical assistance, want to report an issue, or require professional networking and IT services? Reach out directly to us:
               </div>
 
-              <div style={{ display: "flex", flexDirection: "column", gap: "12px", marginBottom: "20px" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginBottom: "20px" }}>
                 <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <div>
                     <div style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Phone / WhatsApp</div>
@@ -13247,6 +13313,64 @@ const EndpointUpdatesPage = () => {
                   >
                     <span>✉️</span> Email
                   </a>
+                </div>
+              </div>
+
+              {/* SERVICES WE OFFER SECTION */}
+              <div style={{ marginBottom: "20px" }}>
+                <div style={{ fontSize: "12px", fontWeight: "700", color: "#0f172a", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "10px", display: "flex", alignItems: "center", gap: "6px" }}>
+                  <span>🛠️</span> Services We Offer
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                  <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "10px 14px", display: "flex", alignItems: "center", gap: "12px" }}>
+                    <div style={{ width: "34px", height: "34px", borderRadius: "8px", background: "#e0f2fe", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "18px", flexShrink: 0 }}>
+                      📹
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: "700", fontSize: "13px", color: "#0f172a" }}>CCTV Installation</div>
+                      <div style={{ fontSize: "12px", color: "#64748b" }}>Commercial &amp; residential IP/analog surveillance setup, NVR configuration, and remote monitoring</div>
+                    </div>
+                  </div>
+
+                  <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "10px 14px", display: "flex", alignItems: "center", gap: "12px" }}>
+                    <div style={{ width: "34px", height: "34px", borderRadius: "8px", background: "#ecfdf5", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "18px", flexShrink: 0 }}>
+                      🔌
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: "700", fontSize: "13px", color: "#0f172a" }}>Structured Cabling</div>
+                      <div style={{ fontSize: "12px", color: "#64748b" }}>Cat6/Cat6A/Fiber optic termination, server rack dressing, patch panel routing &amp; cable certification</div>
+                    </div>
+                  </div>
+
+                  <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "10px 14px", display: "flex", alignItems: "center", gap: "12px" }}>
+                    <div style={{ width: "34px", height: "34px", borderRadius: "8px", background: "#f5f3ff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "18px", flexShrink: 0 }}>
+                      🌐
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: "700", fontSize: "13px", color: "#0f172a" }}>Websites Maintenance</div>
+                      <div style={{ fontSize: "12px", color: "#64748b" }}>Full-stack web application support, uptime monitoring, security patching, SSL management &amp; backups</div>
+                    </div>
+                  </div>
+
+                  <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "10px 14px", display: "flex", alignItems: "center", gap: "12px" }}>
+                    <div style={{ width: "34px", height: "34px", borderRadius: "8px", background: "#eff6ff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "18px", flexShrink: 0 }}>
+                      💻
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: "700", fontSize: "13px", color: "#0f172a" }}>Software Installations and Updates</div>
+                      <div style={{ fontSize: "12px", color: "#64748b" }}>Operating system deployment, enterprise application packaging, scheduled patch rollouts &amp; license management</div>
+                    </div>
+                  </div>
+
+                  <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "10px 14px", display: "flex", alignItems: "center", gap: "12px" }}>
+                    <div style={{ width: "34px", height: "34px", borderRadius: "8px", background: "#fff7ed", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "18px", flexShrink: 0 }}>
+                      ⚙️
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: "700", fontSize: "13px", color: "#0f172a" }}>Hardware Performance Maintenance</div>
+                      <div style={{ fontSize: "12px", color: "#64748b" }}>Component diagnostics, thermal paste replenishment, dust cleaning, hardware upgrades &amp; preventative tuning</div>
+                    </div>
+                  </div>
                 </div>
               </div>
 

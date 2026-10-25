@@ -1478,6 +1478,19 @@ export default function LoginPage({
               ✉️ rogersiru@gmail.com
             </a>
           </div>
+
+          <div style={{ marginTop: "12px", paddingTop: "10px", borderTop: "1px dashed #e2e8f0" }}>
+            <div style={{ fontSize: "10px", fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "6px" }}>
+              Services We Offer
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "6px" }}>
+              <span style={{ background: "#f1f5f9", color: "#334155", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 500 }}>📹 CCTV Installation</span>
+              <span style={{ background: "#f1f5f9", color: "#334155", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 500 }}>🔌 Structured Cabling</span>
+              <span style={{ background: "#f1f5f9", color: "#334155", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 500 }}>🌐 Websites Maintenance</span>
+              <span style={{ background: "#f1f5f9", color: "#334155", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 500 }}>💻 Software Installations &amp; Updates</span>
+              <span style={{ background: "#f1f5f9", color: "#334155", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 500 }}>⚙️ Hardware Performance Maintenance</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
