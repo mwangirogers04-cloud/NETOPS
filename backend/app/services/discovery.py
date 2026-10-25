@@ -711,7 +711,7 @@ def save_discovered_devices(
                         timeout=2,
                     )
                     for line in res.stdout.splitlines():
-                        if any(st in line for st in ("REACHABLE", "DELAY", "PROBE", "STALE")):
+                        if any(st in line for st in ("REACHABLE", "PERMANENT")):
                             is_still_reachable = True
                             break
                 except Exception:

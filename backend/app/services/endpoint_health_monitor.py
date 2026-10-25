@@ -141,8 +141,8 @@ async def endpoint_health_monitor_loop():
                     res = subprocess.run(["ip", "neigh", "show"], capture_output=True, text=True, check=False, timeout=3)
                     for line in res.stdout.splitlines():
                         parts = line.strip().split()
-                        # Valid neighbour states include REACHABLE, DELAY, PROBE, and STALE (with valid lladdr)
-                        if any(st in parts for st in ("REACHABLE", "DELAY", "PROBE", "STALE")):
+                        # Valid neighbour states include REACHABLE and PERMANENT
+                        if any(st in parts for st in ("REACHABLE", "PERMANENT")):
                             if len(parts) >= 1:
                                 active_ips.add(parts[0].strip())
                             if "lladdr" in parts:
@@ -351,8 +351,8 @@ async def endpoint_health_monitor_loop():
                         if d.status == "online":
                             misses = _consecutive_misses.get(d_key, 0) + 1
                             _consecutive_misses[d_key] = misses
-                            if misses < 3:
-                                # Debounce: retain online status for 3 consecutive misses (~12s) to absorb transient ARP/Wi-Fi jitter
+                            if misses < 2:
+                                # Debounce: retain online status for 1 miss (~4s) to absorb transient ARP/Wi-Fi jitter
                                 online_devices.append(d)
                             else:
                                 d.status = "offline"

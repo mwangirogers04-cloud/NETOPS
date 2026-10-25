@@ -187,23 +187,38 @@ def get_devices(
 
     try:
         res = subprocess.run(["ip", "neigh", "show"], capture_output=True, text=True, check=False, timeout=1)
-        active_entries = set()
+        reachable_entries = set()
+        failed_entries = set()
         for line in res.stdout.splitlines():
-            if any(st in line for st in ("REACHABLE", "DELAY", "PROBE", "STALE")) and "lladdr" in line:
-                parts = line.strip().split()
-                if len(parts) >= 1:
-                    active_entries.add(parts[0].strip())
-                if "lladdr" in parts:
-                    idx = parts.index("lladdr")
-                    if idx + 1 < len(parts):
-                        active_entries.add(parts[idx + 1].strip().replace(":", "").replace("-", "").upper())
+            parts = line.strip().split()
+            ip_cand = parts[0].strip() if len(parts) >= 1 else None
+            mac_cand = None
+            if "lladdr" in parts:
+                idx = parts.index("lladdr")
+                if idx + 1 < len(parts):
+                    mac_cand = parts[idx + 1].strip().replace(":", "").replace("-", "").upper()
+
+            if any(st in parts for st in ("REACHABLE", "PERMANENT")):
+                if ip_cand:
+                    reachable_entries.add(ip_cand)
+                if mac_cand:
+                    reachable_entries.add(mac_cand)
+            elif "FAILED" in parts:
+                if ip_cand:
+                    failed_entries.add(ip_cand)
+                if mac_cand:
+                    failed_entries.add(mac_cand)
 
         for device in devices:
             d_mac = device.mac_address.replace(":", "").replace("-", "").upper() if device.mac_address else None
+            d_ip = device.ip_address.strip() if device.ip_address else None
+
             # Quarantined or isolated devices must read offline until authorized for internet
             if device.enforcement_status in ("quarantined", "isolated") or not getattr(device, "internet_access_authorized", True):
                 device.status = "offline"
-            elif device.status == "offline" and ((d_mac and d_mac in active_entries) or (device.ip_address and device.ip_address in active_entries)):
+            elif (d_ip and d_ip in failed_entries) or (d_mac and d_mac in failed_entries and d_ip not in reachable_entries):
+                device.status = "offline"
+            elif device.status == "offline" and ((d_mac and d_mac in reachable_entries) or (d_ip and d_ip in reachable_entries)):
                 device.status = "online"
                 device.last_seen = datetime.now()
     except Exception:
