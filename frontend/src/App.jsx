@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import LoginPage from "./components/LoginPage";
 import UsersPage from "./components/UsersPage";
 import SwitchVlanPage from "./components/SwitchVlanPage";
+import { NETOPS_FAQS, FAQ_CATEGORIES } from "./data/faqs";
 
 const API_URL =
   window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
@@ -66,6 +67,10 @@ function App() {
   // Authenticated Change Password modal state
   const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
   const [showContactModal, setShowContactModal] = useState(false);
+  const [showFaqModal, setShowFaqModal] = useState(false);
+  const [faqSearchQuery, setFaqSearchQuery] = useState("");
+  const [faqSelectedCategory, setFaqSelectedCategory] = useState("All");
+  const [expandedFaqIndex, setExpandedFaqIndex] = useState(null);
   const [currentPw, setCurrentPw] = useState("");
   const [newPw, setNewPw] = useState("");
   const [confirmPw, setConfirmPw] = useState("");
@@ -7513,6 +7518,14 @@ return (
           >
             <span>📨</span> Email &amp; SMS OTP Gateways
           </button>
+          <button
+            type="button"
+            className={activeTab === "faqs" ? "primary-button small" : "secondary-button small"}
+            onClick={() => setActiveTab("faqs")}
+            style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+          >
+            <span>❓</span> FAQs &amp; Knowledge Base
+          </button>
         </div>
 
         {/* TAB 1: ACTIVE FIREWALL & STATUS */}
@@ -8315,6 +8328,101 @@ return (
                 >
                   {notifTestLoading ? "Sending..." : "🚀 Send Live Test"}
                 </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 5: FAQS & KNOWLEDGE BASE */}
+        {activeTab === "faqs" && (
+          <div className="panel">
+            <div className="panel-header">
+              <div>
+                <div className="panel-title" style={{ fontSize: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
+                  <span>❓</span> Frequently Asked Questions (FAQ) &amp; Operational Knowledge Base
+                </div>
+                <div className="panel-subtitle">
+                  Operational guidance on zero-trust device admission, quarantine enforcement, schedule cycles, endpoint updates &amp; IT services
+                </div>
+              </div>
+            </div>
+
+            <div style={{ padding: "0 18px 20px" }}>
+              {/* Category filter pills */}
+              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "16px" }}>
+                {FAQ_CATEGORIES.map((cat) => (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => setFaqSelectedCategory(cat)}
+                    style={{
+                      padding: "6px 12px",
+                      borderRadius: "16px",
+                      border: faqSelectedCategory === cat ? "1px solid #2563eb" : "1px solid #cbd5e1",
+                      background: faqSelectedCategory === cat ? "#2563eb" : "#f8fafc",
+                      color: faqSelectedCategory === cat ? "#ffffff" : "#475569",
+                      fontSize: "12px",
+                      fontWeight: "700",
+                      cursor: "pointer",
+                      transition: "all 0.15s ease",
+                    }}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+
+              {/* Accordion items */}
+              <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                {NETOPS_FAQS.filter((faq) => faqSelectedCategory === "All" || faq.category === faqSelectedCategory).map((faq, idx) => {
+                  const isOpen = expandedFaqIndex === idx;
+                  return (
+                    <div
+                      key={faq.id || idx}
+                      style={{
+                        background: "#ffffff",
+                        border: "1px solid #e2e8f0",
+                        borderRadius: "8px",
+                        boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+                        overflow: "hidden",
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setExpandedFaqIndex(isOpen ? null : idx)}
+                        style={{
+                          width: "100%",
+                          textAlign: "left",
+                          padding: "14px 18px",
+                          background: isOpen ? "#f8fafc" : "#ffffff",
+                          border: "none",
+                          cursor: "pointer",
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          gap: "12px",
+                        }}
+                      >
+                        <div>
+                          <span style={{ fontSize: "10px", fontWeight: "700", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", display: "inline-block", marginBottom: "4px" }}>
+                            {faq.category}
+                          </span>
+                          <div style={{ fontSize: "14px", fontWeight: "700", color: "#0f172a" }}>
+                            {faq.question}
+                          </div>
+                        </div>
+                        <span style={{ fontSize: "14px", color: "#64748b", fontWeight: "800" }}>
+                          {isOpen ? "▲" : "▼"}
+                        </span>
+                      </button>
+                      {isOpen && (
+                        <div style={{ padding: "14px 18px", borderTop: "1px solid #e2e8f0", background: "#f8fafc", fontSize: "13px", color: "#334155", lineHeight: "1.6", whiteSpace: "pre-line" }}>
+                          {faq.answer}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -12832,6 +12940,30 @@ const EndpointUpdatesPage = () => {
 
               <button
                 type="button"
+                onClick={() => setShowFaqModal(true)}
+                className="sound-toggle-btn"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "5px 12px",
+                  borderRadius: "20px",
+                  border: "1px solid #cbd5e1",
+                  background: "#f8fafc",
+                  color: "#1e293b",
+                  fontSize: "12px",
+                  fontWeight: "700",
+                  cursor: "pointer",
+                  transition: "all 0.15s ease",
+                  userSelect: "none",
+                }}
+                title="View Frequently Asked Questions & Operational Knowledge Base"
+              >
+                <span>❓</span> FAQs
+              </button>
+
+              <button
+                type="button"
                 onClick={toggleAlertSound}
                 className="sound-toggle-btn"
                 style={{
@@ -12959,6 +13091,26 @@ const EndpointUpdatesPage = () => {
                 title="View Services We Offer & Contact Information"
               >
                 🛠️ Services We Offer
+              </button>
+              <span className="netops-footer-dot">•</span>
+              <button
+                type="button"
+                onClick={() => setShowFaqModal(true)}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  padding: 0,
+                  cursor: "pointer",
+                  color: "#2563eb",
+                  fontWeight: 600,
+                  fontSize: "11px",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "4px"
+                }}
+                title="View Frequently Asked Questions & Troubleshooting Guides"
+              >
+                ❓ FAQs
               </button>
             </div>
             <div className="netops-footer-right">
@@ -13267,6 +13419,23 @@ const EndpointUpdatesPage = () => {
                 </button>
               </div>
 
+              <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "8px", padding: "10px 14px", marginBottom: "16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ fontSize: "12px", color: "#1e40af" }}>
+                  💡 <strong>Have operational questions?</strong> Answers to device admission, schedules &amp; update FAQs are ready.
+                </div>
+                <button
+                  type="button"
+                  className="secondary-button small"
+                  onClick={() => {
+                    setShowContactModal(false);
+                    setShowFaqModal(true);
+                  }}
+                  style={{ whiteSpace: "nowrap", marginLeft: "10px", borderColor: "#3b82f6", color: "#2563eb", fontWeight: "700" }}
+                >
+                  View FAQs →
+                </button>
+              </div>
+
               <div style={{ fontSize: "13px", color: "#334155", lineHeight: "1.5", marginBottom: "16px" }}>
                 Need technical assistance, want to report an issue, or require professional networking and IT services? Reach out directly to us:
               </div>
@@ -13379,6 +13548,187 @@ const EndpointUpdatesPage = () => {
                   type="button"
                   className="secondary-button small"
                   onClick={() => setShowContactModal(false)}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showFaqModal && (
+          <div
+            style={{
+              position: "fixed",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: "rgba(15, 23, 42, 0.65)",
+              backdropFilter: "blur(4px)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 100000,
+              padding: "16px",
+            }}
+            onClick={() => setShowFaqModal(false)}
+          >
+            <div
+              style={{
+                backgroundColor: "#ffffff",
+                borderRadius: "12px",
+                width: "100%",
+                maxWidth: "680px",
+                maxHeight: "90vh",
+                overflowY: "auto",
+                padding: "24px",
+                boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
+                border: "1px solid #cbd5e1",
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "16px" }}>
+                <div>
+                  <div style={{ fontSize: "18px", fontWeight: "800", color: "#0f172a", display: "flex", alignItems: "center", gap: "8px" }}>
+                    <span>❓</span>
+                    <span>Frequently Asked Questions (FAQ)</span>
+                  </div>
+                  <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
+                    NETOPS Version 2 • Zero-Trust Access, Quarantine &amp; Operations Guide
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowFaqModal(false)}
+                  style={{ background: "transparent", border: "none", fontSize: "18px", color: "#64748b", cursor: "pointer", padding: "4px" }}
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Search Bar */}
+              <div style={{ marginBottom: "14px" }}>
+                <input
+                  type="text"
+                  placeholder="🔍 Search questions, keywords (e.g. quarantine, offline, schedule)..."
+                  value={faqSearchQuery}
+                  onChange={(e) => setFaqSearchQuery(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "9px 14px",
+                    borderRadius: "8px",
+                    border: "1px solid #cbd5e1",
+                    fontSize: "13px",
+                    outline: "none",
+                    boxSizing: "border-box",
+                  }}
+                />
+              </div>
+
+              {/* Category Pills */}
+              <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", marginBottom: "16px" }}>
+                {FAQ_CATEGORIES.map((cat) => (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => setFaqSelectedCategory(cat)}
+                    style={{
+                      padding: "4px 10px",
+                      borderRadius: "14px",
+                      border: faqSelectedCategory === cat ? "1px solid #2563eb" : "1px solid #cbd5e1",
+                      background: faqSelectedCategory === cat ? "#2563eb" : "#f8fafc",
+                      color: faqSelectedCategory === cat ? "#ffffff" : "#475569",
+                      fontSize: "11px",
+                      fontWeight: "700",
+                      cursor: "pointer",
+                      transition: "all 0.15s ease",
+                    }}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+
+              {/* Accordion List */}
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "20px" }}>
+                {NETOPS_FAQS
+                  .filter((faq) => {
+                    const matchesCategory = faqSelectedCategory === "All" || faq.category === faqSelectedCategory;
+                    const matchesQuery = !faqSearchQuery ||
+                      faq.question.toLowerCase().includes(faqSearchQuery.toLowerCase()) ||
+                      faq.answer.toLowerCase().includes(faqSearchQuery.toLowerCase());
+                    return matchesCategory && matchesQuery;
+                  })
+                  .map((faq, index) => {
+                    const isOpen = expandedFaqIndex === index;
+                    return (
+                      <div
+                        key={faq.id || index}
+                        style={{
+                          background: "#f8fafc",
+                          border: "1px solid #e2e8f0",
+                          borderRadius: "8px",
+                          overflow: "hidden",
+                        }}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => setExpandedFaqIndex(isOpen ? null : index)}
+                          style={{
+                            width: "100%",
+                            textAlign: "left",
+                            padding: "12px 16px",
+                            background: isOpen ? "#f1f5f9" : "transparent",
+                            border: "none",
+                            cursor: "pointer",
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            gap: "10px",
+                          }}
+                        >
+                          <div>
+                            <span style={{ fontSize: "10px", fontWeight: "700", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", display: "inline-block", marginBottom: "2px" }}>
+                              {faq.category}
+                            </span>
+                            <div style={{ fontSize: "13px", fontWeight: "700", color: "#0f172a" }}>
+                              {faq.question}
+                            </div>
+                          </div>
+                          <span style={{ fontSize: "12px", color: "#64748b", fontWeight: "700" }}>
+                            {isOpen ? "▲" : "▼"}
+                          </span>
+                        </button>
+                        {isOpen && (
+                          <div style={{ padding: "12px 16px", borderTop: "1px solid #e2e8f0", background: "#ffffff", fontSize: "13px", color: "#334155", lineHeight: "1.6", whiteSpace: "pre-line" }}>
+                            {faq.answer}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+              </div>
+
+              {/* Modal Footer with Support Contact */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: "14px", borderTop: "1px solid #e2e8f0" }}>
+                <div style={{ fontSize: "12px", color: "#64748b" }}>
+                  Need more help?{" "}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowFaqModal(false);
+                      setShowContactModal(true);
+                    }}
+                    style={{ background: "transparent", border: "none", padding: 0, color: "#2563eb", fontWeight: "700", cursor: "pointer", textDecoration: "underline" }}
+                  >
+                    Contact Developer (+254704393504)
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  className="secondary-button small"
+                  onClick={() => setShowFaqModal(false)}
                 >
                   Close
                 </button>
