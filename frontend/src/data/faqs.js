@@ -18,6 +18,12 @@ export const NETOPS_FAQS = [
     answer: "Rejecting a device immediately revokes its internet access and places it into quarantine. If an existing device is deleted, its access authorization is revoked immediately, denying it internet access until it goes through the onboarding approval procedure again."
   },
   {
+    id: "faq-home-router-blocking",
+    category: "Device Admission & Security",
+    question: "Can I block disturbing or unauthorized users if I only have a home Wi-Fi router and no hardware firewall?",
+    answer: "Yes, absolutely! You do NOT need an expensive enterprise hardware firewall to block users on your home network. NETOPS features a built-in Layer 2 (L2) ARP quarantine engine. As long as your NETOPS machine is connected to the same Wi-Fi or LAN as the offending device and home router, NETOPS can instantly sever the offending device's communication with the router gateway (e.g. 192.168.0.1 or 192.168.1.1). Simply reject or isolate the device from the NETOPS dashboard, and its internet drops immediately and reads Offline."
+  },
+  {
     id: "faq-schedule-quarantine",
     category: "Access Schedules & Time Controls",
     question: "If a quarantined device is scheduled, does it exit quarantine immediately?",
