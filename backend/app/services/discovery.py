@@ -718,28 +718,46 @@ def save_discovered_devices(
                     pass
                 if not is_still_reachable:
                     preferred_iface = existing_device.network_interface or scanned_interface or "eth0"
-                    try:
-                        res = subprocess.run(
-                            ["arping", "-c", "2", "-w", "1.5", "-I", preferred_iface, existing_device.ip_address],
-                            capture_output=True,
-                            timeout=3,
-                        )
-                        if res.returncode == 0:
-                            is_still_reachable = True
-                    except Exception:
-                        pass
+                    ifaces_to_try = [preferred_iface]
+                    for alt_iface in ("eth0", "wlan0"):
+                        if alt_iface not in ifaces_to_try:
+                            ifaces_to_try.append(alt_iface)
 
-            if not is_still_reachable:
+                    for iface in ifaces_to_try:
+                        try:
+                            res = subprocess.run(
+                                ["arping", "-c", "2", "-w", "1.5", "-I", iface, existing_device.ip_address],
+                                capture_output=True,
+                                timeout=3,
+                            )
+                            if res.returncode == 0:
+                                is_still_reachable = True
+                                existing_device.network_interface = iface
+                                break
+                        except Exception:
+                            pass
+
+            if not is_still_reachable and existing_device.status == "online":
                 existing_device.status = "offline"
-                create_event(
-                    db,
-                    "device_offline",
-                    (
-                        f"Device {existing_device.hostname or existing_device.ip_address or dev_mac} "
-                        f"({existing_device.mac_address}) went offline / disconnected from the LAN."
-                    ),
-                    existing_device.id,
+                latest_offline = db.scalar(
+                    select(Event)
+                    .where(
+                        Event.device_id == existing_device.id,
+                        Event.event_type == "device_offline",
+                    )
+                    .order_by(Event.id.desc())
+                    .limit(1)
                 )
+                if not latest_offline:
+                    create_event(
+                        db,
+                        "device_offline",
+                        (
+                            f"Device {existing_device.hostname or existing_device.ip_address or dev_mac} "
+                            f"({existing_device.mac_address}) went offline / disconnected from the LAN."
+                        ),
+                        existing_device.id,
+                    )
 
     # ---------------------------------------------------------
     # Process discovered devices

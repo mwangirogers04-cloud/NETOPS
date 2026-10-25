@@ -222,7 +222,10 @@ async def endpoint_health_monitor_loop():
                     if not is_active and d.status == "online" and d.ip_address:
                         # Prioritize the device's recorded interface, then fall back to others
                         preferred_iface = getattr(d, "network_interface", None) or "eth0"
-                        ifaces_to_try = [preferred_iface] if preferred_iface in ("eth0", "wlan0") else ["eth0", "wlan0"]
+                        ifaces_to_try = [preferred_iface]
+                        for alt in ("eth0", "wlan0"):
+                            if alt not in ifaces_to_try:
+                                ifaces_to_try.append(alt)
                         for iface in ifaces_to_try:
                             try:
                                 res = subprocess.run(
@@ -233,6 +236,7 @@ async def endpoint_health_monitor_loop():
                                 )
                                 if res.returncode == 0:
                                     is_active = True
+                                    d.network_interface = iface
                                     break
                             except Exception:
                                 pass
@@ -352,15 +356,25 @@ async def endpoint_health_monitor_loop():
                                 online_devices.append(d)
                             else:
                                 d.status = "offline"
-                                create_event(
-                                    db=db,
-                                    event_type="device_offline",
-                                    message=(
-                                        f"Device {d.hostname or d.ip_address} ({d.mac_address}) "
-                                        f"went offline / disconnected from the LAN."
-                                    ),
-                                    device_id=d.id,
+                                latest_offline = db.scalar(
+                                    select(Event)
+                                    .where(
+                                        Event.device_id == d.id,
+                                        Event.event_type == "device_offline",
+                                    )
+                                    .order_by(Event.id.desc())
+                                    .limit(1)
                                 )
+                                if not latest_offline:
+                                    create_event(
+                                        db=db,
+                                        event_type="device_offline",
+                                        message=(
+                                            f"Device {d.hostname or d.ip_address} ({d.mac_address}) "
+                                            f"went offline / disconnected from the LAN."
+                                        ),
+                                        device_id=d.id,
+                                    )
 
             online_macs = set()
             online_ips = set()

@@ -250,7 +250,12 @@ def enforce_device_access(
     if enforcement_status in ("quarantined", "isolated") or not device.internet_access_authorized:
         device.status = "offline"
     else:
-        device.status = "online"
+        # If transitioning from quarantine/isolation into allowed access, set online
+        if old_enforcement_status in ("quarantined", "isolated"):
+            device.status = "online"
+        # Otherwise, preserve existing online/offline status determined by physical reachability
+        elif not device.status:
+            device.status = "online"
 
     # ---------------------------------------------------------
     # Audit event.
