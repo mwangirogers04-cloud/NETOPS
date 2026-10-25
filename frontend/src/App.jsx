@@ -2033,8 +2033,11 @@ const renderInlineScheduleRow = (device, colSpan = 10) => {
 const DevicesPage = () => {
   const getDeviceIcon = (type) => {
     switch (type) {
-      case "ip_phone":
       case "phone":
+      case "mobile":
+      case "smartphone":
+        return "📱";
+      case "ip_phone":
       case "voip":
         return "📞";
       case "computer":
@@ -3596,8 +3599,10 @@ const LanScannerPage = () => {
 
   const getDeviceIcon = (type) => {
     switch (type) {
-      case "ip_phone":
       case "phone":
+      case "mobile":
+      case "smartphone": return "📱";
+      case "ip_phone":
       case "voip": return "📞";
       case "computer": return "💻";
       case "cctv": return "📹";

@@ -197,11 +197,17 @@ def _run_arp_scan_on_interface(network: str | None, target_iface: str | None) ->
     else:
         cmd.append("--localnet")
 
-    cmd.extend(["--retry=2", "--timeout=800"])
+    is_wireless = is_wireless_interface(target_iface) if target_iface else False
+    if is_wireless:
+        # Smartphones (Android/iOS) on Wi-Fi use power-saving sleep (802.11 PSM / DTIM)
+        # Using 4 retries and 1200ms timeout ensures sleeping phones wake up and respond
+        cmd.extend(["--retry=4", "--timeout=1200"])
+    else:
+        cmd.extend(["--retry=2", "--timeout=800"])
 
     discovered = []
     try:
-        res = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=10)
+        res = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=12)
         for line in res.stdout.splitlines():
             parts = line.strip().split()
             if len(parts) >= 2:
@@ -210,18 +216,33 @@ def _run_arp_scan_on_interface(network: str | None, target_iface: str | None) ->
                 vendor_cand = " ".join(parts[2:]).strip() if len(parts) >= 3 else None
 
                 if is_valid_ip_address(ip_cand) and len(mac_cand) == 17 and ":" in mac_cand:
+                    clean_vendor = vendor_cand if vendor_cand and "unknown" not in vendor_cand.lower() else None
+                    dev_type = classify_device(
+                        hostname=None,
+                        vendor=clean_vendor,
+                        mac_address=mac_cand.upper(),
+                    )
+                    # Detect smartphone / mobile device with randomized/private Wi-Fi MAC
+                    try:
+                        first_byte = int(mac_cand.split(":")[0], 16)
+                        if (first_byte & 0x02) and (is_wireless or not clean_vendor):
+                            if not clean_vendor or "locally administered" in vendor_cand.lower():
+                                clean_vendor = "Mobile Phone (Private Wi-Fi MAC)"
+                            if dev_type == "unknown" or dev_type == "computer":
+                                dev_type = "phone"
+                    except Exception:
+                        pass
+
+                    dev_hostname = f"Phone-{ip_cand.replace('.', '-')}" if dev_type == "phone" else None
+
                     discovered.append({
                         "ip_address": ip_cand,
                         "mac_address": mac_cand.upper(),
                         "interface": target_iface,
-                        "medium": "wireless" if is_wireless_interface(target_iface) else "wired",
-                        "hostname": None,
-                        "vendor": vendor_cand if vendor_cand and "unknown" not in vendor_cand.lower() else None,
-                        "device_type": classify_device(
-                            hostname=None,
-                            vendor=vendor_cand,
-                            mac_address=mac_cand.upper(),
-                        ),
+                        "medium": "wireless" if is_wireless else "wired",
+                        "hostname": dev_hostname,
+                        "vendor": clean_vendor,
+                        "device_type": dev_type,
                     })
     except Exception as exc:
         print(f"[DISCOVERY] arp-scan discovery note on {target_iface}: {exc}")
@@ -777,11 +798,19 @@ def save_discovered_devices(
         # Classify device
         # -----------------------------------------------------
 
-        detected_type = classify_device(
-            hostname=hostname,
-            vendor=vendor,
-            mac_address=mac_address,
-        )
+        detected_type = discovered.get("device_type")
+        if not detected_type or detected_type == "unknown":
+            detected_type = classify_device(
+                hostname=hostname,
+                vendor=vendor,
+                mac_address=mac_address,
+            )
+
+        if detected_type == "phone":
+            if not hostname or hostname.startswith("LAN-HOST-") or hostname.startswith("HOST-"):
+                hostname = f"Phone-{ip_address.replace('.', '-')}"
+            if not vendor or vendor == "LAN Device":
+                vendor = discovered.get("vendor") or "Mobile Phone (Wi-Fi Private MAC)"
 
         # -----------------------------------------------------
         # Existing device

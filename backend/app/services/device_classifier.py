@@ -47,7 +47,7 @@ def classify_device(
         return "computer"
 
     # ---------------------------------------------------------
-    # IP Phones / VoIP Telephony
+    # IP Phones / VoIP Telephony & Mobile Smartphones
     # ---------------------------------------------------------
 
     phone_keywords = [
@@ -71,6 +71,30 @@ def classify_device(
 
     if any(keyword in text for keyword in phone_keywords):
         return "ip_phone"
+
+    mobile_keywords = [
+        "phone",
+        "smartphone",
+        "mobile",
+        "android",
+        "iphone",
+        "ipad",
+        "galaxy",
+        "samsung",
+        "pixel",
+        "xiaomi",
+        "redmi",
+        "infinix",
+        "tecno",
+        "oppo",
+        "vivo",
+        "oneplus",
+        "realme",
+        "huawei mobile",
+    ]
+
+    if any(keyword in text for keyword in mobile_keywords):
+        return "phone"
 
     # ---------------------------------------------------------
     # Access Points / Wireless Infrastructure
