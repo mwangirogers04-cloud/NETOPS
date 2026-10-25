@@ -185,44 +185,10 @@ def get_devices(
         select(Device).order_by(Device.id)
     ).all()
 
-    try:
-        res = subprocess.run(["ip", "neigh", "show"], capture_output=True, text=True, check=False, timeout=1)
-        reachable_entries = set()
-        failed_entries = set()
-        for line in res.stdout.splitlines():
-            parts = line.strip().split()
-            ip_cand = parts[0].strip() if len(parts) >= 1 else None
-            mac_cand = None
-            if "lladdr" in parts:
-                idx = parts.index("lladdr")
-                if idx + 1 < len(parts):
-                    mac_cand = parts[idx + 1].strip().replace(":", "").replace("-", "").upper()
-
-            if any(st in parts for st in ("REACHABLE", "PERMANENT")):
-                if ip_cand:
-                    reachable_entries.add(ip_cand)
-                if mac_cand:
-                    reachable_entries.add(mac_cand)
-            elif "FAILED" in parts:
-                if ip_cand:
-                    failed_entries.add(ip_cand)
-                if mac_cand:
-                    failed_entries.add(mac_cand)
-
-        for device in devices:
-            d_mac = device.mac_address.replace(":", "").replace("-", "").upper() if device.mac_address else None
-            d_ip = device.ip_address.strip() if device.ip_address else None
-
-            # Quarantined or isolated devices must read offline until authorized for internet
-            if device.enforcement_status in ("quarantined", "isolated") or not getattr(device, "internet_access_authorized", True):
-                device.status = "offline"
-            elif (d_ip and d_ip in failed_entries) or (d_mac and d_mac in failed_entries and d_ip not in reachable_entries):
-                device.status = "offline"
-            elif device.status == "offline" and ((d_mac and d_mac in reachable_entries) or (d_ip and d_ip in reachable_entries)):
-                device.status = "online"
-                device.last_seen = datetime.now()
-    except Exception:
-        pass
+    for device in devices:
+        # Quarantined or isolated devices must read offline until authorized for internet
+        if device.enforcement_status in ("quarantined", "isolated") or not getattr(device, "internet_access_authorized", True):
+            device.status = "offline"
 
     attach_update_information(devices, db)
 

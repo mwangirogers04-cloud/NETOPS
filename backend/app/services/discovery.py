@@ -603,7 +603,7 @@ def discover_devices(network: str, interface: str | None = None):
                 try:
                     probe_cmd = ["arping", "-c", "1", "-w", "1"]
                     if iface:
-                        probe_cmd.extend(["-I", iface])
+                        probe_cmd.extend(["-i", iface])
                     probe_cmd.append(ip_addr)
                     probe_res = subprocess.run(
                         probe_cmd,
@@ -726,7 +726,7 @@ def save_discovered_devices(
                     for iface in ifaces_to_try:
                         try:
                             res = subprocess.run(
-                                ["arping", "-c", "2", "-w", "1.5", "-I", iface, existing_device.ip_address],
+                                ["arping", "-c", "2", "-w", "2", "-i", iface, existing_device.ip_address],
                                 capture_output=True,
                                 timeout=3,
                             )
@@ -739,16 +739,16 @@ def save_discovered_devices(
 
             if not is_still_reachable and existing_device.status == "online":
                 existing_device.status = "offline"
-                latest_offline = db.scalar(
+                last_ev = db.scalar(
                     select(Event)
                     .where(
                         Event.device_id == existing_device.id,
-                        Event.event_type == "device_offline",
+                        Event.event_type.in_(["device_online", "device_offline"]),
                     )
                     .order_by(Event.id.desc())
                     .limit(1)
                 )
-                if not latest_offline:
+                if not last_ev or last_ev.event_type != "device_offline":
                     create_event(
                         db,
                         "device_offline",
@@ -1040,15 +1040,25 @@ def save_discovered_devices(
                 was_offline = (existing_device.status != "online")
                 existing_device.status = "online"
                 if was_offline:
-                    create_event(
-                        db,
-                        "device_online",
-                        (
-                            f"Device {existing_device.hostname or existing_device.ip_address} "
-                            f"({existing_device.mac_address}) reconnected and is back online on the LAN."
-                        ),
-                        existing_device.id,
+                    last_ev = db.scalar(
+                        select(Event)
+                        .where(
+                            Event.device_id == existing_device.id,
+                            Event.event_type.in_(["device_online", "device_offline"]),
+                        )
+                        .order_by(Event.id.desc())
+                        .limit(1)
                     )
+                    if not last_ev or last_ev.event_type != "device_online":
+                        create_event(
+                            db,
+                            "device_online",
+                            (
+                                f"Device {existing_device.hostname or existing_device.ip_address} "
+                                f"({existing_device.mac_address}) reconnected and is back online on the LAN."
+                            ),
+                            existing_device.id,
+                        )
             saved_devices.append(existing_device)
 
             if ip_changed:

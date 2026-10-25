@@ -112,12 +112,14 @@ async def endpoint_health_monitor_loop():
 
                 for iface in ("eth0", "wlan0"):
                     try:
+                        retries = "3" if iface == "wlan0" else "2"
+                        t_out = "800" if iface == "wlan0" else "600"
                         res = subprocess.run(
-                            ["arp-scan", "--interface", iface, "--localnet", "--retry=2", "--timeout=600"],
+                            ["arp-scan", "--interface", iface, "--localnet", f"--retry={retries}", f"--timeout={t_out}"],
                             capture_output=True,
                             text=True,
                             check=False,
-                            timeout=5,
+                            timeout=8,
                         )
                         for line in res.stdout.splitlines():
                             parts = line.strip().split()
@@ -219,7 +221,7 @@ async def endpoint_health_monitor_loop():
                     d_mac = d.mac_address.replace(":", "").replace("-", "").upper() if d.mac_address else None
                     is_active = (d.ip_address and d.ip_address in active_ips) or (d_mac and d_mac in active_macs)
 
-                    if not is_active and d.status == "online" and d.ip_address:
+                    if not is_active and d.ip_address:
                         # Prioritize the device's recorded interface, then fall back to others
                         preferred_iface = getattr(d, "network_interface", None) or "eth0"
                         ifaces_to_try = [preferred_iface]
@@ -229,7 +231,7 @@ async def endpoint_health_monitor_loop():
                         for iface in ifaces_to_try:
                             try:
                                 res = subprocess.run(
-                                    ["arping", "-c", "2", "-w", "1.5", "-I", iface, d.ip_address],
+                                    ["arping", "-c", "2", "-w", "2", "-i", iface, d.ip_address],
                                     capture_output=True,
                                     check=False,
                                     timeout=3,
@@ -242,17 +244,20 @@ async def endpoint_health_monitor_loop():
                                 pass
 
                         if not is_active:
-                            try:
-                                res = subprocess.run(
-                                    ["ping", "-c", "1", "-W", "1", d.ip_address],
-                                    capture_output=True,
-                                    check=False,
-                                    timeout=2,
-                                )
-                                if res.returncode == 0:
-                                    is_active = True
-                            except Exception:
-                                pass
+                            for iface in ifaces_to_try:
+                                try:
+                                    res = subprocess.run(
+                                        ["ping", "-I", iface, "-c", "1", "-W", "1", d.ip_address],
+                                        capture_output=True,
+                                        check=False,
+                                        timeout=2,
+                                    )
+                                    if res.returncode == 0:
+                                        is_active = True
+                                        d.network_interface = iface
+                                        break
+                                except Exception:
+                                    pass
 
                     d_key = d_mac or str(d.id)
                     if is_active:
@@ -330,42 +335,58 @@ async def endpoint_health_monitor_loop():
                             d.status = expected_status
                             if expected_status == "online":
                                 ev_type = "new_device" if d.approval_status == "pending" else "device_online"
-                                create_event(
-                                    db=db,
-                                    event_type=ev_type,
-                                    message=(
-                                        f"Machine connected to LAN ({d.network_interface or 'eth0'}): "
-                                        f"{d.hostname or d.ip_address} ({d.ip_address or 'LAN'} / {d.mac_address}) "
-                                        f"[{d.vendor or 'LAN Device'}] — "
-                                        + (
-                                            f"Placed in VLAN {d.vlan_id or 90} Quarantine, awaiting administrator review."
-                                            if d.approval_status == "pending"
-                                            else f"Online on VLAN {d.vlan_id or 20} ({d.enforcement_status})."
+                                last_ev = (
+                                    db.scalars(
+                                        select(Event)
+                                        .where(
+                                            Event.device_id == d.id,
+                                            Event.event_type.in_(["device_online", "device_offline"]),
                                         )
-                                    ),
-                                    device_id=d.id,
+                                        .order_by(Event.id.desc())
+                                    ).first()
+                                    if hasattr(db, "scalars")
+                                    else None
                                 )
+                                if not last_ev or last_ev.event_type != "device_online":
+                                    create_event(
+                                        db=db,
+                                        event_type=ev_type,
+                                        message=(
+                                            f"Machine connected to LAN ({d.network_interface or 'eth0'}): "
+                                            f"{d.hostname or d.ip_address} ({d.ip_address or 'LAN'} / {d.mac_address}) "
+                                            f"[{d.vendor or 'LAN Device'}] — "
+                                            + (
+                                                f"Placed in VLAN {d.vlan_id or 90} Quarantine, awaiting administrator review."
+                                                if d.approval_status == "pending"
+                                                else f"Online on VLAN {d.vlan_id or 20} ({d.enforcement_status})."
+                                            )
+                                        ),
+                                        device_id=d.id,
+                                    )
                         if expected_status == "online":
                             online_devices.append(d)
                     else:
                         if d.status == "online":
                             misses = _consecutive_misses.get(d_key, 0) + 1
                             _consecutive_misses[d_key] = misses
-                            if misses < 2:
-                                # Debounce: retain online status for 1 miss (~4s) to absorb transient ARP/Wi-Fi jitter
+                            if misses < 3:
+                                # Debounce: retain online status for 2 misses (~8s) to absorb transient ARP/Wi-Fi jitter
                                 online_devices.append(d)
                             else:
                                 d.status = "offline"
-                                latest_offline = db.scalar(
-                                    select(Event)
-                                    .where(
-                                        Event.device_id == d.id,
-                                        Event.event_type == "device_offline",
-                                    )
-                                    .order_by(Event.id.desc())
-                                    .limit(1)
+                                last_ev = (
+                                    db.scalars(
+                                        select(Event)
+                                        .where(
+                                            Event.device_id == d.id,
+                                            Event.event_type.in_(["device_online", "device_offline"]),
+                                        )
+                                        .order_by(Event.id.desc())
+                                    ).first()
+                                    if hasattr(db, "scalars")
+                                    else None
                                 )
-                                if not latest_offline:
+                                if not last_ev or last_ev.event_type != "device_offline":
                                     create_event(
                                         db=db,
                                         event_type="device_offline",
