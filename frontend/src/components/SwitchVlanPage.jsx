@@ -135,6 +135,10 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
 
   // Handle Delete VLAN
   const handleDeleteVlan = async (vlanId, vlanName) => {
+    if (!isSuperAdmin) {
+      showStatus("Permission Denied: Only Super Administrators can delete VLAN configurations.", "error");
+      return;
+    }
     if (!window.confirm(`Are you sure you want to delete VLAN ${vlanId} ('${vlanName}') from the switch? This will remove its configuration.`)) {
       return;
     }
@@ -674,7 +678,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                               >
                                 ✏️ Edit
                               </button>
-                              {!v.is_default && !v.is_quarantine && (
+                              {isSuperAdmin && !v.is_default && !v.is_quarantine && (
                                 <button
                                   type="button"
                                   className="secondary-button small"

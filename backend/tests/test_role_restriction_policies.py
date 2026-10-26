@@ -12,6 +12,9 @@ from backend.app.models.event import Event
 from backend.app.models.user import User
 from backend.app.models.switch_config import SwitchConfig
 from backend.app.models.firewall_config import FirewallConfig
+from backend.app.models.vlan_config import VlanConfig
+from backend.app.models.patch_job import PatchJob
+from backend.app.models.access_schedule import AccessSchedule
 from backend.app.services.auth_service import create_access_token, hash_password
 
 
@@ -142,15 +145,28 @@ def test_admin_cannot_create_or_demote_admin():
     assert res_demote.status_code == 403
     assert "only super administrators" in res_demote.json()["detail"].lower()
 
-    # D. Administrator CANNOT delete an admin account
+    # D. Administrator CANNOT delete an admin account (or any user account)
     res_delete = client.delete(
         f"/users/{target_id}",
         headers=admin_hdr,
     )
     assert res_delete.status_code == 403
-    assert "only super administrators can delete administrator accounts" in res_delete.json()["detail"].lower()
+    assert "super administrator" in res_delete.json()["detail"].lower()
 
-    # E. Super Administrator CAN change roles and delete admin accounts
+    # Administrator CANNOT delete a standard user account either
+    db = TestingSessionLocal()
+    reg_user = db.query(User).filter(User.username == "regular_user").first()
+    reg_id = reg_user.id
+    db.close()
+
+    res_del_reg = client.delete(
+        f"/users/{reg_id}",
+        headers=admin_hdr,
+    )
+    assert res_del_reg.status_code == 403
+    assert "super administrator" in res_del_reg.json()["detail"].lower()
+
+    # E. Super Administrator CAN change roles and delete accounts
     res_demote_dev = client.patch(
         f"/users/{target_id}",
         headers=dev_hdr,
@@ -158,6 +174,13 @@ def test_admin_cannot_create_or_demote_admin():
     )
     assert res_demote_dev.status_code == 200
     assert res_demote_dev.json()["user"]["role"] == "user"
+
+    res_del_dev = client.delete(
+        f"/users/{target_id}",
+        headers=dev_hdr,
+    )
+    assert res_del_dev.status_code == 200
+    assert res_del_dev.json()["status"] == "deleted"
 
 
 # -------------------------------------------------------------
@@ -260,6 +283,82 @@ def test_admin_cannot_permanently_delete_devices():
     db2 = TestingSessionLocal()
     assert db2.get(Device, dev_id) is None
     db2.close()
+
+
+def test_admin_cannot_delete_vlans_jobs_or_schedules():
+    """Verify all delete options (VLANs, patch jobs, access schedules) are denied to Administrators."""
+    admin_hdr = auth_headers("net_admin_1", "admin")
+    dev_hdr = auth_headers("lead_developer", "super_admin")
+
+    db = TestingSessionLocal()
+    # 1. Seed custom VLAN
+    vlan = VlanConfig(vlan_id=77, name="Finance_Ops", description="Finance subnet", subnet="192.168.77.0/24")
+    db.add(vlan)
+
+    # 2. Seed Patch Job
+    job = PatchJob(
+        hostname="FINANCE-PC",
+        ip_address="192.168.77.10",
+        action="INSTALL_ALL_UPDATES",
+        status="PENDING",
+    )
+    db.add(job)
+
+    # 3. Seed Access Schedule
+    dev = Device(
+        mac_address="22:33:44:55:66:77",
+        ip_address="192.168.77.20",
+        hostname="FINANCE-TERM",
+        approval_status="approved",
+        vlan_id=77,
+    )
+    db.add(dev)
+    db.commit()
+
+    schedule = AccessSchedule(
+        device_id=dev.id,
+        enabled=True,
+        days="mon,tue,wed,thu,fri",
+        start_time=datetime.strptime("08:00", "%H:%M").time(),
+        end_time=datetime.strptime("17:00", "%H:%M").time(),
+    )
+    db.add(schedule)
+    db.commit()
+
+    vlan_id = vlan.vlan_id
+    job_id = job.id
+    sched_id = schedule.id
+    db.close()
+
+    # --- A. VLAN Deletion ---
+    # Administrator CANNOT delete VLAN (403 Forbidden)
+    res_vlan_admin = client.delete(f"/switches/vlans/{vlan_id}", headers=admin_hdr)
+    assert res_vlan_admin.status_code == 403
+    assert "super administrator" in res_vlan_admin.json()["detail"].lower()
+
+    # Super Administrator CAN delete VLAN
+    res_vlan_dev = client.delete(f"/switches/vlans/{vlan_id}", headers=dev_hdr)
+    assert res_vlan_dev.status_code == 200
+
+    # --- B. Patch Job Deletion ---
+    # Administrator CANNOT delete patch job (403 Forbidden)
+    res_job_admin = client.delete(f"/endpoint-updates/jobs/{job_id}", headers=admin_hdr)
+    assert res_job_admin.status_code == 403
+    assert "super administrator" in res_job_admin.json()["detail"].lower()
+
+    # Super Administrator CAN delete patch job
+    res_job_dev = client.delete(f"/endpoint-updates/jobs/{job_id}", headers=dev_hdr)
+    assert res_job_dev.status_code == 200
+
+    # --- C. Access Schedule Deletion ---
+    # Administrator CANNOT delete access schedule (403 Forbidden)
+    res_sched_admin = client.delete(f"/access-schedules/{sched_id}", headers=admin_hdr)
+    assert res_sched_admin.status_code == 403
+    assert "super administrator" in res_sched_admin.json()["detail"].lower()
+
+    # Super Administrator CAN delete access schedule
+    res_sched_dev = client.delete(f"/access-schedules/{sched_id}", headers=dev_hdr)
+    assert res_sched_dev.status_code == 200
 
 
 # -------------------------------------------------------------

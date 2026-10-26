@@ -11,6 +11,8 @@ from backend.app.models.access_schedule import AccessSchedule
 from backend.app.models.device import Device
 from backend.app.models.endpoint_update import EndpointUpdate
 from backend.app.models.patch_job import PatchJob, UpdatePolicy
+from backend.app.models.user import User
+from backend.app.services.auth_service import create_access_token, hash_password
 from backend.app.services.patch_remediation_service import (
     create_patch_job,
     dispatch_due_scheduled_jobs,
@@ -335,8 +337,39 @@ def test_cancel_and_delete_patch_job(client, db_session):
     assert cancel_res.status_code == 200
     assert cancel_res.json()["status"] == "CANCELLED"
 
-    # Delete the job
-    del_res = client.delete(f"/endpoint-updates/jobs/{job_id}")
+    # 1. Unauthenticated delete is rejected (401)
+    del_unauth = client.delete(f"/endpoint-updates/jobs/{job_id}")
+    assert del_unauth.status_code == 401
+
+    # 2. Administrator cannot delete patch job (403)
+    admin = User(
+        username="patch_admin",
+        email="patch_admin@example.com",
+        hashed_password=hash_password("Admin@1234"),
+        role="admin",
+        is_active=True,
+        is_verified=True,
+    )
+    dev = User(
+        username="patch_dev",
+        email="patch_dev@example.com",
+        hashed_password=hash_password("Dev@1234"),
+        role="super_admin",
+        is_active=True,
+        is_verified=True,
+    )
+    db_session.add_all([admin, dev])
+    db_session.commit()
+
+    admin_token = create_access_token({"sub": admin.username, "role": admin.role, "user_id": admin.id})
+    dev_token = create_access_token({"sub": dev.username, "role": dev.role, "user_id": dev.id})
+
+    del_admin = client.delete(f"/endpoint-updates/jobs/{job_id}", headers={"Authorization": f"Bearer {admin_token}"})
+    assert del_admin.status_code == 403
+    assert "super administrator" in del_admin.json()["detail"].lower()
+
+    # 3. Super Admin can delete the job
+    del_res = client.delete(f"/endpoint-updates/jobs/{job_id}", headers={"Authorization": f"Bearer {dev_token}"})
     assert del_res.status_code == 200
 
     # Verify not found

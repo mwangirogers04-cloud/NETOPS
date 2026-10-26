@@ -468,7 +468,7 @@ def update_switch_vlan(
 @router.delete("/vlans/{vlan_id}")
 def delete_switch_vlan(
     vlan_id: int,
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_super_admin),
     db: Session = Depends(get_db),
 ):
     """

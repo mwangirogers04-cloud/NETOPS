@@ -225,37 +225,56 @@ def test_list_and_create_vlan_on_switch(client, db_session):
 
 
 def test_delete_vlan_and_protect_reserved_vlans(client, db_session):
-    """Cannot delete default VLAN 1 or Quarantine VLAN 90, but can delete custom VLAN."""
+    """Admin cannot delete any VLAN (403). Super Admin cannot delete reserved/quarantine, but can delete custom VLAN."""
     admin = User(
         username="vlan_admin",
-        email="vlan_admin@netops.local",
+        email="vlan_admin@example.com",
         hashed_password=hash_password("Admin@1234"),
         role="admin",
         is_active=True,
         is_verified=True,
     )
-    db_session.add(admin)
+    dev = User(
+        username="vlan_dev",
+        email="vlan_dev@example.com",
+        hashed_password=hash_password("Dev@1234"),
+        role="super_admin",
+        is_active=True,
+        is_verified=True,
+    )
+    db_session.add_all([admin, dev])
     db_session.commit()
 
-    token = create_access_token({"sub": admin.username, "role": admin.role, "user_id": admin.id})
+    admin_token = create_access_token({"sub": admin.username, "role": admin.role, "user_id": admin.id})
+    dev_token = create_access_token({"sub": dev.username, "role": dev.role, "user_id": dev.id})
 
-    # 1. Attempting to delete VLAN 1 fails
-    del_default = client.delete("/switches/vlans/1", headers={"Authorization": f"Bearer {token}"})
+    # 1. Administrator is forbidden from deleting any VLAN (HTTP 403)
+    del_admin = client.delete("/switches/vlans/1", headers={"Authorization": f"Bearer {admin_token}"})
+    assert del_admin.status_code == 403
+    assert "super administrator" in del_admin.json()["detail"].lower()
+
+    # 2. Super Admin attempting to delete VLAN 1 fails
+    del_default = client.delete("/switches/vlans/1", headers={"Authorization": f"Bearer {dev_token}"})
     assert del_default.status_code == 400
     assert "reserved" in del_default.json()["detail"].lower()
 
-    # 2. Attempting to delete Quarantine VLAN 90 fails
-    del_quarantine = client.delete("/switches/vlans/90", headers={"Authorization": f"Bearer {token}"})
+    # 3. Super Admin attempting to delete Quarantine VLAN 90 fails
+    del_quarantine = client.delete("/switches/vlans/90", headers={"Authorization": f"Bearer {dev_token}"})
     assert del_quarantine.status_code == 400
     assert "quarantine" in del_quarantine.json()["detail"].lower()
 
-    # 3. Create and delete custom VLAN 75
+    # 4. Create custom VLAN 75 and delete as Super Admin
     client.post(
         "/switches/vlans",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"Authorization": f"Bearer {dev_token}"},
         json={"vlan_id": 75, "name": "Lab_Testing"},
     )
-    del_custom = client.delete("/switches/vlans/75", headers={"Authorization": f"Bearer {token}"})
+    # Admin cannot delete custom VLAN 75
+    del_custom_admin = client.delete("/switches/vlans/75", headers={"Authorization": f"Bearer {admin_token}"})
+    assert del_custom_admin.status_code == 403
+
+    # Super Admin can delete custom VLAN 75
+    del_custom = client.delete("/switches/vlans/75", headers={"Authorization": f"Bearer {dev_token}"})
     assert del_custom.status_code == 200
     assert del_custom.json()["success"] is True
 

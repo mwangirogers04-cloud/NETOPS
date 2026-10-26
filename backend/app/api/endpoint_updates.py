@@ -8,6 +8,8 @@ from ..database import get_db
 from ..models.endpoint_update import EndpointUpdate
 from ..models.device import Device
 from ..models.patch_job import PatchJob
+from ..models.user import User
+from ..services.auth_service import require_super_admin
 from ..schemas.patch_job import (
     CreatePatchJobRequest,
     UpdateJobStatusRequest,
@@ -676,6 +678,7 @@ def run_patch_job_now(
 def delete_patch_job(
     job_id: int,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_super_admin),
 ):
     """Delete a patch deployment job from history."""
     job = db.get(PatchJob, job_id)

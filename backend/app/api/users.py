@@ -14,6 +14,7 @@ from ..services.auth_service import (
     generate_activation_token,
     hash_password,
     require_admin,
+    require_super_admin,
     send_activation_email,
     validate_password_complexity,
 )
@@ -499,9 +500,9 @@ def resend_activation_link(
 def delete_user(
     user_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_super_admin),
 ):
-    """Delete a user account."""
+    """Delete a user account. Strictly requires Super Administrator role."""
     if current_user.id == user_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -519,12 +520,6 @@ def delete_user(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Super Administrator accounts cannot be deleted.",
-        )
-
-    if user.role == "admin" and current_user.role != "super_admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only Super Administrators can delete Administrator accounts.",
         )
 
     db.delete(user)

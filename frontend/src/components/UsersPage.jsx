@@ -242,16 +242,16 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
   };
 
   const handleDeleteUser = async (user) => {
+    if (!isSuperAdmin) {
+      alert("Permission Denied: Only Super Administrators can delete user accounts.");
+      return;
+    }
     if (user.id === currentUser?.id) {
       alert("You cannot delete your own logged-in account.");
       return;
     }
     if (user.role === "super_admin") {
       alert("Super Administrator accounts cannot be deleted.");
-      return;
-    }
-    if (user.role === "admin" && !isSuperAdmin) {
-      alert("Permission Denied: Only Super Administrators can delete Admin accounts.");
       return;
     }
     if (!window.confirm(`Are you sure you want to permanently delete user account '${user.username}'?`)) {
@@ -843,7 +843,7 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                           )}
 
                           {/* DELETE USER */}
-                          {!isCurrent && u.role !== "super_admin" && (isSuperAdmin || u.role !== "admin") && (
+                          {isSuperAdmin && !isCurrent && u.role !== "super_admin" && (
                             <button
                               type="button"
                               className="secondary-button small"
