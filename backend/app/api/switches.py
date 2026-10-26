@@ -11,7 +11,7 @@ from ..database import get_db
 from ..models.switch_config import SwitchConfig
 from ..models.vlan_config import VlanConfig
 from ..models.user import User
-from ..services.auth_service import require_admin
+from ..services.auth_service import require_admin, require_super_admin
 from ..services.event_service import create_event
 from ..services.switch.manager import (
     create_switch_driver,
@@ -120,10 +120,10 @@ def list_switch_configs(db: Session = Depends(get_db)):
 @router.post("/configs")
 def create_or_update_switch_config(
     req: SwitchConfigRequest,
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_super_admin),
     db: Session = Depends(get_db),
 ):
-    """Create or update a switch profile (Admins/Developers only)."""
+    """Create or update a switch profile (Super Admin / Developers only)."""
     now = datetime.now(timezone.utc).replace(tzinfo=None)
 
     if req.is_active:
@@ -194,10 +194,10 @@ def create_or_update_switch_config(
 @router.post("/configs/{config_id}/activate")
 def activate_switch_config(
     config_id: int,
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_super_admin),
     db: Session = Depends(get_db),
 ):
-    """Set a specific switch configuration profile as active."""
+    """Set a specific switch configuration profile as active (Super Admin only)."""
     cfg = db.get(SwitchConfig, config_id)
     if not cfg:
         raise HTTPException(status_code=404, detail="Switch profile not found.")
@@ -222,10 +222,10 @@ def activate_switch_config(
 @router.delete("/configs/{config_id}")
 def delete_switch_config(
     config_id: int,
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_super_admin),
     db: Session = Depends(get_db),
 ):
-    """Delete a switch profile."""
+    """Delete a switch profile (Super Admin only)."""
     cfg = db.get(SwitchConfig, config_id)
     if not cfg:
         raise HTTPException(status_code=404, detail="Switch profile not found.")
@@ -249,9 +249,9 @@ def delete_switch_config(
 @router.post("/test-connection")
 def test_switch_connection(
     req: TestSwitchConnectionRequest,
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_super_admin),
 ):
-    """Test reachability and credentials against a switch."""
+    """Test reachability and credentials against a switch (Super Admin only)."""
     return probe_switch_connection(
         vendor=req.vendor,
         management_ip=req.management_ip.strip(),

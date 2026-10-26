@@ -11,6 +11,7 @@ from backend.app.services.firewall.manager import (
     get_active_firewall_driver,
     probe_firewall_connection,
 )
+from backend.app.services.auth_service import create_access_token
 from backend.app.services.network_enforcement import enforce_device_access
 
 client = TestClient(app)
@@ -168,19 +169,32 @@ def test_firewall_api_get_vendors():
 
 
 def test_firewall_api_config_and_test():
-    # Test connection endpoint with simulation
-    res_test = client.post("/firewall/test", json={"vendor": "simulation"})
+    admin_token = create_access_token({"sub": "admin", "role": "admin"})
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
+    dev_token = create_access_token({"sub": "developer", "role": "super_admin"})
+    dev_headers = {"Authorization": f"Bearer {dev_token}"}
+
+    # 1. Administrator is DENIED testing firewall credentials (403 Forbidden)
+    res_admin_test = client.post("/firewall/test", headers=admin_headers, json={"vendor": "simulation"})
+    assert res_admin_test.status_code == 403
+
+    # 2. Super Administrator is ALLOWED testing firewall credentials (200 OK)
+    res_test = client.post("/firewall/test", headers=dev_headers, json={"vendor": "simulation"})
     assert res_test.status_code == 200
     assert res_test.json()["connected"] is True
 
-    # Save a configuration
+    # 3. Administrator is DENIED saving firewall configuration/secrets (403 Forbidden)
     payload = {
         "vendor": "simulation",
         "name": "Test Simulation Profile",
         "management_url": "simulation://internal",
         "is_active": True,
     }
-    res_save = client.post("/firewall/config", json=payload)
+    res_admin_save = client.post("/firewall/config", headers=admin_headers, json=payload)
+    assert res_admin_save.status_code == 403
+
+    # 4. Super Administrator is ALLOWED saving firewall configuration/secrets (200 OK)
+    res_save = client.post("/firewall/config", headers=dev_headers, json=payload)
     assert res_save.status_code == 200
     assert res_save.json()["status"] == "success"
     cfg_id = res_save.json()["config_id"]
@@ -205,12 +219,15 @@ def test_firewall_api_config_and_test():
 
 
 def test_firewall_api_quarantine_and_unquarantine():
-    # Quarantine IP
-    res_q = client.post("/firewall/quarantine", json={"ip_address": "192.168.0.222", "hostname": "TEST-HOST"})
+    admin_token = create_access_token({"sub": "admin", "role": "admin"})
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
+
+    # Quarantine IP (Administrator allowed)
+    res_q = client.post("/firewall/quarantine", headers=admin_headers, json={"ip_address": "192.168.0.222", "hostname": "TEST-HOST"})
     assert res_q.status_code == 200
     assert res_q.json()["status"] in ("blocked", "simulated")
 
-    # Unquarantine IP
-    res_uq = client.post("/firewall/unquarantine", json={"ip_address": "192.168.0.222"})
+    # Unquarantine IP (Administrator allowed)
+    res_uq = client.post("/firewall/unquarantine", headers=admin_headers, json={"ip_address": "192.168.0.222"})
     assert res_uq.status_code == 200
     assert res_uq.json()["status"] in ("allowed", "simulated")

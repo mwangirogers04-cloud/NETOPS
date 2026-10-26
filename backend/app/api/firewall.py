@@ -1,11 +1,13 @@
 from typing import Any
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models.firewall_config import FirewallConfig
+from ..models.user import User
+from ..services.auth_service import require_admin, require_super_admin
 from ..services.firewall.manager import (
     get_active_firewall_driver,
     create_driver_instance,
@@ -92,8 +94,12 @@ def get_firewall_configuration(db: Session = Depends(get_db)):
 
 
 @router.post("/config")
-def save_firewall_configuration(req: FirewallConfigRequest, db: Session = Depends(get_db)):
-    """Create or update a firewall profile and optionally set it as active."""
+def save_firewall_configuration(
+    req: FirewallConfigRequest,
+    current_user: User = Depends(require_super_admin),
+    db: Session = Depends(get_db),
+):
+    """Create or update a firewall profile and optionally set it as active (Super Admin only)."""
     if req.is_active:
         # Deactivate all other configs
         existing_active = db.scalars(select(FirewallConfig).where(FirewallConfig.is_active == True)).all()
@@ -164,8 +170,12 @@ def save_firewall_configuration(req: FirewallConfigRequest, db: Session = Depend
 
 
 @router.post("/activate/{config_id}")
-def activate_firewall_configuration(config_id: int, db: Session = Depends(get_db)):
-    """Set a specific saved firewall profile as active."""
+def activate_firewall_configuration(
+    config_id: int,
+    current_user: User = Depends(require_super_admin),
+    db: Session = Depends(get_db),
+):
+    """Set a specific saved firewall profile as active (Super Admin only)."""
     target = db.scalar(select(FirewallConfig).where(FirewallConfig.id == config_id))
     if not target:
         raise HTTPException(status_code=404, detail="Firewall configuration profile not found.")
@@ -179,8 +189,12 @@ def activate_firewall_configuration(config_id: int, db: Session = Depends(get_db
 
 
 @router.post("/test")
-def test_firewall_connection(req: TestConnectionRequest, db: Session = Depends(get_db)):
-    """Test connection to a firewall appliance using supplied credentials."""
+def test_firewall_connection(
+    req: TestConnectionRequest,
+    current_user: User = Depends(require_super_admin),
+    db: Session = Depends(get_db),
+):
+    """Test connection to a firewall appliance using supplied credentials (Super Admin only)."""
     password = req.password
     # If password is placeholder, look up from DB
     if password == "••••••••":
@@ -208,14 +222,22 @@ def get_live_firewall_status(db: Session = Depends(get_db)):
 
 
 @router.post("/quarantine")
-def quarantine_device(req: QuarantineRequest, db: Session = Depends(get_db)):
-    """Quarantine an IP on the active firewall."""
+def quarantine_device(
+    req: QuarantineRequest,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Quarantine an IP on the active firewall (Admins & Super Admins)."""
     driver = get_active_firewall_driver(db)
     return driver.block_device(req.ip_address, req.hostname, req.mac_address)
 
 
 @router.post("/unquarantine")
-def unquarantine_device(req: UnquarantineRequest, db: Session = Depends(get_db)):
-    """Allow an IP on the active firewall."""
+def unquarantine_device(
+    req: UnquarantineRequest,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Allow an IP on the active firewall (Admins & Super Admins)."""
     driver = get_active_firewall_driver(db)
     return driver.allow_device(req.ip_address, req.mac_address)

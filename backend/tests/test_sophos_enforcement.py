@@ -13,6 +13,7 @@ from backend.app.services.sophos_enforcement import (
     GROUP_NAME,
 )
 from backend.app.models.device import Device
+from backend.app.services.auth_service import create_access_token
 from backend.app.services.network_enforcement import enforce_device_access
 
 
@@ -130,6 +131,8 @@ def test_sophos_test_connection_success():
 
 
 def test_sophos_api_routes():
+    admin_token = create_access_token({"sub": "admin", "role": "admin"})
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
     with (
         patch("backend.app.api.sophos.sophos_test_connection") as mock_test,
         patch("backend.app.api.sophos.sophos_block_device") as mock_block,
@@ -145,12 +148,12 @@ def test_sophos_api_routes():
         assert resp.json()["connected"] is True
 
         # Quarantine endpoint
-        resp = client.post("/sophos/quarantine", json={"ip_address": "192.168.0.55", "hostname": "TEST-HOST"})
+        resp = client.post("/sophos/quarantine", headers=admin_headers, json={"ip_address": "192.168.0.55", "hostname": "TEST-HOST"})
         assert resp.status_code == 200
         assert resp.json()["status"] == "blocked"
 
         # Unquarantine endpoint
-        resp = client.post("/sophos/unquarantine", json={"ip_address": "192.168.0.55"})
+        resp = client.post("/sophos/unquarantine", headers=admin_headers, json={"ip_address": "192.168.0.55"})
         assert resp.status_code == 200
         assert resp.json()["status"] == "allowed"
 

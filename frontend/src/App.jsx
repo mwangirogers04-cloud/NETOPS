@@ -1575,8 +1575,8 @@ const loadEvents = async () => {
 };
 
   const deleteDevicePermanently = async (device) => {
-    if (!isAdmin) {
-      alert("Permission Denied: Only Administrators and Developers can permanently delete devices.");
+    if (!isSuperAdmin) {
+      alert("Permission Denied: Only Super Administrators (Developers) can permanently delete devices and audit records. Administrators can isolate, unapprove, or reject devices.");
       return;
     }
     const name = device.hostname || device.mac_address || "this machine";
@@ -1595,8 +1595,8 @@ const loadEvents = async () => {
   };
 
   const deleteBulkDevices = async (idsToDelete = null) => {
-    if (!isAdmin) {
-      alert("Permission Denied: Only Administrators and Developers can delete devices.");
+    if (!isSuperAdmin) {
+      alert("Permission Denied: Only Super Administrators (Developers) can permanently delete devices and audit records. Administrators can isolate, unapprove, or reject devices.");
       return;
     }
     const ids = idsToDelete || Array.from(selectedDeviceIds);
@@ -2595,7 +2595,7 @@ const DevicesPage = () => {
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-            {isAdmin && (
+            {isSuperAdmin && (
               <button
                 type="button"
                 className="secondary-button small"
@@ -2935,25 +2935,31 @@ const DevicesPage = () => {
                       Clear Selection
                     </button>
                   </div>
-                  <button
-                    type="button"
-                    className="secondary-button small"
-                    style={{
-                      background: "#dc2626",
-                      color: "#ffffff",
-                      borderColor: "#b91c1c",
-                      fontWeight: "700",
-                      padding: "6px 14px",
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "5px",
-                    }}
-                    disabled={bulkDeleting}
-                    onClick={() => deleteBulkDevices()}
-                    title="Permanently delete all selected devices and their associated records"
-                  >
-                    {bulkDeleting ? "Deleting..." : `🗑️ Delete Selected (${selectedDeviceIds.size}) Permanently`}
-                  </button>
+                  {isSuperAdmin ? (
+                    <button
+                      type="button"
+                      className="secondary-button small"
+                      style={{
+                        background: "#dc2626",
+                        color: "#ffffff",
+                        borderColor: "#b91c1c",
+                        fontWeight: "700",
+                        padding: "6px 14px",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "5px",
+                      }}
+                      disabled={bulkDeleting}
+                      onClick={() => deleteBulkDevices()}
+                      title="Permanently delete all selected devices and their associated records"
+                    >
+                      {bulkDeleting ? "Deleting..." : `🗑️ Delete Selected (${selectedDeviceIds.size}) Permanently`}
+                    </button>
+                  ) : (
+                    <span style={{ fontSize: "12px", color: "#64748b", fontWeight: "600", display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                      🔒 Permanent deletion restricted to Super Admin
+                    </span>
+                  )}
                 </div>
               )}
 
@@ -3633,7 +3639,7 @@ const DevicesPage = () => {
                           </button>
                         )}
 
-                        {isAdmin && (
+                        {isSuperAdmin && (
                           <button
                             type="button"
                             className="secondary-button small"
@@ -5289,24 +5295,57 @@ const AccessPage = () => {
 
   const EventsPage = () => (
     <div className="page">
-      <div className="page-header">
+      <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "12px" }}>
         <div>
-          <div className="page-title">
-            Network Events
+          <div className="page-title" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <span>Network Events</span>
+            <span style={{ fontSize: "11px", background: "#f0fdf4", color: "#166534", border: "1px solid #bbf7d0", padding: "3px 8px", borderRadius: "12px", fontWeight: "700" }}>
+              🛡️ Audit Trail Protected (Immutable to Admins)
+            </span>
           </div>
 
           <div className="page-description">
-            Audit trail of NETOPS activity.
+            Forensic audit trail of all device approvals, VLAN changes, quarantine enforcements, and user administrative activity.
           </div>
         </div>
 
-        <button
-          className="secondary-button"
-          onClick={refreshAll}
-          disabled={refreshingAll}
-        >
-          {refreshingAll ? "Refreshing..." : "🔄 Refresh Events"}
-        </button>
+        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+          {isSuperAdmin && (
+            <button
+              type="button"
+              className="secondary-button"
+              style={{ borderColor: "#ef4444", color: "#dc2626", background: "#fef2f2", fontWeight: "700" }}
+              onClick={async () => {
+                if (!window.confirm("⚠️ PERMANENTLY CLEAR AUDIT LOGS?\n\nThis will purge all historical network events and audit logs from the database. This action is irreversible.\n\nAre you sure you want to proceed?")) return;
+                try {
+                  const res = await fetch(`${API_URL}/events/clear`, {
+                    method: "DELETE",
+                    headers: getAuthHeaders(),
+                  });
+                  if (res.ok) {
+                    await loadEvents();
+                    alert("Audit event logs cleared successfully.");
+                  } else {
+                    const err = await res.json().catch(() => ({}));
+                    alert(err.detail || "Failed to clear audit logs.");
+                  }
+                } catch (e) {
+                  alert("Error: " + e.message);
+                }
+              }}
+            >
+              🗑️ Purge Audit Logs
+            </button>
+          )}
+
+          <button
+            className="secondary-button"
+            onClick={refreshAll}
+            disabled={refreshingAll}
+          >
+            {refreshingAll ? "Refreshing..." : "🔄 Refresh Events"}
+          </button>
+        </div>
       </div>
 
 
@@ -7507,7 +7546,7 @@ return (
       try {
         const res = await fetch(`${API_URL}/firewall/test`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: getAuthHeaders({ "Content-Type": "application/json" }),
           body: JSON.stringify({
             vendor: form.vendor,
             management_url: form.management_url,
@@ -7534,7 +7573,7 @@ return (
       try {
         const res = await fetch(`${API_URL}/firewall/config`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: getAuthHeaders({ "Content-Type": "application/json" }),
           body: JSON.stringify(form),
         });
         const data = await res.json();
@@ -7554,7 +7593,10 @@ return (
 
     const handleActivateProfile = async (id) => {
       try {
-        const res = await fetch(`${API_URL}/firewall/activate/${id}`, { method: "POST" });
+        const res = await fetch(`${API_URL}/firewall/activate/${id}`, {
+          method: "POST",
+          headers: getAuthHeaders(),
+        });
         if (res.ok) {
           await loadFirewallData();
           await checkLiveStatus();
@@ -7602,7 +7644,7 @@ return (
             onClick={() => setActiveTab("configure")}
             style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
           >
-            <span>➕</span> Configure / Change Firewall
+            <span>➕</span> Configure / Change Firewall {!isSuperAdmin && "(Locked)"}
           </button>
           <button
             type="button"
@@ -7610,7 +7652,7 @@ return (
             onClick={() => setActiveTab("profiles")}
             style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
           >
-            <span>📋</span> Saved Firewall Profiles ({savedConfigs.length})
+            <span>📋</span> Saved Firewall Profiles ({savedConfigs.length}) {!isSuperAdmin && "(Locked)"}
           </button>
           <button
             type="button"
@@ -7881,6 +7923,17 @@ return (
         {/* TAB 2: CONFIGURE / CHANGE FIREWALL */}
         {activeTab === "configure" && (
           <div>
+            {!isSuperAdmin && (
+              <div className="panel" style={{ background: "#fff1f2", border: "1px solid #fecdd3", padding: "18px 20px", borderRadius: "10px", marginBottom: "20px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "10px", color: "#9f1239", fontWeight: "800", fontSize: "16px" }}>
+                  <span>🔒</span> Firewall Secrets &amp; Credentials Locked (Developer Only)
+                </div>
+                <div style={{ fontSize: "13px", color: "#881337", marginTop: "8px", lineHeight: "1.5" }}>
+                  Modifying Sophos / Cisco ASA / Enterprise Firewall credentials, API tokens, and management URLs is strictly restricted to the <strong>Developer / Super Administrator</strong>. Administrators can monitor active firewall status and enforce device quarantine, but cannot alter core firewall connection secrets.
+                </div>
+              </div>
+            )}
+
             {/* VENDOR SELECTOR CARDS */}
             <div style={{ marginBottom: "20px" }}>
               <div style={{ fontSize: "13px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.06em", color: "#475569", marginBottom: "10px" }}>
@@ -8098,12 +8151,13 @@ return (
                 )}
 
                 {/* ACTION BUTTONS */}
-                <div style={{ display: "flex", gap: "10px" }}>
+                <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
                   <button
                     type="button"
                     className="secondary-button"
                     onClick={handleTestConnection}
-                    disabled={testingConnection}
+                    disabled={testingConnection || !isSuperAdmin}
+                    title={!isSuperAdmin ? "Only Super Admin can test firewall credentials" : "Test connection"}
                     style={{ fontWeight: "600", display: "inline-flex", alignItems: "center", gap: "6px" }}
                   >
                     <span>⚡</span> {testingConnection ? "Testing Connection..." : "Test Connection"}
@@ -8112,10 +8166,11 @@ return (
                   <button
                     type="submit"
                     className="primary-button"
-                    disabled={savingConfig}
-                    style={{ fontWeight: "700", display: "inline-flex", alignItems: "center", gap: "6px" }}
+                    disabled={savingConfig || !isSuperAdmin}
+                    title={!isSuperAdmin ? "Only Super Admin can save firewall credentials" : "Save & Activate Firewall"}
+                    style={{ fontWeight: "700", display: "inline-flex", alignItems: "center", gap: "6px", opacity: !isSuperAdmin ? 0.6 : 1 }}
                   >
-                    <span>💾</span> {savingConfig ? "Saving & Enforcing..." : "Save & Activate Firewall"}
+                    <span>{isSuperAdmin ? "💾" : "🔒"}</span> {savingConfig ? "Saving & Enforcing..." : isSuperAdmin ? "Save & Activate Firewall" : "Firewall Secrets Locked (Developer Only)"}
                   </button>
                 </div>
               </form>
@@ -8175,7 +8230,7 @@ return (
                         <td><code style={{ fontSize: "12px" }}>{cfg.management_url || "Local"}</code></td>
                         <td><code>{cfg.quarantine_rule}</code></td>
                         <td style={{ textAlign: "right" }}>
-                          {!cfg.is_active && (
+                          {!cfg.is_active && isSuperAdmin && (
                             <button
                               type="button"
                               className="primary-button small"
@@ -8183,6 +8238,9 @@ return (
                             >
                               ⚡ Activate
                             </button>
+                          )}
+                          {!isSuperAdmin && (
+                            <span style={{ fontSize: "11px", color: "#94a3b8" }}>🔒 Read-Only</span>
                           )}
                         </td>
                       </tr>

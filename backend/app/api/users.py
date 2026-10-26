@@ -180,10 +180,10 @@ def create_user(
     role, and initial credentials. Dispatches an activation login link to their email.
     """
     # Permission check: Only super_admin can create admin accounts
-    if req.role == "admin" and current_user.role != "super_admin":
+    if req.role in ("admin", "super_admin") and current_user.role != "super_admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only Super Administrators can create Admin accounts.",
+            detail="Only Super Administrators can create Admin accounts. Administrators can only create standard User accounts.",
         )
 
     # Validate initial password complexity (min 8 chars, 1 uppercase, 1 lowercase, 1 special)
@@ -297,12 +297,19 @@ def update_user(
             detail="Only Super Administrators can edit Super Administrator accounts.",
         )
 
-    # Role change permission check
+    # Permission check: Administrators CANNOT edit other Administrator accounts
+    if user.role == "admin" and current_user.role != "super_admin" and user.id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only Super Administrators can modify Administrator accounts. Administrators can only edit standard user accounts or their own profile.",
+        )
+
+    # Role change permission check: Only Super Admin can change user roles or demote/promote accounts
     if req.role is not None and req.role != user.role:
         if current_user.role != "super_admin":
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only Super Administrators can change user roles.",
+                detail="Only Super Administrators can change user roles or demote/promote accounts.",
             )
         # Prevent demoting the only super_admin
         if user.role == "super_admin" and req.role != "super_admin":
@@ -459,6 +466,12 @@ def resend_activation_link(
             detail="User not found.",
         )
 
+    if user.role in ("admin", "super_admin") and current_user.role != "super_admin" and user.id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only Super Administrators can resend activation links for Administrator accounts.",
+        )
+
     token = generate_activation_token()
     login_link = generate_activation_link(token)
 
@@ -506,6 +519,12 @@ def delete_user(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Super Administrator accounts cannot be deleted.",
+        )
+
+    if user.role == "admin" and current_user.role != "super_admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only Super Administrators can delete Administrator accounts.",
         )
 
     db.delete(user)

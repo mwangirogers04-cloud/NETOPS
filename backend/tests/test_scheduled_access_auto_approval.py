@@ -714,7 +714,9 @@ def test_deleted_device_denied_internet_access_and_quarantined_until_procedure(d
         mock_driver_instance.vendor = "simulation"
         mock_driver_instance.is_configured.return_value = True
 
-        res = delete_device_permanently(dev_id, db=db_session)
+        from backend.app.models.user import User
+        super_user = User(username="developer", role="super_admin")
+        res = delete_device_permanently(dev_id, db=db_session, current_user=super_user)
         assert res["status"] == "deleted"
 
         # 1. Device was immediately denied internet access via L2 quarantine & firewall

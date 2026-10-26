@@ -250,6 +250,10 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
       alert("Super Administrator accounts cannot be deleted.");
       return;
     }
+    if (user.role === "admin" && !isSuperAdmin) {
+      alert("Permission Denied: Only Super Administrators can delete Admin accounts.");
+      return;
+    }
     if (!window.confirm(`Are you sure you want to permanently delete user account '${user.username}'?`)) {
       return;
     }
@@ -273,8 +277,8 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
   };
 
   const handleOpenEdit = (user) => {
-    if (user.role === "super_admin" && !isSuperAdmin) {
-      alert("Permission Denied: Only Super Administrators can edit Super Administrator accounts.");
+    if ((user.role === "admin" || user.role === "super_admin") && !isSuperAdmin && user.id !== currentUser?.id) {
+      alert("Permission Denied: Only Super Administrators can edit Admin accounts. Administrators can only edit standard users or their own profile.");
       return;
     }
     setEditingUser(user);
@@ -780,8 +784,12 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                             type="button"
                             className="secondary-button small"
                             onClick={() => handleOpenEdit(u)}
-                            disabled={u.role === "super_admin" && !isSuperAdmin}
-                            title={u.role === "super_admin" && !isSuperAdmin ? "Only Super Admin can edit this account" : "Edit user profile, role, status & credentials"}
+                            disabled={!isCurrent && (u.role === "admin" || u.role === "super_admin") && !isSuperAdmin}
+                            title={
+                              !isCurrent && (u.role === "admin" || u.role === "super_admin") && !isSuperAdmin
+                                ? "Only Super Admin can edit Admin accounts"
+                                : "Edit user profile, role, status & credentials"
+                            }
                             style={{ borderColor: "#3b82f6", color: "#2563eb" }}
                           >
                             ✏️ Edit
@@ -798,10 +806,10 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                               setResetError("");
                               setShowResetModal(true);
                             }}
-                            disabled={u.role === "super_admin" && !isSuperAdmin}
+                            disabled={(u.role === "admin" || u.role === "super_admin") && !isSuperAdmin}
                             title={
-                              u.role === "super_admin" && !isSuperAdmin
-                                ? "Only Developer (Super Admin) can reset a Developer password"
+                              (u.role === "admin" || u.role === "super_admin") && !isSuperAdmin
+                                ? "Only Developer (Super Admin) can reset an Administrator or Developer password"
                                 : "Directly reset this user's password without sending an OTP"
                             }
                             style={{ borderColor: "#6366f1", color: "#4f46e5", fontWeight: "700" }}
@@ -835,7 +843,7 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                           )}
 
                           {/* DELETE USER */}
-                          {!isCurrent && u.role !== "super_admin" && (
+                          {!isCurrent && u.role !== "super_admin" && (isSuperAdmin || u.role !== "admin") && (
                             <button
                               type="button"
                               className="secondary-button small"

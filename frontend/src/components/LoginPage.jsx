@@ -1361,7 +1361,7 @@ export default function LoginPage({
                     🔐 Authorize with Admin / Developer Credentials
                   </div>
                   <div style={{ fontSize: "11px", color: "#b45309", background: "#fef3c7", border: "1px solid #fde68a", borderRadius: "6px", padding: "6px 8px", marginBottom: "10px", fontWeight: "600" }}>
-                    ⚠️ Note: An Administrator cannot reset the password for the Developer (Super Admin) account.
+                    ⚠️ Note: An Administrator can only reset standard user accounts. Resetting or unlocking an Administrator or Developer account requires Developer (Super Admin) credentials.
                   </div>
 
                   <div className="form-group" style={{ marginBottom: "12px" }}>

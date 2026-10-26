@@ -59,7 +59,7 @@ def test_get_switch_vendors(client):
 
 
 def test_create_and_activate_switch_config(client, db_session):
-    """Admin registers a Cisco Catalyst switch profile and activates it."""
+    """Admin is denied, Super Admin registers a Cisco Catalyst switch profile and activates it."""
     admin = User(
         username="switch_admin",
         email="switch_admin@netops.local",
@@ -68,35 +68,55 @@ def test_create_and_activate_switch_config(client, db_session):
         is_active=True,
         is_verified=True,
     )
-    db_session.add(admin)
+    dev_user = User(
+        username="switch_dev",
+        email="switch_dev@netops.local",
+        hashed_password=hash_password("Dev@1234"),
+        role="super_admin",
+        is_active=True,
+        is_verified=True,
+    )
+    db_session.add_all([admin, dev_user])
     db_session.commit()
 
-    token = create_access_token({"sub": admin.username, "role": admin.role, "user_id": admin.id})
+    admin_token = create_access_token({"sub": admin.username, "role": admin.role, "user_id": admin.id})
+    dev_token = create_access_token({"sub": dev_user.username, "role": dev_user.role, "user_id": dev_user.id})
 
-    # 1. Create switch profile
+    switch_payload = {
+        "vendor": "cisco_ios",
+        "name": "Core Catalyst 2960-X",
+        "management_ip": "192.168.0.2",
+        "port": 22,
+        "username": "netops",
+        "password": "CiscoPassword123!",
+        "enable_secret": "CiscoSecret123!",
+        "is_active": True,
+        "model": "Catalyst 2960-X",
+        "total_ports": 24,
+        "description": "Building A Main Distribution Switch",
+    }
+
+    # 1. Administrator is DENIED switch secrets / config modification (403 Forbidden)
+    admin_res = client.post(
+        "/switches/configs",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json=switch_payload,
+    )
+    assert admin_res.status_code == 403
+    assert "super administrator access required" in admin_res.json()["detail"].lower()
+
+    # 2. Super Administrator is ALLOWED switch config creation
     create_res = client.post(
         "/switches/configs",
-        headers={"Authorization": f"Bearer {token}"},
-        json={
-            "vendor": "cisco_ios",
-            "name": "Core Catalyst 2960-X",
-            "management_ip": "192.168.0.2",
-            "port": 22,
-            "username": "netops",
-            "password": "CiscoPassword123!",
-            "enable_secret": "CiscoSecret123!",
-            "is_active": True,
-            "model": "Catalyst 2960-X",
-            "total_ports": 24,
-            "description": "Building A Main Distribution Switch",
-        },
+        headers={"Authorization": f"Bearer {dev_token}"},
+        json=switch_payload,
     )
     assert create_res.status_code == 200
     data = create_res.json()
     assert data["vendor"] == "cisco_ios"
     assert data["management_ip"] == "192.168.0.2"
 
-    # 2. List switch configs
+    # 3. List switch configs
     list_res = client.get("/switches/configs")
     assert list_res.status_code == 200
     configs = list_res.json()
@@ -106,7 +126,7 @@ def test_create_and_activate_switch_config(client, db_session):
 
 
 def test_switch_connection_test(client, db_session):
-    """Admin tests reachability to a switch."""
+    """Admin is denied testing secrets; Super Admin tests reachability to a switch."""
     admin = User(
         username="net_engineer",
         email="engineer@netops.local",
@@ -115,21 +135,41 @@ def test_switch_connection_test(client, db_session):
         is_active=True,
         is_verified=True,
     )
-    db_session.add(admin)
+    dev_user = User(
+        username="lead_dev",
+        email="lead_dev@netops.local",
+        hashed_password=hash_password("Dev@1234"),
+        role="super_admin",
+        is_active=True,
+        is_verified=True,
+    )
+    db_session.add_all([admin, dev_user])
     db_session.commit()
 
-    token = create_access_token({"sub": admin.username, "role": admin.role, "user_id": admin.id})
+    admin_token = create_access_token({"sub": admin.username, "role": admin.role, "user_id": admin.id})
+    dev_token = create_access_token({"sub": dev_user.username, "role": dev_user.role, "user_id": dev_user.id})
 
+    test_payload = {
+        "vendor": "simulation",
+        "management_ip": "192.168.0.2",
+        "port": 22,
+        "username": "admin",
+        "password": "Password123!",
+    }
+
+    # Administrator is denied (403 Forbidden)
+    admin_res = client.post(
+        "/switches/test-connection",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json=test_payload,
+    )
+    assert admin_res.status_code == 403
+
+    # Super Admin is allowed (200 OK)
     res = client.post(
         "/switches/test-connection",
-        headers={"Authorization": f"Bearer {token}"},
-        json={
-            "vendor": "simulation",
-            "management_ip": "192.168.0.2",
-            "port": 22,
-            "username": "admin",
-            "password": "Password123!",
-        },
+        headers={"Authorization": f"Bearer {dev_token}"},
+        json=test_payload,
     )
     assert res.status_code == 200
     data = res.json()

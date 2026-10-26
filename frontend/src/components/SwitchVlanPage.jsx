@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 
 export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, devices = [] }) {
   const isAdmin = currentUser?.role === "admin" || currentUser?.role === "super_admin";
+  const isSuperAdmin = currentUser?.role === "super_admin";
   const [activeTab, setActiveTab] = useState("vlans"); // "vlans" | "ports" | "switch_settings"
 
   // Data states
@@ -531,7 +532,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
               gap: "8px",
             }}
           >
-            <span>⚙️</span> Multi-Vendor Switch Configuration
+            <span>⚙️</span> Multi-Vendor Switch Configuration {!isSuperAdmin && "(Locked)"}
           </button>
         )}
       </div>
@@ -1024,6 +1025,18 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
       {/* ======================================================== */}
       {activeTab === "switch_settings" && isAdmin && (
         <div>
+          {/* SECURITY LOCKDOWN BANNER FOR ADMINISTRATORS */}
+          {!isSuperAdmin && (
+            <div className="panel" style={{ background: "#fff1f2", border: "1px solid #fecdd3", padding: "18px 20px", borderRadius: "10px", marginBottom: "20px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "10px", color: "#9f1239", fontWeight: "800", fontSize: "16px" }}>
+                <span>🔒</span> Cisco &amp; Enterprise Switch Secrets Locked (Developer Only)
+              </div>
+              <div style={{ fontSize: "13px", color: "#881337", marginTop: "8px", lineHeight: "1.5" }}>
+                Modifying Cisco Switch SSH credentials, enable secrets, switch management IPs, and hardware profiles is strictly restricted to the <strong>Developer / Super Administrator</strong>. Administrators have full access to configure VLANs, assign switch ports, and isolate devices, but core hardware connection secrets are locked against tampering.
+              </div>
+            </div>
+          )}
+
           {/* SUPPORTED SWITCH PLATFORMS GRID */}
           <div className="panel" style={{ marginBottom: "20px" }}>
             <div style={{ fontSize: "16px", fontWeight: "800", color: "#0f172a", marginBottom: "4px" }}>
@@ -1191,7 +1204,8 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                   type="button"
                   className="secondary-button"
                   onClick={handleTestConnection}
-                  disabled={testingSwitch}
+                  disabled={testingSwitch || !isSuperAdmin}
+                  title={!isSuperAdmin ? "Only Super Admin can test switch credentials" : "Test switch reachability and credentials"}
                   style={{ display: "flex", alignItems: "center", gap: "6px" }}
                 >
                   <span>🔌</span> {testingSwitch ? "Testing Switch Connection..." : "Test Switch Connection"}
@@ -1200,10 +1214,11 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                 <button
                   type="submit"
                   className="primary-button"
-                  disabled={savingSwitch}
-                  style={{ display: "flex", alignItems: "center", gap: "6px" }}
+                  disabled={savingSwitch || !isSuperAdmin}
+                  title={!isSuperAdmin ? "Only Super Admin can save switch credentials" : "Save switch profile"}
+                  style={{ display: "flex", alignItems: "center", gap: "6px", opacity: !isSuperAdmin ? 0.6 : 1 }}
                 >
-                  <span>💾</span> {savingSwitch ? "Saving & Activating..." : "Save & Activate Switch Profile"}
+                  <span>{isSuperAdmin ? "💾" : "🔒"}</span> {savingSwitch ? "Saving & Activating..." : isSuperAdmin ? "Save & Activate Switch Profile" : "Switch Secrets Locked (Developer Only)"}
                 </button>
               </div>
             </form>
@@ -1251,7 +1266,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                           )}
                         </td>
                         <td style={{ textAlign: "right" }}>
-                          {!cfg.is_active && (
+                          {!cfg.is_active && isSuperAdmin && (
                             <button
                               type="button"
                               className="secondary-button small"
@@ -1260,6 +1275,9 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                             >
                               ⚡ Activate
                             </button>
+                          )}
+                          {!isSuperAdmin && (
+                            <span style={{ fontSize: "11px", color: "#94a3b8" }}>🔒 Read-Only</span>
                           )}
                         </td>
                       </tr>

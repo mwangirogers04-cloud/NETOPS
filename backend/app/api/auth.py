@@ -926,11 +926,18 @@ def admin_direct_reset_password(
             detail=f"No user account found matching '{req.target_identifier.strip()}'. Please check the username, email, or phone number.",
         )
 
-    # Role hierarchy check: An Administrator (admin) CANNOT reset the Developer (super_admin) password
-    if target_user.role == "super_admin" and authorizer.role != "super_admin":
+    # Role hierarchy check:
+    # 1. Super Admin can reset anyone's password and clear any lockout.
+    # 2. Administrator (admin) CANNOT reset passwords or bypass lockouts for Admin or Super Admin accounts.
+    #    Admins can ONLY directly reset passwords and unlock standard 'user' accounts.
+    if target_user.role in ("admin", "super_admin") and authorizer.role != "super_admin":
+        if target_user.role == "super_admin":
+            detail = "Access denied: An Administrator cannot reset the password for the Developer (Super Administrator) account or clear its lockouts."
+        else:
+            detail = "Access denied: An Administrator cannot reset passwords or bypass lockouts for Administrator accounts. Only a Super Administrator (Developer) can reset an Administrator account."
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied: An Administrator cannot reset the password for the Developer (Super Administrator) account. Only a Developer can reset the Developer password.",
+            detail=detail,
         )
 
     # Enforce password complexity: >= 8 chars, 1 uppercase, 1 lowercase, 1 special character

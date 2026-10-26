@@ -271,16 +271,33 @@ def test_device_actions_record_actor_in_event():
         assert reject_ev.actor == "admin_sarah"
         assert "admin 'admin_sarah'" in reject_ev.message
 
-        # 3. Permanently delete device
-        res = client.delete(f"/devices/{device.id}", headers=headers)
+        # 3. Permanently delete device: Admin is denied (403)
+        res_denied = client.delete(f"/devices/{device.id}", headers=headers)
+        assert res_denied.status_code == 403
+
+        # Super Admin deletes device (200)
+        super_alex = User(
+            username="super_alex",
+            email="alex@netops.local",
+            hashed_password=hash_password("DevPass@123"),
+            role="super_admin",
+            is_active=True,
+            is_verified=True,
+        )
+        db.add(super_alex)
+        db.commit()
+        dev_token = create_access_token({"sub": super_alex.username, "role": "super_admin"})
+        dev_headers = {"Authorization": f"Bearer {dev_token}"}
+
+        res = client.delete(f"/devices/{device.id}", headers=dev_headers)
         assert res.status_code == 200
 
         del_ev = db.scalar(
             select(Event).where(Event.event_type == "device_permanently_deleted").order_by(Event.id.desc())
         )
         assert del_ev is not None
-        assert del_ev.actor == "admin_sarah"
-        assert "admin 'admin_sarah'" in del_ev.message
+        assert del_ev.actor == "super_alex"
+        assert "super_alex" in del_ev.message
 
     finally:
         app.dependency_overrides.pop(get_db, None)

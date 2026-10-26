@@ -30,7 +30,7 @@ from ..services.access_policy import (
 from ..services.network_enforcement import enforce_device_access
 from ..services.vlan_automation import automate_vlan_assignment
 from ..services.event_service import create_event
-from ..services.auth_service import get_optional_current_user
+from ..services.auth_service import get_optional_current_user, require_super_admin
 from ..services.firewall.manager import get_active_firewall_driver
 from ..services.l2_quarantine import quarantine_device_l2
 from ..services.sophos_enforcement import is_sophos_configured, sophos_block_device
@@ -1225,12 +1225,14 @@ def _purge_device_records(db: Session, device: Device):
 def delete_device_permanently(
     device_id: int,
     db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_optional_current_user),
+    current_user: User = Depends(require_super_admin),
 ):
     """
     Permanently delete a device from the database and remove all its
     associated access schedules, patch remediation jobs, endpoint telemetry,
     and historical event logs.
+    Strictly restricted to Super Administrator (Developer).
+    Admins are permitted to isolate, unapprove, or reject devices, but cannot permanently erase records.
     If the device connects again, it will be treated as a brand new machine.
     """
     device = db.get(Device, device_id)
@@ -1246,9 +1248,8 @@ def delete_device_permanently(
 
     _purge_device_records(db, device)
 
-    has_user = isinstance(current_user, User) or (current_user and hasattr(current_user, "username") and not hasattr(current_user, "dependency"))
-    actor_username = current_user.username if has_user else "administrator"
-    actor_label = f"{current_user.role} '{current_user.username}'" if has_user else "administrator"
+    actor_username = current_user.username
+    actor_label = f"Developer (Super Admin) '{current_user.username}'"
 
     # Log permanent deletion event
     create_event(
@@ -1276,10 +1277,11 @@ def delete_device_permanently(
 def bulk_delete_devices_permanently(
     req: BulkDeleteRequest,
     db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_optional_current_user),
+    current_user: User = Depends(require_super_admin),
 ):
     """
     Bulk permanently delete multiple devices by their IDs.
+    Strictly restricted to Super Administrator (Developer).
     All telemetry, schedules, and jobs are removed. Reconnections will be treated as new machines.
     """
     if not req.device_ids:
@@ -1298,9 +1300,8 @@ def bulk_delete_devices_permanently(
         _purge_device_records(db, device)
         deleted_count += 1
 
-    has_user = isinstance(current_user, User) or (current_user and hasattr(current_user, "username") and not hasattr(current_user, "dependency"))
-    actor_username = current_user.username if has_user else "administrator"
-    actor_label = f"{current_user.role} '{current_user.username}'" if has_user else "administrator"
+    actor_username = current_user.username
+    actor_label = f"Developer (Super Admin) '{current_user.username}'"
 
     create_event(
         db,

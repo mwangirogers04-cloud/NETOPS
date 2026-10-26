@@ -12,6 +12,8 @@ from backend.app.models.access_schedule import AccessSchedule
 from backend.app.models.patch_job import PatchJob
 from backend.app.models.endpoint_update import EndpointUpdate
 from backend.app.models.event import Event
+from backend.app.models.user import User
+from backend.app.services.auth_service import create_access_token, hash_password
 
 
 TEST_DB_URL = "sqlite:///:memory:"
@@ -38,9 +40,38 @@ client = TestClient(app)
 def setup_database():
     Base.metadata.create_all(bind=engine)
     app.dependency_overrides[get_db] = override_get_db
+
+    # Seed users for role permission checks
+    db = TestingSessionLocal()
+    dev_user = User(
+        username="dev_admin",
+        email="dev@netops.local",
+        hashed_password=hash_password("DevPass@123"),
+        role="super_admin",
+        is_active=True,
+        is_verified=True,
+    )
+    admin_user = User(
+        username="netops_admin",
+        email="admin@netops.local",
+        hashed_password=hash_password("AdminPass@123"),
+        role="admin",
+        is_active=True,
+        is_verified=True,
+    )
+    db.add_all([dev_user, admin_user])
+    db.commit()
+    db.close()
+
     yield
     app.dependency_overrides.clear()
     Base.metadata.drop_all(bind=engine)
+
+
+def get_auth_headers(role: str = "super_admin"):
+    username = "dev_admin" if role == "super_admin" else "netops_admin"
+    token = create_access_token({"sub": username, "role": role})
+    return {"Authorization": f"Bearer {token}"}
 
 
 def test_delete_device_permanently_cascades_and_removes_state():
@@ -104,8 +135,13 @@ def test_delete_device_permanently_cascades_and_removes_state():
     db.commit()
     db.close()
 
-    # Call DELETE /devices/{device_id}
-    res = client.delete(f"/devices/{dev_id}")
+    # 1. Administrator is DENIED permanent deletion (403 Forbidden)
+    admin_res = client.delete(f"/devices/{dev_id}", headers=get_auth_headers("admin"))
+    assert admin_res.status_code == 403
+    assert "super administrator access required" in admin_res.json()["detail"].lower()
+
+    # 2. Super Administrator is ALLOWED permanent deletion (200 OK)
+    res = client.delete(f"/devices/{dev_id}", headers=get_auth_headers("super_admin"))
     assert res.status_code == 200
     data = res.json()
     assert data["status"] == "deleted"
@@ -149,7 +185,20 @@ def test_bulk_delete_devices_permanently():
     id1, id2, id3 = dev1.id, dev2.id, dev3.id
     db.close()
 
-    res = client.post("/devices/bulk-delete", json={"device_ids": [id1, id2]})
+    # Administrator cannot bulk delete (403 Forbidden)
+    admin_res = client.post(
+        "/devices/bulk-delete",
+        headers=get_auth_headers("admin"),
+        json={"device_ids": [id1, id2]},
+    )
+    assert admin_res.status_code == 403
+
+    # Super Administrator can bulk delete
+    res = client.post(
+        "/devices/bulk-delete",
+        headers=get_auth_headers("super_admin"),
+        json={"device_ids": [id1, id2]},
+    )
     assert res.status_code == 200
     data = res.json()
     assert data["status"] == "bulk_deleted"
@@ -163,5 +212,5 @@ def test_bulk_delete_devices_permanently():
 
 
 def test_delete_nonexistent_device_returns_404():
-    res = client.delete("/devices/999999")
+    res = client.delete("/devices/999999", headers=get_auth_headers("super_admin"))
     assert res.status_code == 404
