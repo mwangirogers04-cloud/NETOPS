@@ -19,6 +19,8 @@ from ..schemas.device import (
     DeviceVlanUpdate,
     DeviceIpAssignmentUpdate,
     BulkDeleteRequest,
+    DeviceTroubleshootResponse,
+    DiagnosticFixRequest,
 )
 from ..services.vlan_policy import get_vlan_for_device_type
 from ..services.access_policy import (
@@ -32,6 +34,8 @@ from ..services.auth_service import get_optional_current_user
 from ..services.firewall.manager import get_active_firewall_driver
 from ..services.l2_quarantine import quarantine_device_l2
 from ..services.sophos_enforcement import is_sophos_configured, sophos_block_device
+from ..services.device_troubleshooter import run_device_diagnostics, apply_diagnostic_fix
+
 
 
 router = APIRouter(
@@ -1316,6 +1320,78 @@ def bulk_delete_devices_permanently(
         "deleted_count": deleted_count,
         "message": f"Successfully deleted {deleted_count} machine(s). Any reconnecting machine will be treated as a new device.",
     }
+
+
+# ------------------------------------------------------------
+# DEVICE TROUBLESHOOTING & DIAGNOSTICS
+# ------------------------------------------------------------
+
+@router.post(
+    "/{device_id}/troubleshoot",
+    response_model=DeviceTroubleshootResponse,
+)
+def troubleshoot_device(
+    device_id: int,
+    db: Session = Depends(get_db),
+):
+    """
+    Run on-demand multi-layer diagnostic suite on a machine (especially offline machines)
+    to identify root causes: ARP link status, IP drift, ICMP firewall blocking,
+    open TCP ports, routing issues, VLAN quarantine, and agent telemetry.
+    """
+    device = db.get(Device, device_id)
+    if device is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Device not found",
+        )
+
+    diag_result = run_device_diagnostics(db, device)
+
+    # If diagnostics discovered that the device is actually online and responding,
+    # synchronize status to online in the database
+    if diag_result["diagnosed_status"] in ("online_reachable", "firewall_icmp_blocked") and device.status != "online":
+        device.status = "online"
+        device.last_seen = datetime.now()
+        db.commit()
+        db.refresh(device)
+        diag_result["recorded_status"] = "online"
+
+    return diag_result
+
+
+@router.post(
+    "/{device_id}/troubleshoot/apply-fix",
+)
+def apply_troubleshoot_fix(
+    device_id: int,
+    payload: DiagnosticFixRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Apply an automated remediation fix based on diagnostic findings
+    (e.g., updating IP address after DHCP drift, or marking machine online).
+    """
+    device = db.get(Device, device_id)
+    if device is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Device not found",
+        )
+
+    result = apply_diagnostic_fix(
+        db=db,
+        device=device,
+        action=payload.action,
+        new_ip=payload.new_ip,
+    )
+    if not result.get("success"):
+        raise HTTPException(
+            status_code=400,
+            detail=result.get("message", "Failed to apply fix"),
+        )
+    return result
+
 
 
 

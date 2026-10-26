@@ -111,3 +111,36 @@ class DeviceIpAssignmentUpdate(BaseModel):
 
 class BulkDeleteRequest(BaseModel):
     device_ids: list[int]
+
+
+class DeviceDiagnosticCheck(BaseModel):
+    name: str
+    status: str
+    details: str
+    data: dict[str, Any] | None = None
+
+
+class DeviceTroubleshootResponse(BaseModel):
+    device_id: int
+    hostname: str | None = None
+    mac_address: str | None = None
+    ip_address: str | None = None
+    network_interface: str | None = None
+    recorded_status: str
+    diagnosed_status: str
+    verdict: str
+    summary: str
+    checks: list[DeviceDiagnosticCheck]
+    probable_causes: list[str]
+    recommendations: list[str]
+    detected_ip: str | None = None
+    detected_interface: str | None = None
+    can_auto_fix: bool = False
+    suggested_fix_action: str | None = None
+    timestamp: str
+
+
+class DiagnosticFixRequest(BaseModel):
+    action: str
+    new_ip: str | None = None
+

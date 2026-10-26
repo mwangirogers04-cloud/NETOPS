@@ -317,6 +317,13 @@ function App() {
   const [deviceSearchQuery, setDeviceSearchQuery] = useState("");
   const [lanFilterStatus, setLanFilterStatus] = useState("all");
 
+  // Device Troubleshooting & Root Cause Diagnostics
+  const [troubleshootModalDevice, setTroubleshootModalDevice] = useState(null);
+  const [troubleshootLoading, setTroubleshootLoading] = useState(false);
+  const [troubleshootResult, setTroubleshootResult] = useState(null);
+  const [troubleshootFixLoading, setTroubleshootFixLoading] = useState(false);
+  const [troubleshootError, setTroubleshootError] = useState(null);
+
   const [alertSoundEnabled, setAlertSoundEnabled] = useState(() => {
     try {
       const saved = localStorage.getItem("netops_alert_sound_enabled");
@@ -1630,6 +1637,70 @@ const loadEvents = async () => {
       setBulkDeleting(false);
     }
   };
+
+  // ------------------------------------------------------------
+  // DEVICE TROUBLESHOOTING & DIAGNOSTICS
+  // ------------------------------------------------------------
+
+  const handleRunTroubleshoot = async (device) => {
+    if (!device) return;
+    setTroubleshootModalDevice(device);
+    setTroubleshootLoading(true);
+    setTroubleshootResult(null);
+    setTroubleshootError(null);
+
+    try {
+      const response = await fetch(`${API_URL}/devices/${device.id}/troubleshoot`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuthHeaders(),
+        },
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.detail || `Diagnostic failed (HTTP ${response.status})`);
+      }
+      const data = await response.json();
+      setTroubleshootResult(data);
+      loadDevices();
+    } catch (err) {
+      console.error("Troubleshoot error:", err);
+      setTroubleshootError(err.message || "Diagnostic scan failed");
+    } finally {
+      setTroubleshootLoading(false);
+    }
+  };
+
+  const handleApplyTroubleshootFix = async (action, newIp = null) => {
+    if (!troubleshootModalDevice) return;
+    setTroubleshootFixLoading(true);
+
+    try {
+      const response = await fetch(
+        `${API_URL}/devices/${troubleshootModalDevice.id}/troubleshoot/apply-fix`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...getAuthHeaders(),
+          },
+          body: JSON.stringify({ action, new_ip: newIp }),
+        }
+      );
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.detail || "Failed to apply remediation fix");
+      }
+      await handleRunTroubleshoot(troubleshootModalDevice);
+      await loadDevices();
+    } catch (err) {
+      alert(`Remediation Error: ${err.message}`);
+    } finally {
+      setTroubleshootFixLoading(false);
+    }
+  };
+
 // ------------------------------------------------------------
 // TIME SCHEDULE HELPERS
 // ------------------------------------------------------------
@@ -2760,6 +2831,32 @@ const DevicesPage = () => {
             >
               ⏱️ Scheduled Network Access ({scopedDevices.filter(isDeviceScheduledForAccess).length})
             </button>
+          </div>
+        )}
+
+        {/* OFFLINE MACHINES TROUBLESHOOTING BANNER */}
+        {deviceFilter === "offline" && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              flexWrap: "wrap",
+              gap: "10px",
+              padding: "12px 16px",
+              background: "#fef2f2",
+              border: "1px solid #fecaca",
+              borderRadius: "8px",
+              marginBottom: "16px",
+              fontSize: "13px",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "#991b1b" }}>
+              <span style={{ fontSize: "20px" }}>🩺</span>
+              <div>
+                <strong style={{ color: "#7f1d1d" }}>Offline Machine Diagnostics:</strong> Click <strong>🩺 Diagnose</strong> in the connection column or <strong>🩺 Troubleshoot</strong> in actions on any offline device below to analyze ARP link, DHCP IP drift, ICMP firewall drops, open TCP ports, and access policy rules.
+              </div>
+            </div>
           </div>
         )}
         {(() => {
@@ -11217,6 +11314,325 @@ const EndpointUpdatesPage = () => {
   };
 
   // ------------------------------------------------------------
+  // MACHINE TROUBLESHOOTING & DIAGNOSTICS MODAL
+  // ------------------------------------------------------------
+
+  const renderTroubleshootModal = () => {
+    if (!troubleshootModalDevice) return null;
+
+    const dev = troubleshootModalDevice;
+    const res = troubleshootResult;
+
+    return (
+      <div
+        className="modal-overlay"
+        onClick={() => {
+          if (!troubleshootLoading && !troubleshootFixLoading) {
+            setTroubleshootModalDevice(null);
+            setTroubleshootResult(null);
+            setTroubleshootError(null);
+          }
+        }}
+      >
+        <div
+          className="automation-modal"
+          onClick={(e) => e.stopPropagation()}
+          style={{ maxWidth: "780px", width: "95%", maxHeight: "90vh", display: "flex", flexDirection: "column" }}
+        >
+          {/* Header */}
+          <div className="automation-modal-header">
+            <div>
+              <div className="automation-label" style={{ color: "#ef4444" }}>
+                NETWORK DIAGNOSTICS &amp; ROOT CAUSE ANALYSIS
+              </div>
+              <div className="automation-title" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <span>🩺</span>
+                Troubleshoot: {dev.hostname || dev.ip_address || `Device #${dev.id}`}
+              </div>
+            </div>
+            <button
+              type="button"
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "#475569",
+                fontSize: "20px",
+                cursor: "pointer",
+              }}
+              onClick={() => {
+                setTroubleshootModalDevice(null);
+                setTroubleshootResult(null);
+                setTroubleshootError(null);
+              }}
+            >
+              ✕
+            </button>
+          </div>
+
+          {/* Device Summary Strip */}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
+              gap: "10px",
+              background: "#f8fafc",
+              border: "1px solid #cbd5e1",
+              borderRadius: "8px",
+              padding: "12px",
+              margin: "14px 0",
+              fontSize: "12px",
+            }}
+          >
+            <div>
+              <span style={{ color: "#64748b", fontSize: "11px", textTransform: "uppercase" }}>IP Address</span>
+              <div style={{ fontWeight: "700", color: "#0f172a" }}>{dev.ip_address || "—"}</div>
+            </div>
+            <div>
+              <span style={{ color: "#64748b", fontSize: "11px", textTransform: "uppercase" }}>MAC Address</span>
+              <div style={{ fontWeight: "700", color: "#0f172a", fontFamily: "monospace" }}>{dev.mac_address || "—"}</div>
+            </div>
+            <div>
+              <span style={{ color: "#64748b", fontSize: "11px", textTransform: "uppercase" }}>Interface</span>
+              <div style={{ fontWeight: "700", color: "#0f172a" }}>{dev.network_interface || "eth0"}</div>
+            </div>
+            <div>
+              <span style={{ color: "#64748b", fontSize: "11px", textTransform: "uppercase" }}>VLAN / Access</span>
+              <div style={{ fontWeight: "700", color: "#0f172a" }}>VLAN {dev.vlan_id || "90"} ({dev.enforcement_status || "—"})</div>
+            </div>
+            <div>
+              <span style={{ color: "#64748b", fontSize: "11px", textTransform: "uppercase" }}>Inventory Status</span>
+              <div>
+                <span className={`status-badge ${dev.status === "online" ? "allowed" : "blocked"}`} style={{ fontSize: "10px", padding: "1px 6px" }}>
+                  {dev.status ? dev.status.toUpperCase() : "UNKNOWN"}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Modal Content Scroll Area */}
+          <div style={{ overflowY: "auto", flex: 1, paddingRight: "4px" }}>
+            {troubleshootLoading && (
+              <div style={{ textAlign: "center", padding: "40px 16px" }}>
+                <div style={{ fontSize: "36px", marginBottom: "12px" }}>
+                  ⏳
+                </div>
+                <div style={{ fontWeight: "700", fontSize: "16px", color: "#0f172a" }}>
+                  Running Multi-Layer Diagnostic Suite...
+                </div>
+                <div style={{ fontSize: "13px", color: "#64748b", marginTop: "6px" }}>
+                  Probing Layer 2 ARP link, checking DHCP IP drift, pinging eth0/wlan0, scanning management ports &amp; validating access policies...
+                </div>
+              </div>
+            )}
+
+            {troubleshootError && (
+              <div style={{ background: "#fef2f2", border: "1px solid #ef4444", borderRadius: "8px", padding: "14px", color: "#991b1b" }}>
+                <strong>Diagnostic Error:</strong> {troubleshootError}
+              </div>
+            )}
+
+            {!troubleshootLoading && res && (
+              <>
+                {/* Verdict Banner */}
+                <div
+                  style={{
+                    borderRadius: "8px",
+                    padding: "14px 16px",
+                    marginBottom: "16px",
+                    border:
+                      res.diagnosed_status === "online_reachable"
+                        ? "1px solid #10b981"
+                        : res.diagnosed_status === "ip_mismatch"
+                        ? "1px solid #6366f1"
+                        : res.diagnosed_status === "firewall_icmp_blocked"
+                        ? "1px solid #f59e0b"
+                        : "1px solid #ef4444",
+                    background:
+                      res.diagnosed_status === "online_reachable"
+                        ? "#ecfdf5"
+                        : res.diagnosed_status === "ip_mismatch"
+                        ? "#eef2ff"
+                        : res.diagnosed_status === "firewall_icmp_blocked"
+                        ? "#fffbeb"
+                        : "#fef2f2",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", fontWeight: "700", fontSize: "15px", color: "#0f172a" }}>
+                    <span>
+                      {res.diagnosed_status === "online_reachable"
+                        ? "✅"
+                        : res.diagnosed_status === "ip_mismatch"
+                        ? "🔄"
+                        : res.diagnosed_status === "firewall_icmp_blocked"
+                        ? "🛡️"
+                        : "🔴"}
+                    </span>
+                    {res.verdict}
+                  </div>
+                  <div style={{ fontSize: "13px", color: "#334155", marginTop: "6px", lineHeight: "1.5" }}>
+                    {res.summary}
+                  </div>
+                </div>
+
+                {/* 1-Click Remediation Fix Banner */}
+                {res.can_auto_fix && (
+                  <div
+                    style={{
+                      background: "linear-gradient(135deg, #f0fdf4 0%, #e0f2fe 100%)",
+                      border: "1px solid #3b82f6",
+                      borderRadius: "8px",
+                      padding: "14px 16px",
+                      marginBottom: "16px",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      flexWrap: "wrap",
+                      gap: "10px",
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontWeight: "700", color: "#1e3a8a", fontSize: "13px" }}>
+                        ⚡ Recommended Automated Fix Available
+                      </div>
+                      <div style={{ fontSize: "12px", color: "#334155", marginTop: "2px" }}>
+                        {res.suggested_fix_action}
+                      </div>
+                    </div>
+                    {res.detected_ip && (
+                      <button
+                        type="button"
+                        className="primary-button small"
+                        style={{ background: "#2563eb", borderColor: "#1d4ed8" }}
+                        disabled={troubleshootFixLoading}
+                        onClick={() => handleApplyTroubleshootFix("update_ip", res.detected_ip)}
+                      >
+                        {troubleshootFixLoading ? "Applying Fix..." : `🔄 Apply Detected IP (${res.detected_ip})`}
+                      </button>
+                    )}
+                    {!res.detected_ip && (
+                      <button
+                        type="button"
+                        className="primary-button small"
+                        style={{ background: "#059669", borderColor: "#047857" }}
+                        disabled={troubleshootFixLoading}
+                        onClick={() => handleApplyTroubleshootFix("mark_online")}
+                      >
+                        {troubleshootFixLoading ? "Synchronizing..." : "✓ Mark ONLINE in Inventory"}
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* Probable Causes */}
+                {res.probable_causes && res.probable_causes.length > 0 && (
+                  <div style={{ marginBottom: "16px" }}>
+                    <div style={{ fontWeight: "700", fontSize: "13px", color: "#991b1b", marginBottom: "6px", display: "flex", alignItems: "center", gap: "6px" }}>
+                      <span>⚠️</span> Probable Causes Identified:
+                    </div>
+                    <ul style={{ margin: 0, paddingLeft: "20px", fontSize: "12px", color: "#334155", lineHeight: "1.6" }}>
+                      {res.probable_causes.map((c, i) => (
+                        <li key={i}>{c}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Recommendations */}
+                {res.recommendations && res.recommendations.length > 0 && (
+                  <div style={{ marginBottom: "16px" }}>
+                    <div style={{ fontWeight: "700", fontSize: "13px", color: "#1e40af", marginBottom: "6px", display: "flex", alignItems: "center", gap: "6px" }}>
+                      <span>💡</span> Recommended Action Steps:
+                    </div>
+                    <ol style={{ margin: 0, paddingLeft: "20px", fontSize: "12px", color: "#334155", lineHeight: "1.6" }}>
+                      {res.recommendations.map((r, i) => (
+                        <li key={i}>{r}</li>
+                      ))}
+                    </ol>
+                  </div>
+                )}
+
+                {/* Detailed Diagnostic Checks Matrix */}
+                <div>
+                  <div style={{ fontWeight: "700", fontSize: "13px", color: "#0f172a", marginBottom: "8px" }}>
+                    📋 Diagnostic Test Results (Multi-Layer Verification):
+                  </div>
+                  <table className="data-table" style={{ fontSize: "12px" }}>
+                    <thead>
+                      <tr>
+                        <th style={{ width: "240px" }}>DIAGNOSTIC TEST</th>
+                        <th style={{ width: "100px", textAlign: "center" }}>STATUS</th>
+                        <th>OBSERVATION &amp; DETAILS</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {res.checks.map((check, idx) => (
+                        <tr key={idx}>
+                          <td style={{ fontWeight: "600", color: "#1e293b" }}>{check.name}</td>
+                          <td style={{ textAlign: "center" }}>
+                            <span
+                              className={`status-badge ${
+                                check.status === "passed"
+                                  ? "allowed"
+                                  : check.status === "failed"
+                                  ? "blocked"
+                                  : check.status === "warning"
+                                  ? "warning"
+                                  : "offline"
+                              }`}
+                              style={{ fontSize: "10px", padding: "1px 6px" }}
+                            >
+                              {check.status.toUpperCase()}
+                            </span>
+                          </td>
+                          <td style={{ color: "#475569", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                            {check.details}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Modal Footer */}
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginTop: "16px",
+              paddingTop: "12px",
+              borderTop: "1px solid #e2e8f0",
+            }}
+          >
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={troubleshootLoading || troubleshootFixLoading}
+              onClick={() => handleRunTroubleshoot(dev)}
+            >
+              🔄 Re-run Diagnostics
+            </button>
+            <button
+              type="button"
+              className="primary-button"
+              onClick={() => {
+                setTroubleshootModalDevice(null);
+                setTroubleshootResult(null);
+                setTroubleshootError(null);
+              }}
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // ------------------------------------------------------------
   // MAIN UI
   // ------------------------------------------------------------
 
@@ -13247,6 +13663,8 @@ const EndpointUpdatesPage = () => {
 
         {renderAutomationResult()}
         {renderPatchModals()}
+        {renderTroubleshootModal()}
+
 
         {showChangePasswordModal && (
           <div
