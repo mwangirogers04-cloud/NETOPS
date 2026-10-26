@@ -3149,19 +3149,41 @@ const DevicesPage = () => {
                           <span className="status-dot online" /> ONLINE
                         </span>
                       ) : (
-                        <span
-                          className="status-badge blocked"
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: "5px",
-                            fontSize: "11px",
-                            fontWeight: "700",
-                            padding: "2px 8px",
-                          }}
-                        >
-                          <span className="status-dot offline" /> OFFLINE
-                        </span>
+                        <div style={{ display: "inline-flex", flexDirection: "column", gap: "4px", alignItems: "flex-start" }}>
+                          <span
+                            className="status-badge blocked"
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "5px",
+                              fontSize: "11px",
+                              fontWeight: "700",
+                              padding: "2px 8px",
+                            }}
+                          >
+                            <span className="status-dot offline" /> OFFLINE
+                          </span>
+                          <button
+                            type="button"
+                            className="secondary-button small"
+                            style={{
+                              fontSize: "11px",
+                              padding: "2px 8px",
+                              color: "#b91c1c",
+                              borderColor: "#fca5a5",
+                              background: "#fef2f2",
+                              fontWeight: "700",
+                              cursor: "pointer",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "3px",
+                            }}
+                            onClick={() => handleRunTroubleshoot(device)}
+                            title="Run multi-layer root-cause diagnostics (ARP, IP drift, ICMP, firewall, ports)"
+                          >
+                            🩺 Diagnose
+                          </button>
+                        </div>
                       )}
                     </td>
 
@@ -3636,6 +3658,26 @@ const DevicesPage = () => {
                             {actionLoading === `isolate-${device.id}`
                               ? "..."
                               : "🔒 Isolate"}
+                          </button>
+                        )}
+
+                        {device.status === "offline" && (
+                          <button
+                            type="button"
+                            className="secondary-button small"
+                            style={{
+                              borderColor: "#f87171",
+                              color: "#b91c1c",
+                              background: "#fef2f2",
+                              fontWeight: "700",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "4px",
+                            }}
+                            onClick={() => handleRunTroubleshoot(device)}
+                            title="Diagnose why this device is offline (ARP, IP drift, ICMP ping, Firewall drop, port scan)"
+                          >
+                            🩺 Troubleshoot
                           </button>
                         )}
 
@@ -4180,19 +4222,41 @@ const LanScannerPage = () => {
                             <span className="status-dot online" /> ONLINE
                           </span>
                         ) : (
-                          <span
-                            className="status-badge blocked"
-                            style={{
-                              display: "inline-flex",
-                              alignItems: "center",
-                              gap: "5px",
-                              fontSize: "11px",
-                              fontWeight: "700",
-                              padding: "2px 8px",
-                            }}
-                          >
-                            <span className="status-dot offline" /> OFFLINE
-                          </span>
+                          <div style={{ display: "inline-flex", flexDirection: "column", gap: "4px", alignItems: "flex-start" }}>
+                            <span
+                              className="status-badge blocked"
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "5px",
+                                fontSize: "11px",
+                                fontWeight: "700",
+                                padding: "2px 8px",
+                              }}
+                            >
+                              <span className="status-dot offline" /> OFFLINE
+                            </span>
+                            <button
+                              type="button"
+                              className="secondary-button small"
+                              style={{
+                                fontSize: "11px",
+                                padding: "2px 8px",
+                                color: "#b91c1c",
+                                borderColor: "#fca5a5",
+                                background: "#fef2f2",
+                                fontWeight: "700",
+                                cursor: "pointer",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "3px",
+                              }}
+                              onClick={() => handleRunTroubleshoot(device)}
+                              title="Run multi-layer root-cause diagnostics"
+                            >
+                              🩺 Diagnose
+                            </button>
+                          </div>
                         )}
                       </td>
 
