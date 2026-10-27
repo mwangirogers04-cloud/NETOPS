@@ -140,11 +140,12 @@ def validate_password_complexity(password: str) -> str:
       - Minimum 8 characters
       - At least one uppercase letter (A-Z)
       - At least one lowercase letter (a-z)
+      - At least one number (0-9)
       - At least one special character (non-alphanumeric)
     """
     if not password or len(password) < 8:
         raise ValueError(
-            "Password must be at least 8 characters long and include at least one uppercase letter, one lowercase letter, and one special character."
+            "Password must be at least 8 characters long and include at least one uppercase letter, one lowercase letter, one number, and one special character."
         )
     if not any(ch.isupper() for ch in password):
         raise ValueError(
@@ -153,6 +154,10 @@ def validate_password_complexity(password: str) -> str:
     if not any(ch.islower() for ch in password):
         raise ValueError(
             "Password must contain at least one lowercase letter (a-z)."
+        )
+    if not any(ch.isdigit() for ch in password):
+        raise ValueError(
+            "Password must contain at least one number (0-9)."
         )
     if not any(not ch.isalnum() and not ch.isspace() for ch in password):
         raise ValueError(

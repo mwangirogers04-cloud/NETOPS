@@ -187,7 +187,7 @@ def create_user(
             detail="Only Super Administrators can create Admin accounts. Administrators can only create standard User accounts.",
         )
 
-    # Validate initial password complexity (min 8 chars, 1 uppercase, 1 lowercase, 1 special)
+    # Validate initial password complexity (min 8 chars, 1 uppercase, 1 lowercase, 1 number, 1 special)
     try:
         validate_password_complexity(req.password)
     except ValueError as exc:

@@ -579,11 +579,12 @@ def test_admin_and_developer_direct_password_reset_without_otp():
     assert adm_vs_dev.status_code == 403
     assert "administrator cannot reset the password for the developer" in adm_vs_dev.json()["detail"].lower()
 
-    # 3b. Password complexity checks on reset (< 8 chars, missing uppercase, missing lowercase, missing special char)
+    # 3b. Password complexity checks on reset (< 8 chars, missing uppercase, missing lowercase, missing number, missing special char)
     for weak_pwd, expected_sub in [
         ("Ab@1", "at least 8 characters"),
         ("lowercaseonly@123", "uppercase letter"),
         ("UPPERCASEONLY@123", "lowercase letter"),
+        ("NoNumbersHere@!", "number"),
         ("NoSpecialChar123", "special character"),
     ]:
         weak_res = client.post(
@@ -617,6 +618,52 @@ def test_admin_and_developer_direct_password_reset_without_otp():
         json={"username": "staff_member", "password": "ResetByDeveloper@789"},
     )
     assert login_staff_2.status_code == 200
+
+
+def test_create_user_password_complexity_validation():
+    """Verify that user creation enforces min 8 chars, 1 uppercase, 1 lowercase, 1 number, and 1 special character."""
+    login_adm = client.post("/auth/login", json={"username": "admin", "password": "Admin@1234"})
+    token = login_adm.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # 1. Test failing combinations
+    cases = [
+        ("Short1!", "at least 8 characters"),
+        ("nouppercase123!", "uppercase letter"),
+        ("NOLOWERCASE123!", "lowercase letter"),
+        ("NoNumberHere@!", "number"),
+        ("NoSpecialChar123", "special character"),
+    ]
+
+    for bad_pwd, expected_err in cases:
+        res = client.post(
+            "/users/",
+            headers=headers,
+            json={
+                "username": f"user_test_{bad_pwd[:4]}",
+                "email": f"test_{bad_pwd[:4]}@example.com",
+                "phone_number": "+254711998877",
+                "password": bad_pwd,
+                "role": "user",
+            },
+        )
+        assert res.status_code == 400, f"Expected 400 for password: {bad_pwd}"
+        assert expected_err in res.json()["detail"].lower()
+
+    # 2. Test valid password meeting all 5 requirements
+    valid_res = client.post(
+        "/users/",
+        headers=headers,
+        json={
+            "username": "valid_user_pwd",
+            "email": "valid_user@example.com",
+            "phone_number": "+254711998800",
+            "password": "ValidPassword@123",
+            "role": "user",
+        },
+    )
+    assert valid_res.status_code == 201
+    assert valid_res.json()["status"] == "created"
 
 
 

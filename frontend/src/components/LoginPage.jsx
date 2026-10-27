@@ -158,24 +158,28 @@ export default function LoginPage({
     return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
   };
 
-  // Validate password complexity: min 8 chars, 1 uppercase, 1 lowercase, 1 special character
+  // Validate password complexity: min 8 chars, 1 uppercase, 1 lowercase, 1 number, 1 special character
   const getPasswordRuleStatus = (pwd = "") => ({
     minLength: pwd.length >= 8,
     hasUpper: /[A-Z]/.test(pwd),
     hasLower: /[a-z]/.test(pwd),
+    hasNumber: /[0-9]/.test(pwd),
     hasSpecial: /[^A-Za-z0-9\s]/.test(pwd),
   });
 
   const validatePasswordComplexity = (pwd = "") => {
     const rules = getPasswordRuleStatus(pwd);
     if (!rules.minLength) {
-      return "Password must be at least 8 characters long and include at least one uppercase letter, one lowercase letter, and one special character.";
+      return "Password must be at least 8 characters long and include at least one uppercase letter, one lowercase letter, one number, and one special character.";
     }
     if (!rules.hasUpper) {
       return "Password must contain at least one uppercase letter (A-Z).";
     }
     if (!rules.hasLower) {
       return "Password must contain at least one lowercase letter (a-z).";
+    }
+    if (!rules.hasNumber) {
+      return "Password must contain at least one number (0-9).";
     }
     if (!rules.hasSpecial) {
       return "Password must contain at least one special character (e.g. @, #, $, %, !, &, *).";
@@ -209,6 +213,7 @@ export default function LoginPage({
         <div style={itemStyle(r.minLength)}>{r.minLength ? "✓" : "○"} Min 8 characters</div>
         <div style={itemStyle(r.hasUpper)}>{r.hasUpper ? "✓" : "○"} 1 Uppercase (A–Z)</div>
         <div style={itemStyle(r.hasLower)}>{r.hasLower ? "✓" : "○"} 1 Lowercase (a–z)</div>
+        <div style={itemStyle(r.hasNumber)}>{r.hasNumber ? "✓" : "○"} 1 Number (0–9)</div>
         <div style={itemStyle(r.hasSpecial)}>{r.hasSpecial ? "✓" : "○"} 1 Special (@#$%!&*)</div>
       </div>
     );
@@ -1252,7 +1257,7 @@ export default function LoginPage({
                   disabled={loading}
                   required
                 />
-                {renderComplexityChecklist(expiredAdminNewPassword)}
+                {renderPasswordChecklist(expiredAdminNewPassword)}
               </div>
 
               <div className="form-group">

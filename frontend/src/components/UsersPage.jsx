@@ -59,13 +59,16 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
 
   const validatePasswordComplexity = (pwd) => {
     if (!pwd || pwd.length < 8) {
-      return "Password must be at least 8 characters long and include at least one uppercase letter, one lowercase letter, and one special character.";
+      return "Password must be at least 8 characters long and include at least one uppercase letter, one lowercase letter, one number, and one special character.";
     }
     if (!/[A-Z]/.test(pwd)) {
       return "Password must contain at least one uppercase letter (A-Z).";
     }
     if (!/[a-z]/.test(pwd)) {
       return "Password must contain at least one lowercase letter (a-z).";
+    }
+    if (!/[0-9]/.test(pwd)) {
+      return "Password must contain at least one number (0-9).";
     }
     if (!/[^A-Za-z0-9\s]/.test(pwd)) {
       return "Password must contain at least one special character (e.g. @, #, $, %, !, &, *).";
@@ -79,6 +82,7 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
       { label: "Min 8 characters", met: val.length >= 8 },
       { label: "1 Uppercase (A–Z)", met: /[A-Z]/.test(val) },
       { label: "1 Lowercase (a–z)", met: /[a-z]/.test(val) },
+      { label: "1 Number (0–9)", met: /[0-9]/.test(val) },
       { label: "1 Special (@#$%!&*)", met: /[^A-Za-z0-9\s]/.test(val) },
     ];
     return (
@@ -1450,6 +1454,9 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                   </div>
                   <div style={{ color: /[a-z]/.test(resetNewPassword) ? "#059669" : "#64748b", fontWeight: /[a-z]/.test(resetNewPassword) ? "700" : "500" }}>
                     {/[a-z]/.test(resetNewPassword) ? "✓" : "○"} 1 Lowercase (a–z)
+                  </div>
+                  <div style={{ color: /[0-9]/.test(resetNewPassword) ? "#059669" : "#64748b", fontWeight: /[0-9]/.test(resetNewPassword) ? "700" : "500" }}>
+                    {/[0-9]/.test(resetNewPassword) ? "✓" : "○"} 1 Number (0–9)
                   </div>
                   <div style={{ color: /[^A-Za-z0-9\s]/.test(resetNewPassword) ? "#059669" : "#64748b", fontWeight: /[^A-Za-z0-9\s]/.test(resetNewPassword) ? "700" : "500" }}>
                     {/[^A-Za-z0-9\s]/.test(resetNewPassword) ? "✓" : "○"} 1 Special (@#$%!&*)
