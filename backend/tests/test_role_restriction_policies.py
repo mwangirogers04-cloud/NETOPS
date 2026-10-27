@@ -95,27 +95,27 @@ def auth_headers(username: str, role: str):
 
 
 # -------------------------------------------------------------
-# 1. CREATE OR DEMOTE ADMIN ACCOUNTS
+# 1. CREATE USER & ROLE ASSIGNMENT RESTRICTIONS
 # -------------------------------------------------------------
 
-def test_admin_cannot_create_or_demote_admin():
+def test_admin_cannot_create_or_grant_developer_rights():
     admin_hdr = auth_headers("net_admin_1", "admin")
     dev_hdr = auth_headers("lead_developer", "super_admin")
 
-    # A. Administrator CANNOT create an admin account (403 Forbidden)
-    res = client.post(
+    # A. Administrator CANNOT create a user with Developer rights (403 Forbidden)
+    res_dev_by_admin = client.post(
         "/users/",
         headers=admin_hdr,
         json={
-            "username": "rogue_admin",
-            "email": "rogue@example.com",
+            "username": "rogue_dev",
+            "email": "rogue_dev@example.com",
             "phone_number": "+254711111111",
-            "password": "RogueAdmin@123",
-            "role": "admin",
+            "password": "RogueDev@123",
+            "role": "super_admin",
         },
     )
-    assert res.status_code == 403
-    assert "only super administrators can create admin accounts" in res.json()["detail"].lower()
+    assert res_dev_by_admin.status_code == 403
+    assert "developer" in res_dev_by_admin.json()["detail"].lower() or "super administrator" in res_dev_by_admin.json()["detail"].lower()
 
     # B. Administrator CAN create a standard user account (201 Created)
     res_user = client.post(
@@ -130,57 +130,93 @@ def test_admin_cannot_create_or_demote_admin():
         },
     )
     assert res_user.status_code == 201
+    valid_user_id = res_user.json()["user"]["id"]
 
-    # C. Administrator CANNOT demote or change role of an existing admin
+    # C. Administrator CAN create another administrator account (201 Created)
+    res_admin = client.post(
+        "/users/",
+        headers=admin_hdr,
+        json={
+            "username": "new_net_admin",
+            "email": "new_admin@example.com",
+            "phone_number": "+254733333333",
+            "password": "NewAdminPass@123",
+            "role": "admin",
+        },
+    )
+    assert res_admin.status_code == 201
+    assert res_admin.json()["user"]["role"] == "admin"
+
+    # D. Administrator CANNOT give or grant Developer rights to any user (403 Forbidden)
+    res_give_dev = client.patch(
+        f"/users/{valid_user_id}",
+        headers=admin_hdr,
+        json={"role": "super_admin"},
+    )
+    assert res_give_dev.status_code == 403
+    assert "developer" in res_give_dev.json()["detail"].lower() or "super administrator" in res_give_dev.json()["detail"].lower()
+
+    # E. Administrator CAN promote a standard user to administrator
+    res_promote_admin = client.patch(
+        f"/users/{valid_user_id}",
+        headers=admin_hdr,
+        json={"role": "admin"},
+    )
+    assert res_promote_admin.status_code == 200
+    assert res_promote_admin.json()["user"]["role"] == "admin"
+
+    # F. Administrator CANNOT modify or demote a Developer account (403 Forbidden)
     db = TestingSessionLocal()
-    target_admin = db.scalar(select(User).where(User.username == "net_admin_2"))
-    target_id = target_admin.id
+    dev_user = db.scalar(select(User).where(User.username == "lead_developer"))
+    dev_id = dev_user.id
     db.close()
 
-    res_demote = client.patch(
-        f"/users/{target_id}",
+    res_demote_dev = client.patch(
+        f"/users/{dev_id}",
         headers=admin_hdr,
         json={"role": "user"},
     )
-    assert res_demote.status_code == 403
-    assert "only super administrators" in res_demote.json()["detail"].lower()
+    assert res_demote_dev.status_code == 403
 
-    # D. Administrator CANNOT delete an admin account (or any user account)
+    # G. Administrator CANNOT delete an account (only Super Admin / Developer can delete)
     res_delete = client.delete(
-        f"/users/{target_id}",
+        f"/users/{valid_user_id}",
         headers=admin_hdr,
     )
     assert res_delete.status_code == 403
     assert "super administrator" in res_delete.json()["detail"].lower()
 
-    # Administrator CANNOT delete a standard user account either
-    db = TestingSessionLocal()
-    reg_user = db.query(User).filter(User.username == "regular_user").first()
-    reg_id = reg_user.id
-    db.close()
-
-    res_del_reg = client.delete(
-        f"/users/{reg_id}",
-        headers=admin_hdr,
-    )
-    assert res_del_reg.status_code == 403
-    assert "super administrator" in res_del_reg.json()["detail"].lower()
-
-    # E. Super Administrator CAN change roles and delete accounts
-    res_demote_dev = client.patch(
-        f"/users/{target_id}",
+    # H. Super Administrator (Developer) CAN create accounts with Developer rights
+    res_super_create = client.post(
+        "/users/",
         headers=dev_hdr,
-        json={"role": "user"},
+        json={
+            "username": "second_developer",
+            "email": "second_dev@example.com",
+            "phone_number": "+254744444444",
+            "password": "SecondDevSecret@123",
+            "role": "super_admin",
+        },
     )
-    assert res_demote_dev.status_code == 200
-    assert res_demote_dev.json()["user"]["role"] == "user"
+    assert res_super_create.status_code == 201
+    assert res_super_create.json()["user"]["role"] == "super_admin"
+    second_dev_id = res_super_create.json()["user"]["id"]
 
+    # Super Administrator CAN delete non-developer accounts
     res_del_dev = client.delete(
-        f"/users/{target_id}",
+        f"/users/{valid_user_id}",
         headers=dev_hdr,
     )
     assert res_del_dev.status_code == 200
     assert res_del_dev.json()["status"] == "deleted"
+
+    # Super Administrator accounts are protected against deletion
+    res_del_super = client.delete(
+        f"/users/{second_dev_id}",
+        headers=dev_hdr,
+    )
+    assert res_del_super.status_code == 403
+    assert "super administrator accounts cannot be deleted" in res_del_super.json()["detail"].lower()
 
 
 # -------------------------------------------------------------

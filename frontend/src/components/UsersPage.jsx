@@ -281,8 +281,8 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
   };
 
   const handleOpenEdit = (user) => {
-    if ((user.role === "admin" || user.role === "super_admin") && !isSuperAdmin && user.id !== currentUser?.id) {
-      alert("Permission Denied: Only Super Administrators can edit Admin accounts. Administrators can only edit standard users or their own profile.");
+    if (user.role === "super_admin" && !isSuperAdmin) {
+      alert("Permission Denied: Only Developers (Super Administrators) can edit Developer accounts. Administrators cannot modify Developer accounts.");
       return;
     }
     setEditingUser(user);
@@ -1045,8 +1045,9 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                     disabled={formLoading}
                   >
                     <option value="user">Standard User (Read-Only Monitoring)</option>
+                    <option value="admin">Administrator (LAN Ops & User Management)</option>
                     {isSuperAdmin && (
-                      <option value="admin">Administrator (LAN Ops & User Management)</option>
+                      <option value="super_admin">👑 Developer (Super Admin)</option>
                     )}
                   </select>
                 </div>
@@ -1224,16 +1225,18 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                     >
                       <option value="user">Standard User</option>
                       <option value="admin">Administrator</option>
-                      <option value="super_admin">Super Administrator</option>
+                      <option value="super_admin">👑 Developer (Super Admin)</option>
                     </select>
                   ) : (
-                    <input
-                      type="text"
+                    <select
                       className="login-input"
-                      value={editFormState.role === "admin" ? "Administrator" : "Standard User"}
-                      disabled
-                      style={{ opacity: 0.7 }}
-                    />
+                      value={editFormState.role}
+                      onChange={(e) => setEditFormState({ ...editFormState, role: e.target.value })}
+                      disabled={editLoading}
+                    >
+                      <option value="user">Standard User</option>
+                      <option value="admin">Administrator</option>
+                    </select>
                   )}
                 </div>
 

@@ -52,8 +52,10 @@ class UserCreateRequest(BaseModel):
     @classmethod
     def validate_role(cls, v: str) -> str:
         clean = v.strip().lower()
-        if clean not in ("admin", "user"):
-            raise ValueError("Role must be 'admin' or 'user'")
+        if clean in ("developer", "dev"):
+            clean = "super_admin"
+        if clean not in ("admin", "user", "super_admin"):
+            raise ValueError("Role must be 'admin', 'user', or 'super_admin'")
         return clean
 
 
@@ -98,6 +100,8 @@ class UserUpdateRequest(BaseModel):
     def validate_role(cls, v: str | None) -> str | None:
         if v is not None:
             clean = v.strip().lower()
+            if clean in ("developer", "dev"):
+                clean = "super_admin"
             if clean not in ("admin", "user", "super_admin"):
                 raise ValueError("Role must be 'admin', 'user', or 'super_admin'")
             return clean
@@ -180,11 +184,12 @@ def create_user(
     Create a new user account requesting username, email, phone number,
     role, and initial credentials. Dispatches an activation login link to their email.
     """
-    # Permission check: Only super_admin can create admin accounts
-    if req.role in ("admin", "super_admin") and current_user.role != "super_admin":
+    # Permission check: Administrators cannot create accounts with Developer (Super Admin) rights.
+    # Administrators can create standard users or other administrators. Only Developers can create Developer accounts.
+    if req.role in ("super_admin", "developer") and current_user.role != "super_admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only Super Administrators can create Admin accounts. Administrators can only create standard User accounts.",
+            detail="Permission Denied: Administrators cannot create accounts with Developer (Super Admin) rights. Administrators can only create Standard Users or other Administrators. Only Developers can create Developer accounts.",
         )
 
     # Validate initial password complexity (min 8 chars, 1 uppercase, 1 lowercase, 1 number, 1 special)
@@ -291,26 +296,24 @@ def update_user(
             detail="User not found.",
         )
 
-    # Permission check: Only Super Admin can edit Super Admin accounts
+    # Permission check: Only Super Administrators (Developers) can edit Developer accounts
     if user.role == "super_admin" and current_user.role != "super_admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only Super Administrators can edit Super Administrator accounts.",
+            detail="Permission Denied: Only Super Administrators (Developers) can edit Developer accounts.",
         )
 
-    # Permission check: Administrators CANNOT edit other Administrator accounts
-    if user.role == "admin" and current_user.role != "super_admin" and user.id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only Super Administrators can modify Administrator accounts. Administrators can only edit standard user accounts or their own profile.",
-        )
-
-    # Role change permission check: Only Super Admin can change user roles or demote/promote accounts
+    # Role change permission check: Administrators cannot give Developer rights
     if req.role is not None and req.role != user.role:
-        if current_user.role != "super_admin":
+        if req.role in ("super_admin", "developer") and current_user.role != "super_admin":
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only Super Administrators can change user roles or demote/promote accounts.",
+                detail="Permission Denied: Administrators cannot give or grant Developer (Super Admin) rights. Only Developers can grant Developer rights.",
+            )
+        if user.role == "super_admin" and current_user.role != "super_admin":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Permission Denied: Administrators cannot demote or modify Developer accounts.",
             )
         # Prevent demoting the only super_admin
         if user.role == "super_admin" and req.role != "super_admin":
@@ -467,10 +470,10 @@ def resend_activation_link(
             detail="User not found.",
         )
 
-    if user.role in ("admin", "super_admin") and current_user.role != "super_admin" and user.id != current_user.id:
+    if user.role == "super_admin" and current_user.role != "super_admin" and user.id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only Super Administrators can resend activation links for Administrator accounts.",
+            detail="Permission Denied: Only Developers (Super Administrators) can resend activation links for Developer accounts.",
         )
 
     token = generate_activation_token()
