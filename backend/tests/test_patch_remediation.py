@@ -56,7 +56,25 @@ def client(db_session):
             pass
 
     app.dependency_overrides[get_db] = override_get_db
-    yield TestClient(app)
+    test_client = TestClient(app)
+
+    # Seed default developer (super_admin) so deployment endpoints are authorized by default
+    dev = db_session.query(User).filter(User.username == "patch_dev").first()
+    if not dev:
+        dev = User(
+            username="patch_dev",
+            email="patch_dev@example.com",
+            hashed_password=hash_password("Dev@1234"),
+            role="super_admin",
+            is_active=True,
+            is_verified=True,
+        )
+        db_session.add(dev)
+        db_session.commit()
+    token = create_access_token({"sub": dev.username, "role": dev.role, "user_id": dev.id})
+    test_client.headers.update({"Authorization": f"Bearer {token}"})
+
+    yield test_client
     app.dependency_overrides.clear()
 
 
@@ -337,29 +355,34 @@ def test_cancel_and_delete_patch_job(client, db_session):
     assert cancel_res.status_code == 200
     assert cancel_res.json()["status"] == "CANCELLED"
 
-    # 1. Unauthenticated delete is rejected (401)
-    del_unauth = client.delete(f"/endpoint-updates/jobs/{job_id}")
-    assert del_unauth.status_code == 401
+    # 1. Unauthenticated delete is rejected (401 or 403)
+    del_unauth = client.delete(f"/endpoint-updates/jobs/{job_id}", headers={"Authorization": ""})
+    assert del_unauth.status_code in (401, 403)
 
     # 2. Administrator cannot delete patch job (403)
     admin = User(
-        username="patch_admin",
-        email="patch_admin@example.com",
+        username="del_patch_admin",
+        email="del_patch_admin@example.com",
         hashed_password=hash_password("Admin@1234"),
         role="admin",
         is_active=True,
         is_verified=True,
     )
-    dev = User(
-        username="patch_dev",
-        email="patch_dev@example.com",
-        hashed_password=hash_password("Dev@1234"),
-        role="super_admin",
-        is_active=True,
-        is_verified=True,
-    )
-    db_session.add_all([admin, dev])
+    db_session.add(admin)
     db_session.commit()
+
+    dev = db_session.query(User).filter(User.username == "patch_dev").first()
+    if not dev:
+        dev = User(
+            username="patch_dev",
+            email="patch_dev@example.com",
+            hashed_password=hash_password("Dev@1234"),
+            role="super_admin",
+            is_active=True,
+            is_verified=True,
+        )
+        db_session.add(dev)
+        db_session.commit()
 
     admin_token = create_access_token({"sub": admin.username, "role": admin.role, "user_id": admin.id})
     dev_token = create_access_token({"sub": dev.username, "role": dev.role, "user_id": dev.id})

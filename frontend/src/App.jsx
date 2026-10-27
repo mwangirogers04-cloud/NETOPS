@@ -501,11 +501,15 @@ function App() {
   };
 
   const saveUpdatePolicy = async (nextPolicy) => {
+    if (!isSuperAdmin) {
+      alert("Permission Denied: Only Developers (Super Admins) can modify central update deployment policies.");
+      return null;
+    }
     setPolicySaving(true);
     try {
       const response = await fetch(`${API_URL}/endpoint-updates/policy`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
         body: JSON.stringify(nextPolicy),
       });
       if (!response.ok) {
@@ -525,14 +529,15 @@ function App() {
   };
 
   const scheduleAllPendingOffHours = async () => {
-    if (!isAdmin) {
-      alert("Permission Denied: Only Administrators can schedule central updates.");
+    if (!isSuperAdmin) {
+      alert("Permission Denied: Only Developers (Super Admins) can schedule central updates remotely. Administrators have view-only access.");
       return [];
     }
     setBulkOffHoursLoading(true);
     try {
       const response = await fetch(`${API_URL}/endpoint-updates/schedule-off-hours-all`, {
         method: "POST",
+        headers: { ...getAuthHeaders() },
       });
       if (!response.ok) {
         throw new Error(`Failed to schedule off-hours updates (${response.status})`);
@@ -629,8 +634,8 @@ function App() {
   };
 
   const openDeployModal = async (device, preferredMode = null) => {
-    if (!isAdmin) {
-      alert("Permission Denied: Standard users cannot deploy central updates. Only Administrators can manage patch remediation.");
+    if (!isSuperAdmin) {
+      alert("Permission Denied: Only Developers (Super Admins) can deploy updates remotely to machines. Administrators have view-only access.");
       return;
     }
     setForceWorkingHours(false);
@@ -660,6 +665,10 @@ function App() {
   };
 
   const deployUpdates = async (target, scheduledTime = null, mode = "now", forceOverride = false) => {
+    if (!isSuperAdmin) {
+      alert("Permission Denied: Only Developers (Super Admins) can deploy updates remotely to machines. Administrators have view-only access.");
+      return null;
+    }
     const hostname = target.hostname || "local";
     const ip_address = target.ip_address || target.device_ip || null;
     const mac_address = target.mac_address || null;
@@ -671,7 +680,7 @@ function App() {
     try {
       const response = await fetch(`${API_URL}/endpoint-updates/jobs`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
         body: JSON.stringify({
           hostname,
           ip_address,
@@ -679,7 +688,7 @@ function App() {
           machine_id,
           device_id,
           action: "INSTALL_ALL_UPDATES",
-          initiated_by: "Admin Console",
+          initiated_by: currentUser?.username || "Developer Console",
           scheduled_at,
           schedule_mode: mode,
           respect_working_hours: mode === "scheduled" || mode === "off_hours",
@@ -707,9 +716,14 @@ function App() {
   };
 
   const runJobNow = async (jobId) => {
+    if (!isSuperAdmin) {
+      alert("Permission Denied: Only Developers (Super Admins) can trigger immediate update deployment.");
+      return null;
+    }
     try {
       const response = await fetch(`${API_URL}/endpoint-updates/jobs/${jobId}/run-now`, {
         method: "POST",
+        headers: { ...getAuthHeaders() },
       });
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
@@ -3413,25 +3427,31 @@ const DevicesPage = () => {
                                   {device.operating_system} {device.os_version || ""}
                                 </div>
                               )}
-                              <button
-                                type="button"
-                                className="primary-button small"
-                                style={{
-                                  marginTop: "6px",
-                                  fontSize: "11px",
-                                  padding: "3px 8px",
-                                  backgroundColor: "#10b981",
-                                  borderColor: "#059669",
-                                  display: "inline-flex",
-                                  alignItems: "center",
-                                  gap: "4px",
-                                  fontWeight: "600",
-                                }}
-                                onClick={() => openDeployModal(device)}
-                                title="Centrally deploy pending updates to this machine"
-                              >
-                                ⚡ Deploy Updates
-                              </button>
+                              {isSuperAdmin ? (
+                                <button
+                                  type="button"
+                                  className="primary-button small"
+                                  style={{
+                                    marginTop: "6px",
+                                    fontSize: "11px",
+                                    padding: "3px 8px",
+                                    backgroundColor: "#10b981",
+                                    borderColor: "#059669",
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: "4px",
+                                    fontWeight: "600",
+                                  }}
+                                  onClick={() => openDeployModal(device)}
+                                  title="Centrally deploy pending updates to this machine"
+                                >
+                                  ⚡ Deploy Updates
+                                </button>
+                              ) : (
+                                <div style={{ marginTop: "4px", fontSize: "11px", color: "#64748b" }}>
+                                  🔒 Updates pending (Deploy: Developer only)
+                                </div>
+                              )}
                             </div>
                           );
                         }
@@ -9753,7 +9773,7 @@ const Dashboard = () => {
                                 ? `⚡ ${activeJob.progress_percent}%`
                                 : "⚡ Queued"}
                             </button>
-                            {(activeJob.status === "PENDING" || activeJob.status === "SCHEDULED") && (
+                            {(activeJob.status === "PENDING" || activeJob.status === "SCHEDULED") && isSuperAdmin && (
                               <button
                                 type="button"
                                 className="primary-button small"
@@ -9774,7 +9794,7 @@ const Dashboard = () => {
                               </button>
                             )}
                           </div>
-                        ) : (
+                        ) : isSuperAdmin ? (
                           <button
                             type="button"
                             className="primary-button small"
@@ -9790,6 +9810,19 @@ const Dashboard = () => {
                           >
                             ⚡ Deploy Updates
                           </button>
+                        ) : (
+                          <span
+                            className="status-badge"
+                            style={{
+                              background: "#f1f5f9",
+                              color: "#64748b",
+                              fontSize: "11px",
+                              border: "1px solid #cbd5e1",
+                            }}
+                            title="Admins can monitor updates; deployment is restricted to Developer"
+                          >
+                            👁️ View Only
+                          </span>
                         )}
                       </td>
                     </tr>
@@ -10252,28 +10285,45 @@ const EndpointUpdatesPage = () => {
           </div>
         </div>
 
-        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-          <button
-            type="button"
-            className="primary-button"
-            onClick={async () => {
-              await scheduleAllPendingOffHours();
-              await loadEndpointUpdates();
-            }}
-            disabled={bulkOffHoursLoading || endpointsWithUpdates === 0}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "6px",
-              background: "#6366f1",
-              borderColor: "#4f46e5",
-            }}
-            title="Schedule all machines needing updates for their next non-working-hours window"
-          >
-            {bulkOffHoursLoading
-              ? "⏳ Scheduling Off-Hours..."
-              : `🌙 Schedule All Outside Working Hours (${endpointsWithUpdates})`}
-          </button>
+        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+          {isSuperAdmin ? (
+            <button
+              type="button"
+              className="primary-button"
+              onClick={async () => {
+                await scheduleAllPendingOffHours();
+                await loadEndpointUpdates();
+              }}
+              disabled={bulkOffHoursLoading || endpointsWithUpdates === 0}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                background: "#6366f1",
+                borderColor: "#4f46e5",
+              }}
+              title="Schedule all machines needing updates for their next non-working-hours window"
+            >
+              {bulkOffHoursLoading
+                ? "⏳ Scheduling Off-Hours..."
+                : `🌙 Schedule All Outside Working Hours (${endpointsWithUpdates})`}
+            </button>
+          ) : (
+            <span
+              className="status-badge"
+              style={{
+                background: "#f8fafc",
+                color: "#64748b",
+                border: "1px solid #cbd5e1",
+                padding: "6px 12px",
+                fontSize: "12px",
+                fontWeight: "600",
+              }}
+              title="Deployment is restricted to Developers (Super Admins). Administrators have view-only monitoring rights."
+            >
+              🛡️ Remote Deployment: Developer Only
+            </span>
+          )}
           <button
             type="button"
             className="secondary-button"
@@ -10836,7 +10886,7 @@ const EndpointUpdatesPage = () => {
                                 ? `⚡ Updating ${activeJob.progress_percent}%`
                                 : "⚡ Queued"}
                             </button>
-                            {(activeJob.status === "PENDING" || activeJob.status === "SCHEDULED") && (
+                            {(activeJob.status === "PENDING" || activeJob.status === "SCHEDULED") && isSuperAdmin && (
                               <div style={{ display: "flex", gap: "4px" }}>
                                 <button
                                   type="button"
@@ -10870,7 +10920,7 @@ const EndpointUpdatesPage = () => {
                               </div>
                             )}
                           </div>
-                        ) : (
+                        ) : isSuperAdmin ? (
                           <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
                             <button
                               type="button"
@@ -10903,6 +10953,20 @@ const EndpointUpdatesPage = () => {
                               ⚡ Deploy
                             </button>
                           </div>
+                        ) : (
+                          <span
+                            className="status-badge"
+                            style={{
+                              background: "#f1f5f9",
+                              color: "#64748b",
+                              border: "1px solid #cbd5e1",
+                              fontSize: "11px",
+                              padding: "4px 8px",
+                            }}
+                            title="Admins have view-only monitoring access. Remote deployment is restricted to Developer (Super Admin)."
+                          >
+                            👁️ View Only (Deploy Restricted)
+                          </span>
                         )}
                       </td>
                     </tr>
@@ -11666,7 +11730,7 @@ const EndpointUpdatesPage = () => {
                               : job.status}
                           </span>
 
-                          {(job.status === "PENDING" || job.status === "SCHEDULED") && (
+                          {(job.status === "PENDING" || job.status === "SCHEDULED") && isSuperAdmin && (
                             <>
                               <button
                                 type="button"
@@ -11689,7 +11753,10 @@ const EndpointUpdatesPage = () => {
                                   const label = job.status === "SCHEDULED" ? "scheduled update" : "pending update";
                                   if (window.confirm(`Cancel ${label} job #${job.id} for ${job.hostname}?`)) {
                                     try {
-                                      await fetch(`${API_URL}/endpoint-updates/jobs/${job.id}/cancel`, { method: "POST" });
+                                      await fetch(`${API_URL}/endpoint-updates/jobs/${job.id}/cancel`, {
+                                        method: "POST",
+                                        headers: { ...getAuthHeaders() },
+                                      });
                                       await loadPatchJobs();
                                     } catch (err) {
                                       alert("Failed to cancel job: " + err.message);
@@ -11702,7 +11769,7 @@ const EndpointUpdatesPage = () => {
                               </button>
                             </>
                           )}
-                          {(job.status === "CANCELLED" || job.status === "FAILED") && (
+                          {(job.status === "CANCELLED" || job.status === "FAILED") && isSuperAdmin && (
                             <button
                               type="button"
                               className="secondary-button small"
@@ -11738,37 +11805,44 @@ const EndpointUpdatesPage = () => {
                         <div>
                           <strong>📅 Scheduled Maintenance Window:</strong> Updates for <strong>{selectedJobDetails.hostname}</strong> are scheduled to run at <strong>{selectedJobDetails.scheduled_at ? new Date(selectedJobDetails.scheduled_at.endsWith("Z") ? selectedJobDetails.scheduled_at : selectedJobDetails.scheduled_at + "Z").toLocaleString() : "the scheduled time"}</strong>.
                         </div>
-                        <div style={{ display: "flex", gap: "8px", flexShrink: 0 }}>
-                          <button
-                            type="button"
-                            className="primary-button small"
-                            style={{ fontSize: "11px", padding: "2px 8px", background: "#10b981", borderColor: "#059669", fontWeight: "600", whiteSpace: "nowrap" }}
-                            onClick={async () => {
-                              await runJobNow(selectedJobDetails.id);
-                            }}
-                            title="Execute updates immediately without waiting for scheduled time"
-                          >
-                            ▶️ Run Now
-                          </button>
-                          <button
-                            type="button"
-                            className="secondary-button small"
-                            style={{ fontSize: "11px", padding: "2px 8px", color: "#dc2626", borderColor: "#7f1d1d", whiteSpace: "nowrap" }}
-                            onClick={async () => {
-                              if (window.confirm(`Cancel scheduled update job #${selectedJobDetails.id}?`)) {
-                                try {
-                                  await fetch(`${API_URL}/endpoint-updates/jobs/${selectedJobDetails.id}/cancel`, { method: "POST" });
-                                  await loadPatchJobs();
-                                  setSelectedJobDetails((prev) => prev ? { ...prev, status: "CANCELLED" } : null);
-                                } catch (err) {
-                                  alert("Failed to cancel job: " + err.message);
+                        {isSuperAdmin ? (
+                          <div style={{ display: "flex", gap: "8px", flexShrink: 0 }}>
+                            <button
+                              type="button"
+                              className="primary-button small"
+                              style={{ fontSize: "11px", padding: "2px 8px", background: "#10b981", borderColor: "#059669", fontWeight: "600", whiteSpace: "nowrap" }}
+                              onClick={async () => {
+                                await runJobNow(selectedJobDetails.id);
+                              }}
+                              title="Execute updates immediately without waiting for scheduled time"
+                            >
+                              ▶️ Run Now
+                            </button>
+                            <button
+                              type="button"
+                              className="secondary-button small"
+                              style={{ fontSize: "11px", padding: "2px 8px", color: "#dc2626", borderColor: "#7f1d1d", whiteSpace: "nowrap" }}
+                              onClick={async () => {
+                                if (window.confirm(`Cancel scheduled update job #${selectedJobDetails.id}?`)) {
+                                  try {
+                                    await fetch(`${API_URL}/endpoint-updates/jobs/${selectedJobDetails.id}/cancel`, {
+                                      method: "POST",
+                                      headers: { ...getAuthHeaders() },
+                                    });
+                                    await loadPatchJobs();
+                                    setSelectedJobDetails((prev) => prev ? { ...prev, status: "CANCELLED" } : null);
+                                  } catch (err) {
+                                    alert("Failed to cancel job: " + err.message);
+                                  }
                                 }
-                              }
-                            }}
-                          >
-                            Cancel Schedule
-                          </button>
-                        </div>
+                              }}
+                            >
+                              Cancel Schedule
+                            </button>
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: "11px", color: "#64748b", fontStyle: "italic" }}>Execution controls restricted to Developer</div>
+                        )}
                       </div>
                     )}
 
@@ -11777,37 +11851,44 @@ const EndpointUpdatesPage = () => {
                         <div>
                           <strong>⏳ Queued for Updates:</strong> This command is waiting in queue for <strong>{selectedJobDetails.hostname}</strong> ({selectedJobDetails.ip_address || "LAN"}).
                         </div>
-                        <div style={{ display: "flex", gap: "8px", flexShrink: 0 }}>
-                          <button
-                            type="button"
-                            className="primary-button small"
-                            style={{ fontSize: "11px", padding: "3px 10px", background: "#10b981", borderColor: "#059669", fontWeight: "600", whiteSpace: "nowrap" }}
-                            onClick={async () => {
-                              await runJobNow(selectedJobDetails.id);
-                            }}
-                            title="Continue update deployment immediately"
-                          >
-                            ▶️ Continue to Update Now
-                          </button>
-                          <button
-                            type="button"
-                            className="secondary-button small"
-                            style={{ fontSize: "11px", padding: "2px 8px", color: "#dc2626", borderColor: "#7f1d1d", whiteSpace: "nowrap" }}
-                            onClick={async () => {
-                              if (window.confirm(`Cancel pending update job #${selectedJobDetails.id}?`)) {
-                                try {
-                                  await fetch(`${API_URL}/endpoint-updates/jobs/${selectedJobDetails.id}/cancel`, { method: "POST" });
-                                  await loadPatchJobs();
-                                  setSelectedJobDetails((prev) => prev ? { ...prev, status: "CANCELLED" } : null);
-                                } catch (err) {
-                                  alert("Failed to cancel job: " + err.message);
+                        {isSuperAdmin ? (
+                          <div style={{ display: "flex", gap: "8px", flexShrink: 0 }}>
+                            <button
+                              type="button"
+                              className="primary-button small"
+                              style={{ fontSize: "11px", padding: "3px 10px", background: "#10b981", borderColor: "#059669", fontWeight: "600", whiteSpace: "nowrap" }}
+                              onClick={async () => {
+                                await runJobNow(selectedJobDetails.id);
+                              }}
+                              title="Continue update deployment immediately"
+                            >
+                              ▶️ Continue to Update Now
+                            </button>
+                            <button
+                              type="button"
+                              className="secondary-button small"
+                              style={{ fontSize: "11px", padding: "2px 8px", color: "#dc2626", borderColor: "#7f1d1d", whiteSpace: "nowrap" }}
+                              onClick={async () => {
+                                if (window.confirm(`Cancel pending update job #${selectedJobDetails.id}?`)) {
+                                  try {
+                                    await fetch(`${API_URL}/endpoint-updates/jobs/${selectedJobDetails.id}/cancel`, {
+                                      method: "POST",
+                                      headers: { ...getAuthHeaders() },
+                                    });
+                                    await loadPatchJobs();
+                                    setSelectedJobDetails((prev) => prev ? { ...prev, status: "CANCELLED" } : null);
+                                  } catch (err) {
+                                    alert("Failed to cancel job: " + err.message);
+                                  }
                                 }
-                              }
-                            }}
-                          >
-                            Cancel Job
-                          </button>
-                        </div>
+                              }}
+                            >
+                              Cancel Job
+                            </button>
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: "11px", color: "#64748b", fontStyle: "italic" }}>Execution controls restricted to Developer</div>
+                        )}
                       </div>
                     )}
 

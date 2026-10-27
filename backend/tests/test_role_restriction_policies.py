@@ -14,6 +14,7 @@ from backend.app.models.switch_config import SwitchConfig
 from backend.app.models.firewall_config import FirewallConfig
 from backend.app.models.vlan_config import VlanConfig
 from backend.app.models.patch_job import PatchJob
+from backend.app.models.endpoint_update import EndpointUpdate
 from backend.app.models.access_schedule import AccessSchedule
 from backend.app.services.auth_service import create_access_token, hash_password
 
@@ -486,3 +487,98 @@ def test_admin_cannot_bypass_lockouts_or_reset_admin_passwords():
     )
     assert res_dev_reset_adm.status_code == 200
     assert res_dev_reset_adm.json()["reset_by_role"] == "super_admin"
+
+
+# -------------------------------------------------------------
+# 6. REMOTE UPDATE DEPLOYMENT RESTRICTION
+# -------------------------------------------------------------
+
+def test_admin_cannot_deploy_updates_remotely():
+    admin_hdr = auth_headers("net_admin_1", "admin")
+    dev_hdr = auth_headers("lead_developer", "super_admin")
+
+    db = TestingSessionLocal()
+    dev_pc = Device(
+        mac_address="22:33:44:55:66:77",
+        ip_address="192.168.0.75",
+        hostname="WS-ENGINEER",
+        device_type="computer",
+        approval_status="approved",
+        enforcement_status="allowed",
+    )
+    db.add(dev_pc)
+    db.commit()
+
+    ep_update = EndpointUpdate(
+        machine_id="mach-001",
+        hostname="WS-ENGINEER",
+        ip_address="192.168.0.75",
+        mac_address="22:33:44:55:66:77",
+        operating_system="Ubuntu Linux",
+        os_version="24.04 LTS",
+        architecture="x86_64",
+        update_status="updates_available",
+        pending_updates=5,
+        security_updates=2,
+        last_checked=datetime.now(timezone.utc).replace(tzinfo=None),
+    )
+    db.add(ep_update)
+    db.commit()
+    db.close()
+
+    # A. Administrator CAN view endpoints with updates (Read-Only)
+    res_list = client.get("/endpoint-updates/", headers=admin_hdr)
+    assert res_list.status_code == 200
+    assert any(ep["hostname"] == "WS-ENGINEER" for ep in res_list.json())
+
+    # B. Administrator CANNOT deploy updates remotely via POST /endpoint-updates/jobs (403 Forbidden)
+    res_deploy_admin = client.post(
+        "/endpoint-updates/jobs",
+        headers=admin_hdr,
+        json={
+            "hostname": "WS-ENGINEER",
+            "ip_address": "192.168.0.75",
+            "mac_address": "22:33:44:55:66:77",
+            "action": "INSTALL_ALL_UPDATES",
+        },
+    )
+    assert res_deploy_admin.status_code == 403
+    assert "super administrator" in res_deploy_admin.json()["detail"].lower() or "developer" in res_deploy_admin.json()["detail"].lower()
+
+    # C. Administrator CANNOT schedule bulk off-hours updates (403 Forbidden)
+    res_bulk_admin = client.post("/endpoint-updates/schedule-off-hours-all", headers=admin_hdr)
+    assert res_bulk_admin.status_code == 403
+
+    # D. Administrator CANNOT update deployment policy (403 Forbidden)
+    res_pol_admin = client.put(
+        "/endpoint-updates/policy",
+        headers=admin_hdr,
+        json={"default_working_start": "09:00", "default_working_end": "18:00"},
+    )
+    assert res_pol_admin.status_code == 403
+
+    # E. Super Administrator (Developer) CAN deploy updates remotely (200 OK)
+    res_deploy_dev = client.post(
+        "/endpoint-updates/jobs",
+        headers=dev_hdr,
+        json={
+            "hostname": "WS-ENGINEER",
+            "ip_address": "192.168.0.75",
+            "mac_address": "22:33:44:55:66:77",
+            "action": "INSTALL_ALL_UPDATES",
+        },
+    )
+    assert res_deploy_dev.status_code == 200
+    job_id = res_deploy_dev.json()["id"]
+
+    # F. Administrator CANNOT trigger run-now or cancel on the job (403 Forbidden)
+    res_run_admin = client.post(f"/endpoint-updates/jobs/{job_id}/run-now", headers=admin_hdr)
+    assert res_run_admin.status_code == 403
+
+    res_cancel_admin = client.post(f"/endpoint-updates/jobs/{job_id}/cancel", headers=admin_hdr)
+    assert res_cancel_admin.status_code == 403
+
+    # G. Super Administrator (Developer) CAN cancel the update job (200 OK)
+    res_cancel_dev = client.post(f"/endpoint-updates/jobs/{job_id}/cancel", headers=dev_hdr)
+    assert res_cancel_dev.status_code == 200
+    assert res_cancel_dev.json()["status"] == "CANCELLED"

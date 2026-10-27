@@ -430,6 +430,7 @@ def get_update_policy(
 def update_update_policy_endpoint(
     payload: UpdatePolicyUpdateRequest,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_super_admin),
 ):
     """Update global off-working-hours update policy and optionally evaluate pending off-hours jobs."""
     policy = get_or_create_update_policy(db)
@@ -485,6 +486,7 @@ def check_working_hours_for_endpoint(
 @router.post("/schedule-off-hours-all", response_model=list[PatchJobResponse])
 def schedule_all_pending_updates_off_hours(
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_super_admin),
 ):
     """
     Schedule updates outside working hours for all endpoints that currently have pending updates.
@@ -534,6 +536,7 @@ def run_lan_patch_scan(
 def trigger_patch_job(
     payload: CreatePatchJobRequest,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_super_admin),
 ):
     """
     Queue or schedule an update deployment job for an endpoint.
@@ -633,6 +636,7 @@ def report_job_status(
 def cancel_patch_job(
     job_id: int,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_super_admin),
 ):
     """Cancel a pending or in-progress update deployment job."""
     job = db.get(PatchJob, job_id)
@@ -661,6 +665,7 @@ def cancel_patch_job(
 def run_patch_job_now(
     job_id: int,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_super_admin),
 ):
     """
     Manually trigger immediate execution / continuation of a queued, scheduled, or pending patch job.
