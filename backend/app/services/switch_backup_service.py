@@ -200,6 +200,15 @@ def create_switch_backup(
             change_summary = "Identical to preceding backup (No changes)"
         else:
             change_summary = f"+{diff_res['additions']} added, -{diff_res['deletions']} removed vs #{prev_backup.id}"
+            # Check for security-sensitive discrepancies
+            discrepancies = detect_security_discrepancies(prev_backup.config_text, config_text)
+            if discrepancies:
+                create_event(
+                    db,
+                    "unauthorized_cli_change",
+                    f"Sensitive security discrepancy detected in switch '{switch.name}' ({switch.management_ip}) configuration drift: {'; '.join(discrepancies)}",
+                    actor=created_by,
+                )
     else:
         change_summary = "Initial Baseline Running-Config"
 

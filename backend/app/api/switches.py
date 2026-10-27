@@ -271,10 +271,11 @@ def delete_switch_config(
 @router.post("/test-connection")
 def test_switch_connection(
     req: TestSwitchConnectionRequest,
+    db: Session = Depends(get_db),
     current_user: User = Depends(require_super_admin),
 ):
     """Test reachability and credentials against a switch (Super Admin only)."""
-    return probe_switch_connection(
+    res = probe_switch_connection(
         vendor=req.vendor,
         management_ip=req.management_ip.strip(),
         port=req.port,
@@ -282,6 +283,15 @@ def test_switch_connection(
         password=req.password,
         enable_secret=req.enable_secret,
     )
+    if not res.get("connected"):
+        create_event(
+            db,
+            "switch_unreachable",
+            f"Switch connection probe failed for {req.management_ip.strip()} ({req.vendor}): {res.get('message', 'Unreachable')}",
+            actor=current_user.username,
+        )
+        db.commit()
+    return res
 
 
 @router.get("/active")

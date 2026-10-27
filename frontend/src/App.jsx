@@ -5361,10 +5361,26 @@ const AccessPage = () => {
     <div className="page">
       <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "12px" }}>
         <div>
-          <div className="page-title" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <div className="page-title" style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
             <span>Network Events</span>
             <span style={{ fontSize: "11px", background: "#f0fdf4", color: "#166534", border: "1px solid #bbf7d0", padding: "3px 8px", borderRadius: "12px", fontWeight: "700" }}>
               🛡️ Audit Trail Protected (Immutable to Admins)
+            </span>
+            <span
+              onClick={() => { setActivePage("settings"); setActiveTab("notifications"); }}
+              style={{
+                fontSize: "11px",
+                background: notifForm.webhook_enabled ? "#eff6ff" : "#f1f5f9",
+                color: notifForm.webhook_enabled ? "#1d4ed8" : "#475569",
+                border: `1px solid ${notifForm.webhook_enabled ? "#93c5fd" : "#cbd5e1"}`,
+                padding: "3px 8px",
+                borderRadius: "12px",
+                fontWeight: "700",
+                cursor: "pointer",
+              }}
+              title="Click to manage real-time alert webhooks"
+            >
+              🔔 {notifForm.webhook_enabled ? `Alerts Active (${(notifForm.webhook_platform || "slack").toUpperCase()})` : "Webhooks: Inactive"}
             </span>
           </div>
 
@@ -7561,16 +7577,32 @@ return (
     sms_username: "",
     sms_sender_id: "",
     sms_webhook_url: "",
+    webhook_enabled: false,
+    webhook_url: "",
+    webhook_platform: "slack",
+    alert_email: "",
+    alert_email_enabled: false,
+    triggers: {
+      device_quarantined: true,
+      rogue_device_detected: true,
+      auth_lockout: true,
+      switch_unreachable: true,
+      unauthorized_cli_change: true,
+    },
+    last_webhook_status: null,
+    last_webhook_sent_at: null,
+    last_webhook_error: null,
   });
   const [notifSaving, setNotifSaving] = useState(false);
   const [notifFeedback, setNotifFeedback] = useState(null);
+  const [notifTestChannel, setNotifTestChannel] = useState("webhook");
   const [notifTestRecipient, setNotifTestRecipient] = useState("");
   const [notifTestLoading, setNotifTestLoading] = useState(false);
 
   const loadNotificationSettings = async () => {
     if (!isAdmin) return;
     try {
-      const res = await fetch(`${API_URL}/auth/notification-settings`, {
+      const res = await fetch(`${API_URL}/notifications/settings`, {
         headers: getAuthHeaders(),
       });
       if (res.ok) {
@@ -7724,7 +7756,7 @@ return (
             onClick={() => setActiveTab("notifications")}
             style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
           >
-            <span>📨</span> Email &amp; SMS OTP Gateways
+            <span>🔔</span> Webhooks &amp; Alert Gateways
           </button>
           <button
             type="button"
@@ -8316,16 +8348,16 @@ return (
           </div>
         )}
 
-        {/* TAB 4: EMAIL (SMTP) & SMS OTP GATEWAYS */}
+        {/* TAB 4: REAL-TIME WEBHOOKS & ALERT GATEWAYS */}
         {activeTab === "notifications" && (
           <div className="panel">
             <div className="panel-header">
               <div>
-                <div className="panel-title" style={{ fontSize: "16px" }}>
-                  📨 Email (SMTP) &amp; SMS OTP Delivery Gateways
+                <div className="panel-title" style={{ fontSize: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
+                  <span>🔔</span> Real-Time Webhooks &amp; Alert Delivery Gateways
                 </div>
                 <div className="panel-subtitle">
-                  Configure your SMTP Email server (e.g., Gmail App Password, Office 365) and SMS Gateway (Africa&apos;s Talking, Twilio, or Custom Webhook) so 5-minute Forgot Password OTPs and account activation links are delivered to real email addresses and mobile phones.
+                  Configure instant Slack, Discord, and Custom Webhook notifications for security breaches, rogue devices, switch CLI drift, and brute-force lockouts, alongside SMTP Email &amp; SMS OTP gateways.
                 </div>
               </div>
             </div>
@@ -8338,16 +8370,170 @@ return (
                   borderRadius: "8px",
                   background: notifFeedback.type === "success" ? "rgba(16, 185, 129, 0.14)" : "rgba(239, 68, 68, 0.14)",
                   border: `1px solid ${notifFeedback.type === "success" ? "#10b981" : "#ef4444"}`,
-                  color: notifFeedback.type === "success" ? "#6ee7b7" : "#b91c1c",
+                  color: notifFeedback.type === "success" ? "#10b981" : "#ef4444",
                   fontSize: "13px",
+                  fontWeight: "600",
                 }}
               >
                 {notifFeedback.text}
               </div>
             )}
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: "20px", padding: "0 18px 18px" }}>
-              {/* EMAIL SMTP CARD */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: "20px", padding: "0 18px 18px" }}>
+              {/* CARD 1: REAL-TIME WEBHOOK ALERTING */}
+              <div style={{ background: "#f8fafc", border: "1px solid #cbd5e1", borderRadius: "10px", padding: "18px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+                  <div style={{ fontWeight: "700", fontSize: "14px", color: "#6366f1", display: "flex", alignItems: "center", gap: "6px" }}>
+                    <span>⚡</span> Real-Time Webhooks (Slack / Discord / JSON)
+                  </div>
+                  <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", cursor: "pointer", fontWeight: "600", color: notifForm.webhook_enabled ? "#10b981" : "#64748b" }}>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(notifForm.webhook_enabled)}
+                      onChange={(e) => setNotifForm({ ...notifForm, webhook_enabled: e.target.checked })}
+                    />
+                    {notifForm.webhook_enabled ? "Enabled" : "Disabled"}
+                  </label>
+                </div>
+
+                <div style={{ marginBottom: "10px" }}>
+                  <label style={{ display: "block", fontSize: "11px", color: "#475569", marginBottom: "4px" }}>
+                    Webhook Destination Platform
+                  </label>
+                  <select
+                    value={notifForm.webhook_platform || "slack"}
+                    onChange={(e) => setNotifForm({ ...notifForm, webhook_platform: e.target.value })}
+                    style={{ width: "100%", padding: "8px 10px", background: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "6px", color: "#0f172a", fontSize: "12px" }}
+                  >
+                    <option value="slack">🟣 Slack (Incoming Webhook Block Kit &amp; Attachments)</option>
+                    <option value="discord">🎮 Discord (Rich Embed Cards with Severity Colors)</option>
+                    <option value="generic">🌐 Generic JSON (REST API / SIEM / NOC Integration)</option>
+                  </select>
+                </div>
+
+                <div style={{ marginBottom: "10px" }}>
+                  <label style={{ display: "block", fontSize: "11px", color: "#475569", marginBottom: "4px" }}>
+                    Webhook URL (Slack / Discord / Custom endpoint)
+                  </label>
+                  <input
+                    type="url"
+                    placeholder={
+                      notifForm.webhook_platform === "discord"
+                        ? "https://discord.com/api/webhooks/..."
+                        : notifForm.webhook_platform === "generic"
+                        ? "https://siem.internal.company.com/api/alerts"
+                        : "https://hooks.slack.com/services/T.../B.../..."
+                    }
+                    value={notifForm.webhook_url || ""}
+                    onChange={(e) => setNotifForm({ ...notifForm, webhook_url: e.target.value })}
+                    style={{ width: "100%", padding: "8px 10px", background: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "6px", color: "#0f172a", fontSize: "12px", fontFamily: "monospace" }}
+                  />
+                </div>
+
+                <div style={{ marginBottom: "12px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                    <label style={{ fontSize: "11px", color: "#475569" }}>Emergency Alert Email Recipient</label>
+                    <label style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "11px", cursor: "pointer", color: notifForm.alert_email_enabled ? "#10b981" : "#64748b" }}>
+                      <input
+                        type="checkbox"
+                        checked={Boolean(notifForm.alert_email_enabled)}
+                        onChange={(e) => setNotifForm({ ...notifForm, alert_email_enabled: e.target.checked })}
+                      />
+                      Send Email Alerts
+                    </label>
+                  </div>
+                  <input
+                    type="email"
+                    placeholder="security-noc@netops.local"
+                    value={notifForm.alert_email || ""}
+                    onChange={(e) => setNotifForm({ ...notifForm, alert_email: e.target.value })}
+                    style={{ width: "100%", padding: "8px 10px", background: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "6px", color: "#0f172a", fontSize: "12px" }}
+                  />
+                </div>
+
+                {/* DISPATCH HEALTH BADGE */}
+                <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "8px 12px", fontSize: "11px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span style={{ color: "#64748b" }}>Last Dispatch:</span>
+                  <span style={{ fontWeight: "600", color: notifForm.last_webhook_status === "success" ? "#10b981" : notifForm.last_webhook_status === "failed" ? "#ef4444" : "#94a3b8" }}>
+                    {notifForm.last_webhook_status === "success" ? "✅ Sent successfully" : notifForm.last_webhook_status === "failed" ? `❌ Error: ${notifForm.last_webhook_error || "Failed"}` : "⚪ No dispatches yet"}
+                  </span>
+                </div>
+              </div>
+
+              {/* CARD 2: SECURITY ALERT TRIGGER RULES */}
+              <div style={{ background: "#f8fafc", border: "1px solid #cbd5e1", borderRadius: "10px", padding: "18px" }}>
+                <div style={{ fontWeight: "700", fontSize: "14px", color: "#b91c1c", marginBottom: "12px", display: "flex", alignItems: "center", gap: "6px" }}>
+                  <span>🎯</span> Active Security Alert Triggers
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                  {[
+                    {
+                      key: "device_quarantined",
+                      title: "🚨 Device Quarantined / Isolated",
+                      desc: "Triggered when endpoint is moved to VLAN 90 quarantine or isolated by admin",
+                    },
+                    {
+                      key: "rogue_device_detected",
+                      title: "⚠️ Rogue / Unknown LAN Device",
+                      desc: "Triggered when ARP/DHCP discovery finds unregistered MAC or static conflict",
+                    },
+                    {
+                      key: "auth_lockout",
+                      title: "🔒 Brute-Force Account Lockout",
+                      desc: "Triggered after 3 consecutive failed login attempts on any admin/user account",
+                    },
+                    {
+                      key: "switch_unreachable",
+                      title: "🔌 Network Switch Unreachable",
+                      desc: "Triggered when switch drops offline, fails ping, or rejects SSH credentials",
+                    },
+                    {
+                      key: "unauthorized_cli_change",
+                      title: "📜 Switch CLI Drift / Sensitive Discrepancy",
+                      desc: "Triggered when backup diff discovers unauthorized secrets, VLANs, or trunk changes",
+                    },
+                  ].map((trig) => {
+                    const isChecked = notifForm.triggers ? notifForm.triggers[trig.key] !== false : true;
+                    return (
+                      <label
+                        key={trig.key}
+                        style={{
+                          display: "flex",
+                          alignItems: "flex-start",
+                          gap: "10px",
+                          padding: "8px 10px",
+                          background: "#ffffff",
+                          border: `1px solid ${isChecked ? "#cbd5e1" : "#e2e8f0"}`,
+                          borderRadius: "6px",
+                          cursor: "pointer",
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={(e) => {
+                            const updated = { ...(notifForm.triggers || {}) };
+                            updated[trig.key] = e.target.checked;
+                            setNotifForm({ ...notifForm, triggers: updated });
+                          }}
+                          style={{ marginTop: "3px" }}
+                        />
+                        <div>
+                          <div style={{ fontSize: "12px", fontWeight: "700", color: isChecked ? "#0f172a" : "#94a3b8" }}>
+                            {trig.title}
+                          </div>
+                          <div style={{ fontSize: "10px", color: "#64748b" }}>
+                            {trig.desc}
+                          </div>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* CARD 3: EMAIL SMTP CARD */}
               <div style={{ background: "#f8fafc", border: "1px solid #cbd5e1", borderRadius: "10px", padding: "18px" }}>
                 <div style={{ fontWeight: "700", fontSize: "14px", color: "#2563eb", marginBottom: "12px" }}>
                   📧 Email Gateway (SMTP / Gmail / Office 365)
@@ -8361,7 +8547,7 @@ return (
                       placeholder="smtp.gmail.com"
                       value={notifForm.smtp_host || ""}
                       onChange={(e) => setNotifForm({ ...notifForm, smtp_host: e.target.value })}
-                      style={{ width: "100%", padding: "8px 10px", background: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "6px", color: "#f8fafc", fontSize: "12px" }}
+                      style={{ width: "100%", padding: "8px 10px", background: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "6px", color: "#0f172a", fontSize: "12px" }}
                     />
                   </div>
                   <div>
@@ -8370,7 +8556,7 @@ return (
                       type="number"
                       value={notifForm.smtp_port || 587}
                       onChange={(e) => setNotifForm({ ...notifForm, smtp_port: Number(e.target.value) })}
-                      style={{ width: "100%", padding: "8px 10px", background: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "6px", color: "#f8fafc", fontSize: "12px" }}
+                      style={{ width: "100%", padding: "8px 10px", background: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "6px", color: "#0f172a", fontSize: "12px" }}
                     />
                   </div>
                 </div>
@@ -8382,18 +8568,18 @@ return (
                     placeholder="your-email@gmail.com"
                     value={notifForm.smtp_user || ""}
                     onChange={(e) => setNotifForm({ ...notifForm, smtp_user: e.target.value })}
-                    style={{ width: "100%", padding: "8px 10px", background: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "6px", color: "#f8fafc", fontSize: "12px" }}
+                    style={{ width: "100%", padding: "8px 10px", background: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "6px", color: "#0f172a", fontSize: "12px" }}
                   />
                 </div>
 
                 <div style={{ marginBottom: "10px" }}>
-                  <label style={{ display: "block", fontSize: "11px", color: "#475569", marginBottom: "4px" }}>SMTP Password / 16-Character Gmail App Password</label>
+                  <label style={{ display: "block", fontSize: "11px", color: "#475569", marginBottom: "4px" }}>SMTP Password / Gmail App Password</label>
                   <input
                     type="password"
                     placeholder="Enter SMTP or Gmail App Password"
                     value={notifForm.smtp_password || ""}
                     onChange={(e) => setNotifForm({ ...notifForm, smtp_password: e.target.value })}
-                    style={{ width: "100%", padding: "8px 10px", background: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "6px", color: "#f8fafc", fontSize: "12px" }}
+                    style={{ width: "100%", padding: "8px 10px", background: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "6px", color: "#0f172a", fontSize: "12px" }}
                   />
                 </div>
 
@@ -8404,12 +8590,12 @@ return (
                     placeholder="noreply@netops.local"
                     value={notifForm.smtp_from_email || ""}
                     onChange={(e) => setNotifForm({ ...notifForm, smtp_from_email: e.target.value })}
-                    style={{ width: "100%", padding: "8px 10px", background: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "6px", color: "#f8fafc", fontSize: "12px" }}
+                    style={{ width: "100%", padding: "8px 10px", background: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "6px", color: "#0f172a", fontSize: "12px" }}
                   />
                 </div>
               </div>
 
-              {/* SMS GATEWAY CARD */}
+              {/* CARD 4: SMS GATEWAY CARD */}
               <div style={{ background: "#f8fafc", border: "1px solid #cbd5e1", borderRadius: "10px", padding: "18px" }}>
                 <div style={{ fontWeight: "700", fontSize: "14px", color: "#059669", marginBottom: "12px" }}>
                   📱 SMS Gateway (Africa&apos;s Talking / Twilio / Webhook)
@@ -8420,7 +8606,7 @@ return (
                   <select
                     value={notifForm.sms_provider || "africastalking"}
                     onChange={(e) => setNotifForm({ ...notifForm, sms_provider: e.target.value })}
-                    style={{ width: "100%", padding: "8px 10px", background: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "6px", color: "#f8fafc", fontSize: "12px" }}
+                    style={{ width: "100%", padding: "8px 10px", background: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "6px", color: "#0f172a", fontSize: "12px" }}
                   >
                     <option value="africastalking">Africa&apos;s Talking SMS API (Kenya / Africa)</option>
                     <option value="twilio">Twilio Programmable SMS</option>
@@ -8438,7 +8624,7 @@ return (
                       placeholder={notifForm.sms_provider === "twilio" ? "ACxxxxxxxxxxxxxxxx" : "sandbox or your AT username"}
                       value={notifForm.sms_username || ""}
                       onChange={(e) => setNotifForm({ ...notifForm, sms_username: e.target.value })}
-                      style={{ width: "100%", padding: "8px 10px", background: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "6px", color: "#f8fafc", fontSize: "12px" }}
+                      style={{ width: "100%", padding: "8px 10px", background: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "6px", color: "#0f172a", fontSize: "12px" }}
                     />
                   </div>
                 )}
@@ -8452,7 +8638,7 @@ return (
                     placeholder="Enter SMS API Key or Auth Token"
                     value={notifForm.sms_api_key || ""}
                     onChange={(e) => setNotifForm({ ...notifForm, sms_api_key: e.target.value })}
-                    style={{ width: "100%", padding: "8px 10px", background: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "6px", color: "#f8fafc", fontSize: "12px" }}
+                    style={{ width: "100%", padding: "8px 10px", background: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "6px", color: "#0f172a", fontSize: "12px" }}
                   />
                 </div>
 
@@ -8465,7 +8651,7 @@ return (
                     placeholder={notifForm.sms_provider === "twilio" ? "+15005550006" : "NETOPS"}
                     value={notifForm.sms_sender_id || ""}
                     onChange={(e) => setNotifForm({ ...notifForm, sms_sender_id: e.target.value })}
-                    style={{ width: "100%", padding: "8px 10px", background: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "6px", color: "#f8fafc", fontSize: "12px" }}
+                    style={{ width: "100%", padding: "8px 10px", background: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "6px", color: "#0f172a", fontSize: "12px" }}
                   />
                 </div>
 
@@ -8477,14 +8663,15 @@ return (
                       placeholder="https://sms-gateway.example.com/api/send"
                       value={notifForm.sms_webhook_url || ""}
                       onChange={(e) => setNotifForm({ ...notifForm, sms_webhook_url: e.target.value })}
-                      style={{ width: "100%", padding: "8px 10px", background: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "6px", color: "#f8fafc", fontSize: "12px" }}
+                      style={{ width: "100%", padding: "8px 10px", background: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "6px", color: "#0f172a", fontSize: "12px" }}
                     />
                   </div>
                 )}
               </div>
             </div>
 
-            <div style={{ padding: "0 18px 18px", display: "flex", flexWrap: "wrap", gap: "12px", alignItems: "center", justifyContent: "space-between" }}>
+            {/* ACTION & TEST BAR */}
+            <div style={{ padding: "0 18px 18px", display: "flex", flexWrap: "wrap", gap: "12px", alignItems: "center", justifyContent: "space-between", borderTop: "1px solid #e2e8f0", paddingTop: "16px" }}>
               <button
                 type="button"
                 className="primary-button"
@@ -8493,7 +8680,7 @@ return (
                   setNotifSaving(true);
                   setNotifFeedback(null);
                   try {
-                    const res = await fetch(`${API_URL}/auth/notification-settings`, {
+                    const res = await fetch(`${API_URL}/notifications/settings`, {
                       method: "POST",
                       headers: getAuthHeaders({ "Content-Type": "application/json" }),
                       body: JSON.stringify(notifForm),
@@ -8503,7 +8690,7 @@ return (
                       setNotifFeedback({ type: "success", text: `✅ ${data.message}` });
                       loadNotificationSettings();
                     } else {
-                      setNotifFeedback({ type: "error", text: data.detail || "Failed to save gateway settings." });
+                      setNotifFeedback({ type: "error", text: data.detail || "Failed to save notification settings." });
                     }
                   } catch (err) {
                     setNotifFeedback({ type: "error", text: err.message });
@@ -8512,37 +8699,63 @@ return (
                   }
                 }}
               >
-                {notifSaving ? "Saving..." : "💾 Save Email & SMS Gateway Settings"}
+                {notifSaving ? "Saving..." : "💾 Save Webhook & Gateway Settings"}
               </button>
 
               <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                <select
+                  value={notifTestChannel}
+                  onChange={(e) => setNotifTestChannel(e.target.value)}
+                  style={{ padding: "8px 10px", background: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "6px", color: "#0f172a", fontSize: "12px" }}
+                >
+                  <option value="webhook">🔔 Test Webhook ({notifForm.webhook_platform || "slack"})</option>
+                  <option value="email">📧 Test Email (SMTP)</option>
+                  <option value="sms">📱 Test SMS Gateway</option>
+                </select>
+
                 <input
                   type="text"
-                  placeholder="Test email or +2547... phone"
+                  placeholder={
+                    notifTestChannel === "webhook"
+                      ? "Custom URL or leave blank to test configured"
+                      : notifTestChannel === "email"
+                      ? "Recipient email address"
+                      : "+2547... phone number"
+                  }
                   value={notifTestRecipient}
                   onChange={(e) => setNotifTestRecipient(e.target.value)}
-                  style={{ padding: "8px 10px", background: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "6px", color: "#f8fafc", fontSize: "12px", width: "220px" }}
+                  style={{ padding: "8px 10px", background: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "6px", color: "#0f172a", fontSize: "12px", width: "240px" }}
                 />
+
                 <button
                   type="button"
                   className="secondary-button"
                   disabled={notifTestLoading}
                   onClick={async () => {
-                    if (!notifTestRecipient.trim()) return;
                     setNotifTestLoading(true);
                     setNotifFeedback(null);
-                    const ch = notifTestRecipient.includes("@") ? "email" : "sms";
                     try {
-                      const res = await fetch(`${API_URL}/auth/notification-settings/test`, {
+                      const res = await fetch(`${API_URL}/notifications/test`, {
                         method: "POST",
                         headers: getAuthHeaders({ "Content-Type": "application/json" }),
-                        body: JSON.stringify({ channel: ch, recipient: notifTestRecipient.trim() }),
+                        body: JSON.stringify({
+                          channel: notifTestChannel,
+                          recipient: notifTestRecipient.trim(),
+                          webhook_platform: notifForm.webhook_platform || "slack",
+                        }),
                       });
                       const data = await res.json();
-                      setNotifFeedback({
-                        type: data.delivered ? "success" : "error",
-                        text: data.detail || (data.delivered ? "Test message delivered!" : "Delivery failed."),
-                      });
+                      if (res.ok) {
+                        setNotifFeedback({
+                          type: data.delivered ? "success" : "error",
+                          text: data.delivered
+                            ? `✅ Live ${data.channel.toUpperCase()} test delivered successfully!`
+                            : `❌ Delivery failed: ${data.detail || "Check endpoint credentials."}`,
+                        });
+                        loadNotificationSettings();
+                      } else {
+                        setNotifFeedback({ type: "error", text: data.detail || "Test dispatch failed." });
+                      }
                     } catch (err) {
                       setNotifFeedback({ type: "error", text: err.message });
                     } finally {

@@ -316,7 +316,7 @@ NOTIFICATION_CONFIG_PATH = Path(__file__).resolve().parents[2] / "notification_s
 
 
 def get_notification_settings() -> dict:
-    """Return active SMTP Email and SMS Gateway configuration."""
+    """Return active SMTP Email, SMS Gateway, and Webhook configuration."""
     defaults = {
         "smtp_host": settings.smtp_host or "",
         "smtp_port": int(settings.smtp_port or 587),
@@ -328,6 +328,22 @@ def get_notification_settings() -> dict:
         "sms_username": settings.sms_username or "",
         "sms_sender_id": settings.sms_sender_id or "",
         "sms_webhook_url": settings.sms_webhook_url or "",
+        # Webhook & Real-Time Alerting
+        "webhook_enabled": False,
+        "webhook_url": "",
+        "webhook_platform": "slack",  # slack, discord, generic
+        "alert_email": "",
+        "alert_email_enabled": False,
+        "triggers": {
+            "device_quarantined": True,
+            "rogue_device_detected": True,
+            "auth_lockout": True,
+            "switch_unreachable": True,
+            "unauthorized_cli_change": True,
+        },
+        "last_webhook_status": None,
+        "last_webhook_sent_at": None,
+        "last_webhook_error": None,
     }
     if NOTIFICATION_CONFIG_PATH.exists():
         try:
@@ -335,21 +351,27 @@ def get_notification_settings() -> dict:
             if isinstance(saved, dict):
                 for k, v in saved.items():
                     if v is not None and k in defaults:
-                        defaults[k] = v
+                        if k == "triggers" and isinstance(v, dict):
+                            defaults["triggers"] = {**defaults["triggers"], **v}
+                        else:
+                            defaults[k] = v
         except Exception as exc:
             logger.warning(f"Failed to read notification_settings.json: {exc}")
     return defaults
 
 
 def save_notification_settings(new_cfg: dict) -> dict:
-    """Persist SMTP Email and SMS Gateway configuration to disk."""
+    """Persist SMTP Email, SMS Gateway, and Webhook configuration to disk."""
     current = get_notification_settings()
     for k in current.keys():
         if k in new_cfg and new_cfg[k] is not None:
             # Keep existing password/api_key if masked placeholder passed
             if k in ("smtp_password", "sms_api_key") and new_cfg[k] == "••••••••":
                 continue
-            current[k] = new_cfg[k]
+            if k == "triggers" and isinstance(new_cfg[k], dict):
+                current["triggers"] = {**current.get("triggers", {}), **new_cfg[k]}
+            else:
+                current[k] = new_cfg[k]
     NOTIFICATION_CONFIG_PATH.write_text(json.dumps(current, indent=2), encoding="utf-8")
     return current
 

@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models.user import User, UserSession
 from ..services.event_service import create_event
+from ..services.webhook_service import dispatch_security_alert, test_webhook_endpoint
 from ..services.auth_service import (
     check_user_conflicts,
     create_access_token,
@@ -383,6 +384,29 @@ def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
                 FAILED_LOGIN_ATTEMPTS[user.email.lower()] = current_fails
 
         if current_fails >= 3:
+            client_ip = (
+                request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+                or (request.client.host if request.client else "127.0.0.1")
+            )
+            create_event(
+                db=db,
+                event_type="auth_lockout",
+                message=f"Brute-force security lockout: Account '{ident}' locked out after 3 consecutive failed login attempts from IP {client_ip}.",
+                actor="security_gateway",
+            )
+            try:
+                db.commit()
+            except Exception:
+                db.rollback()
+
+            dispatch_security_alert(
+                event_type="auth_lockout",
+                message=f"Brute-force security lockout: Account '{ident}' locked out after 3 consecutive failed login attempts from IP {client_ip}.",
+                details={"identifier": ident, "client_ip": client_ip, "timestamp": datetime.now(timezone.utc).isoformat()},
+                severity="critical",
+                sync=False,
+            )
+
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="You have entered an incorrect password 3 times. Please contact the administrator.",
@@ -714,16 +738,24 @@ class NotificationSettingsUpdate(BaseModel):
     sms_username: str | None = None
     sms_sender_id: str | None = None
     sms_webhook_url: str | None = None
+    # Real-Time Webhook Alerting
+    webhook_enabled: bool | None = None
+    webhook_url: str | None = None
+    webhook_platform: str | None = None
+    alert_email: str | None = None
+    alert_email_enabled: bool | None = None
+    triggers: dict[str, bool] | None = None
 
 
 class NotificationTestRequest(BaseModel):
-    channel: str  # "email" or "sms"
-    recipient: str
+    channel: str  # "email", "sms", or "webhook"
+    recipient: str | None = ""
+    webhook_platform: str | None = "slack"
 
 
 @router.get("/notification-settings")
 def read_notification_settings(current_user: User = Depends(require_admin)):
-    """Get current Email (SMTP) and SMS Gateway settings (masking secrets)."""
+    """Get current Email (SMTP), SMS Gateway, and Webhook Alerting settings (masking secrets)."""
     cfg = get_notification_settings()
     return {
         "smtp_host": cfg.get("smtp_host", ""),
@@ -738,6 +770,23 @@ def read_notification_settings(current_user: User = Depends(require_admin)):
         "sms_sender_id": cfg.get("sms_sender_id", ""),
         "sms_webhook_url": cfg.get("sms_webhook_url", ""),
         "sms_configured": bool(cfg.get("sms_api_key") or cfg.get("sms_webhook_url")),
+        # Real-time Webhook Alerting
+        "webhook_enabled": bool(cfg.get("webhook_enabled", False)),
+        "webhook_url": cfg.get("webhook_url", ""),
+        "webhook_platform": cfg.get("webhook_platform", "slack"),
+        "webhook_configured": bool(cfg.get("webhook_url")),
+        "alert_email": cfg.get("alert_email", ""),
+        "alert_email_enabled": bool(cfg.get("alert_email_enabled", False)),
+        "triggers": cfg.get("triggers", {
+            "device_quarantined": True,
+            "rogue_device_detected": True,
+            "auth_lockout": True,
+            "switch_unreachable": True,
+            "unauthorized_cli_change": True,
+        }),
+        "last_webhook_status": cfg.get("last_webhook_status"),
+        "last_webhook_sent_at": cfg.get("last_webhook_sent_at"),
+        "last_webhook_error": cfg.get("last_webhook_error"),
     }
 
 
@@ -746,13 +795,14 @@ def update_notification_settings(
     req: NotificationSettingsUpdate,
     current_user: User = Depends(require_admin),
 ):
-    """Save Email (SMTP) and SMS Gateway settings."""
+    """Save Email (SMTP), SMS Gateway, and Webhook Alerting settings."""
     saved = save_notification_settings(req.model_dump())
     return {
         "status": "saved",
-        "message": "Email (SMTP) & SMS OTP Gateway settings saved successfully.",
+        "message": "Email, SMS & Webhook Alerting settings saved successfully.",
         "smtp_configured": bool(saved.get("smtp_host")),
         "sms_configured": bool(saved.get("sms_api_key") or saved.get("sms_webhook_url")),
+        "webhook_configured": bool(saved.get("webhook_url")),
     }
 
 
@@ -761,11 +811,30 @@ def test_notification_gateway(
     req: NotificationTestRequest,
     current_user: User = Depends(require_admin),
 ):
-    """Send a live test Email or SMS using the configured gateway."""
+    """Send a live test Email, SMS, or Webhook notification using configured settings."""
     ch = req.channel.strip().lower()
-    recipient = req.recipient.strip()
+    recipient = (req.recipient or "").strip()
+    cfg = get_notification_settings()
+
+    if ch == "webhook":
+        target_url = recipient or cfg.get("webhook_url") or ""
+        if not target_url:
+            raise HTTPException(status_code=400, detail="Please enter a target Webhook URL or configure one first.")
+        platform = req.webhook_platform or cfg.get("webhook_platform", "slack")
+        ok, detail = test_webhook_endpoint(webhook_url=target_url, webhook_platform=platform)
+        return {
+            "delivered": ok,
+            "channel": "webhook",
+            "platform": platform,
+            "recipient": target_url,
+            "detail": detail,
+        }
+
     if not recipient:
-        raise HTTPException(status_code=400, detail="Please enter a recipient email or phone number.")
+        if ch == "email":
+            recipient = cfg.get("alert_email") or ""
+        if not recipient:
+            raise HTTPException(status_code=400, detail="Please enter a recipient email or phone number.")
 
     if ch == "email":
         ok, detail = send_email_message(
@@ -785,7 +854,7 @@ def test_notification_gateway(
             message_text="NETOPS SMS Gateway Test: Your SMS provider is properly configured to deliver 5-minute OTP codes.",
         )
     else:
-        raise HTTPException(status_code=400, detail="Channel must be 'email' or 'sms'.")
+        raise HTTPException(status_code=400, detail="Channel must be 'email', 'sms', or 'webhook'.")
 
     return {
         "delivered": ok,

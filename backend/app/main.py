@@ -29,8 +29,10 @@ from .api.simulation import router as simulation_router
 from .api.auth import router as auth_router
 from .api.users import router as users_router
 from .api.switches import router as switches_router
+from .api.notifications import router as notifications_router
 
 from .services.auth_service import seed_default_users
+from .services.webhook_service import dispatch_security_alert, map_event_type_to_trigger
 
 from .services.websocket_manager import manager
 from .services.schedule_enforcement import schedule_enforcement_loop
@@ -102,6 +104,7 @@ app.include_router(simulation_router)
 app.include_router(auth_router)
 app.include_router(users_router)
 app.include_router(switches_router)
+app.include_router(notifications_router)
 
 
 # ---------------------------------------------------------
@@ -181,6 +184,22 @@ async def event_broadcaster():
                             "event": event_payload,
                         }
                     )
+
+                    # Trigger real-time webhook & security alert if event matches a trigger rule
+                    try:
+                        if map_event_type_to_trigger(event.event_type):
+                            dispatch_security_alert(
+                                event_type=event.event_type,
+                                message=event.message,
+                                details={
+                                    "device_id": event.device_id,
+                                    "actor": event.actor,
+                                    "event_id": event.id,
+                                },
+                                sync=False,
+                            )
+                    except Exception as alert_err:
+                        print(f"[ALERT] Error dispatching webhook alert: {alert_err}")
 
                     last_event_id = event.id
 
