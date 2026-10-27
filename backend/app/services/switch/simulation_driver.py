@@ -219,3 +219,100 @@ class SimulationSwitchDriver(BaseSwitchDriver):
             "message": msg,
             "commands_applied": cmds,
         }
+
+    def get_running_config(self) -> str:
+        """
+        Generate a realistic Cisco IOS running-config representing the current state
+        of the switch including active VLAN database, trunk and access interfaces.
+        """
+        switch_name = getattr(self.config, "name", "Core-Switch-1") or "Core-Switch-1"
+        hostname = switch_name.replace(" ", "-").replace("(", "").replace(")", "").upper()
+        mgmt_ip = getattr(self.config, "management_ip", "192.168.0.2") or "192.168.0.2"
+        model = getattr(self.config, "model", "WS-C2960X-24TS-L") or "WS-C2960X-24TS-L"
+
+        lines = [
+            f"! Current configuration : Cisco IOS Software, C2960X Software (C2960X-UNIVERSALK9-M), Version 15.2(7)E7",
+            f"! Technical Support: http://www.cisco.com/techsupport",
+            f"! Managed by NETOPS Network Operations Platform",
+            f"!",
+            f"version 15.2",
+            f"no service pad",
+            f"service timestamps debug datetime msec",
+            f"service timestamps log datetime msec",
+            f"service password-encryption",
+            f"!",
+            f"hostname {hostname}",
+            f"!",
+            f"boot-start-marker",
+            f"boot-end-marker",
+            f"!",
+            f"spanning-tree mode rapid-pvst",
+            f"spanning-tree extend system-id",
+            f"!",
+        ]
+
+        # Add VLAN definitions
+        vlans = self.get_vlans()
+        for v in vlans:
+            v_id = v.get("vlan_id")
+            v_name = v.get("name", f"VLAN{v_id}")
+            if v_id and v_id != 1:
+                lines.append(f"vlan {v_id}")
+                lines.append(f" name {v_name}")
+                lines.append(f" state active")
+                lines.append(f"!")
+
+        # Add physical interface configurations
+        ports = self.get_interfaces()
+        for p in ports:
+            port_name = p.get("port", "GigabitEthernet0/1")
+            vlan = p.get("vlan", 1)
+            is_trunk = (p.get("mode") == "trunk" or port_name in ("GigabitEthernet0/23", "GigabitEthernet0/24", "Gi0/23", "Gi0/24"))
+            lines.append(f"interface {port_name}")
+            if is_trunk:
+                lines.append(f" description Uplink to Distribution / Firewall")
+                lines.append(f" switchport trunk encapsulation dot1q")
+                lines.append(f" switchport mode trunk")
+                lines.append(f" switchport trunk native vlan {vlan}")
+                lines.append(f" switchport trunk allowed vlan all")
+            else:
+                lines.append(f" description Workstation / Endpoint Port")
+                lines.append(f" switchport mode access")
+                lines.append(f" switchport access vlan {vlan}")
+                lines.append(f" spanning-tree portfast")
+                lines.append(f" spanning-tree bpduguard enable")
+            lines.append(f"!")
+
+        # Add management interface, SSH, and line vty
+        lines.extend([
+            f"interface Vlan1",
+            f" description In-Band Network Management",
+            f" ip address {mgmt_ip} 255.255.255.0",
+            f" no shutdown",
+            f"!",
+            f"ip default-gateway 192.168.0.1",
+            f"ip forward-protocol nd",
+            f"ip http server",
+            f"ip http secure-server",
+            f"ip ssh version 2",
+            f"!",
+            f"banner motd ^C",
+            f"===========================================================",
+            f" NETOPS MANAGED DEVICE - UNAUTHORIZED ACCESS IS PROHIBITED",
+            f" All configuration changes are audited and tracked.",
+            f"===========================================================",
+            f"^C",
+            f"!",
+            f"line con 0",
+            f" logging synchronous",
+            f"line vty 0 4",
+            f" transport input ssh",
+            f" login local",
+            f"line vty 5 15",
+            f" transport input ssh",
+            f" login local",
+            f"!",
+            f"end",
+        ])
+
+        return "\n".join(lines) + "\n"

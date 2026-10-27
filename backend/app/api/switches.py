@@ -3,12 +3,14 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models.switch_config import SwitchConfig
+from ..models.switch_backup import SwitchBackup
 from ..models.vlan_config import VlanConfig
 from ..models.user import User
 from ..services.auth_service import require_admin, require_super_admin
@@ -18,6 +20,14 @@ from ..services.switch.manager import (
     get_active_switch_driver,
     list_supported_switch_vendors,
     probe_switch_connection,
+)
+from ..services.switch_backup_service import (
+    create_switch_backup,
+    list_switch_backups,
+    get_switch_backup,
+    compare_two_backups,
+    compare_live_with_backup,
+    delete_switch_backup,
 )
 
 logger = logging.getLogger(__name__)
@@ -78,6 +88,18 @@ class ConfigureUplinksRequest(BaseModel):
     ports: list[str] | None = None
     native_vlan: int = Field(1, ge=1, le=4094)
     mode: str = Field("trunk")
+
+
+class SwitchBackupCreateRequest(BaseModel):
+    backup_name: str | None = None
+    backup_type: str = "manual"
+
+
+class SwitchDiffRequest(BaseModel):
+    backup_id_a: int
+    backup_id_b: int | None = None
+    compare_with_live: bool = False
+    switch_id: int | None = None
 
 
 # -------------------------------------------------------------
@@ -614,4 +636,217 @@ def configure_switch_uplinks(
         "native_vlan": native_vlan,
         "message": f"Ports {port_names_str} successfully configured as Trunk Uplinks.",
         "results": results,
+    }
+
+
+# -------------------------------------------------------------
+# SWITCH CONFIGURATION BACKUPS & CLI DIFF TRACKING
+# -------------------------------------------------------------
+
+@router.post("/{switch_id}/backups")
+def trigger_switch_backup(
+    switch_id: int,
+    req: SwitchBackupCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """
+    Take an on-demand snapshot backup of the switch's live running-configuration,
+    compute its SHA-256 checksum, calculate line differences vs preceding backup, and record in DB.
+    """
+    if switch_id == 0:
+        active_cfg = db.scalar(select(SwitchConfig).where(SwitchConfig.is_active == True).limit(1))
+        if not active_cfg:
+            active_cfg = SwitchConfig(
+                vendor="cisco_ios",
+                name="Core Switch 1 (Cisco Catalyst)",
+                management_ip="192.168.0.2",
+                port=22,
+                username="admin",
+                model="WS-C2960X-24TS-L",
+                total_ports=24,
+                is_active=True,
+            )
+            db.add(active_cfg)
+            db.commit()
+            db.refresh(active_cfg)
+        switch_id = active_cfg.id
+
+    try:
+        backup = create_switch_backup(
+            db=db,
+            switch_id=switch_id,
+            backup_name=req.backup_name,
+            created_by=current_user.username,
+            backup_type=req.backup_type,
+        )
+        return {
+            "success": True,
+            "message": f"Configuration backup '{backup.backup_name}' successfully created.",
+            "backup": {
+                "id": backup.id,
+                "switch_id": backup.switch_id,
+                "backup_name": backup.backup_name,
+                "backup_type": backup.backup_type,
+                "created_by": backup.created_by,
+                "created_at": backup.created_at.isoformat(),
+                "checksum": backup.checksum,
+                "lines_count": backup.lines_count,
+                "size_bytes": backup.size_bytes,
+                "change_summary": backup.change_summary,
+            },
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception as exc:
+        logger.exception("Failed to create switch backup: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create switch backup: {str(exc)}",
+        )
+
+
+@router.get("/{switch_id}/backups")
+def get_switch_backups(
+    switch_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Retrieve all historical configuration backups for a specific switch."""
+    if switch_id == 0:
+        active_cfg = db.scalar(select(SwitchConfig).where(SwitchConfig.is_active == True).limit(1))
+        if not active_cfg:
+            return []
+        switch_id = active_cfg.id
+
+    backups = list_switch_backups(db, switch_id)
+    return [
+        {
+            "id": b.id,
+            "switch_id": b.switch_id,
+            "backup_name": b.backup_name,
+            "backup_type": b.backup_type,
+            "created_by": b.created_by,
+            "created_at": b.created_at.isoformat(),
+            "checksum": b.checksum,
+            "lines_count": b.lines_count,
+            "size_bytes": b.size_bytes,
+            "change_summary": b.change_summary,
+        }
+        for b in backups
+    ]
+
+
+@router.get("/backups/{backup_id}")
+def get_backup_detail(
+    backup_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Retrieve full configuration text and metadata for a specific backup."""
+    b = get_switch_backup(db, backup_id)
+    if not b:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Backup record not found.")
+
+    return {
+        "id": b.id,
+        "switch_id": b.switch_id,
+        "backup_name": b.backup_name,
+        "config_type": b.config_type,
+        "backup_type": b.backup_type,
+        "created_by": b.created_by,
+        "created_at": b.created_at.isoformat(),
+        "checksum": b.checksum,
+        "lines_count": b.lines_count,
+        "size_bytes": b.size_bytes,
+        "change_summary": b.change_summary,
+        "config_text": b.config_text,
+    }
+
+
+@router.get("/backups/{backup_id}/download")
+def download_backup_file(
+    backup_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Download the raw switch running configuration file."""
+    b = get_switch_backup(db, backup_id)
+    if not b:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Backup record not found.")
+
+    clean_filename = f"switch_config_backup_{b.switch_id}_{b.id}_{b.created_at.strftime('%Y%m%d_%H%M%S')}.cfg"
+    return PlainTextResponse(
+        content=b.config_text,
+        media_type="text/plain",
+        headers={"Content-Disposition": f'attachment; filename="{clean_filename}"'},
+    )
+
+
+@router.post("/backups/diff")
+def compare_switch_diff(
+    req: SwitchDiffRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """
+    Compare two historical configuration backups, or compare a stored backup
+    against the live active switch running-config to detect out-of-band CLI changes.
+    """
+    try:
+        if req.compare_with_live:
+            sw_id = req.switch_id
+            if not sw_id:
+                active_cfg = db.scalar(select(SwitchConfig).where(SwitchConfig.is_active == True).limit(1))
+                sw_id = active_cfg.id if active_cfg else None
+            if not sw_id:
+                raise ValueError("Active switch not found for live diff.")
+            diff_result = compare_live_with_backup(
+                db=db,
+                switch_id=sw_id,
+                backup_id=req.backup_id_a,
+            )
+        else:
+            if not req.backup_id_b:
+                raise ValueError("backup_id_b is required for comparing two historical backups.")
+            diff_result = compare_two_backups(
+                db=db,
+                backup_id_a=req.backup_id_a,
+                backup_id_b=req.backup_id_b,
+            )
+
+        return {
+            "success": True,
+            "diff": diff_result,
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception as exc:
+        logger.exception("Failed to calculate switch diff: %s", exc)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+
+
+@router.delete("/backups/{backup_id}")
+def delete_backup_record(
+    backup_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_super_admin),
+):
+    """
+    Permanently delete a switch configuration backup.
+    Strictly restricted to Super Administrator (Developer) by least privilege policy.
+    """
+    deleted = delete_switch_backup(db, backup_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Backup record not found.")
+
+    create_event(
+        db=db,
+        event_type="switch_backup_deleted",
+        message=f"Switch configuration backup #{backup_id} permanently deleted by Super Admin '{current_user.username}'.",
+        actor=current_user.username,
+    )
+    return {
+        "success": True,
+        "message": f"Switch backup #{backup_id} deleted successfully.",
     }

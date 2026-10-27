@@ -23,6 +23,7 @@ class GenericNetmikoSwitchDriver(BaseSwitchDriver):
     vlan_list_cmd: str = "show vlan"
     interfaces_cmd: str = "show interfaces status"
     save_cmd: str = "write memory"
+    running_config_cmd: str = "show running-config"
 
     def __init__(self, config: Any | None = None):
         super().__init__(config)
@@ -104,6 +105,21 @@ class GenericNetmikoSwitchDriver(BaseSwitchDriver):
 
     def get_interfaces(self) -> list[dict[str, Any]]:
         return self.fallback.get_interfaces()
+
+    def get_running_config(self) -> str:
+        """Pull live running configuration from the switch CLI or fallback to simulation."""
+        params = self._get_connection_params()
+        try:
+            with ConnectHandler(**params) as conn:
+                if params.get("secret"):
+                    conn.enable()
+                output = conn.send_command(self.running_config_cmd, read_timeout=30)
+                if output and len(output.strip()) > 20:
+                    return output
+        except Exception as exc:
+            logger.warning("%s get_running_config failed (%s): %s; using simulation fallback.", self.get_vendor_title(), params.get("host"), exc)
+
+        return self.fallback.get_running_config()
 
 
 # =========================================================================
@@ -236,6 +252,7 @@ class JuniperSwitchDriver(GenericNetmikoSwitchDriver):
     default_model = "Juniper EX2300 24-Port Switch"
     version_cmd = "show version"
     vlan_list_cmd = "show vlans"
+    running_config_cmd = "show configuration"
 
     def get_vendor_id(self) -> str:
         return "juniper"
@@ -719,6 +736,7 @@ class HuaweiSwitchDriver(GenericNetmikoSwitchDriver):
     default_model = "Huawei S5720-28P Gigabit Switch"
     version_cmd = "display version"
     vlan_list_cmd = "display vlan"
+    running_config_cmd = "display current-configuration"
     save_cmd = "save"
 
     def get_vendor_id(self) -> str:
@@ -1207,6 +1225,7 @@ class MikrotikSwitchDriver(GenericNetmikoSwitchDriver):
     default_model = "MikroTik CRS326-24G-2S+RM"
     version_cmd = "/system resource print"
     vlan_list_cmd = "/interface bridge vlan print"
+    running_config_cmd = "/export"
 
     def get_vendor_id(self) -> str:
         return "mikrotik"

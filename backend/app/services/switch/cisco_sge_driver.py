@@ -259,3 +259,15 @@ class CiscoSgeSwitchDriver(BaseSwitchDriver):
                     "connected_mac": None,
                 })
         return interfaces if interfaces else self.fallback.get_interfaces()
+
+    def get_running_config(self) -> str:
+        params = self._get_connection_params()
+        try:
+            with ConnectHandler(**params) as conn:
+                output = conn.send_command("show running-config", read_timeout=30)
+                if output and len(output.strip()) > 20:
+                    return output
+        except Exception as exc:
+            logger.warning("Cisco SGE get_running_config failed (%s): %s; using simulation fallback.", params.get("host"), exc)
+
+        return self.fallback.get_running_config()

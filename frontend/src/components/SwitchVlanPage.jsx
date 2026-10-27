@@ -36,6 +36,22 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
   const [assigningPort, setAssigningPort] = useState(false);
   const [configuringUplinks, setConfiguringUplinks] = useState(false);
 
+  // Config Backups & CLI Diff States
+  const [backups, setBackups] = useState([]);
+  const [loadingBackups, setLoadingBackups] = useState(false);
+  const [takingBackup, setTakingBackup] = useState(false);
+  const [backupNameInput, setBackupNameInput] = useState("");
+  const [backupTypeInput, setBackupTypeInput] = useState("manual");
+  const [viewingBackup, setViewingBackup] = useState(null);
+  const [diffResult, setDiffResult] = useState(null);
+  const [diffLoading, setDiffLoading] = useState(false);
+  const [diffCompareMode, setDiffCompareMode] = useState("live"); // "live" | "two_backups"
+  const [selectedBackupA, setSelectedBackupA] = useState("");
+  const [selectedBackupB, setSelectedBackupB] = useState("");
+  const [showDiffModal, setShowDiffModal] = useState(false);
+  const [copiedConfig, setCopiedConfig] = useState(false);
+  const [deletingBackupId, setDeletingBackupId] = useState(null);
+
   // Switch Config Form
   const [switchForm, setSwitchForm] = useState({
     id: null,
@@ -361,6 +377,136 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
     }
   };
 
+  // -------------------------------------------------------------
+  // SWITCH CONFIGURATION BACKUP & DIFF HANDLERS
+  // -------------------------------------------------------------
+  const getActiveSwitchId = () => {
+    return activeSwitch?.config?.id || savedConfigs.find((c) => c.is_active)?.id || savedConfigs[0]?.id || 0;
+  };
+
+  const loadBackups = async () => {
+    setLoadingBackups(true);
+    try {
+      const swId = getActiveSwitchId();
+      const res = await fetch(`${API_URL}/switches/${swId}/backups`, {
+        headers: getAuthHeaders ? getAuthHeaders() : {},
+      });
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        setBackups(data);
+        if (data.length > 0) {
+          setSelectedBackupA((prev) => prev || data[0].id.toString());
+          if (data.length > 1) {
+            setSelectedBackupB((prev) => prev || data[1].id.toString());
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Failed to load switch backups:", err);
+    } finally {
+      setLoadingBackups(false);
+    }
+  };
+
+  const handleTakeBackup = async (e) => {
+    if (e) e.preventDefault();
+    setTakingBackup(true);
+    try {
+      const swId = getActiveSwitchId();
+      const res = await fetch(`${API_URL}/switches/${swId}/backups`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        body: JSON.stringify({
+          backup_name: backupNameInput.trim() || null,
+          backup_type: backupTypeInput,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to create switch configuration backup.");
+      showStatus(data.message || "Switch running-configuration backup created successfully!", "success");
+      setBackupNameInput("");
+      await loadBackups();
+    } catch (err) {
+      showStatus(err.message, "error");
+    } finally {
+      setTakingBackup(false);
+    }
+  };
+
+  const handleViewBackup = async (backupId) => {
+    try {
+      const res = await fetch(`${API_URL}/switches/backups/${backupId}`, {
+        headers: getAuthHeaders ? getAuthHeaders() : {},
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to load backup details.");
+      setViewingBackup(data);
+      setCopiedConfig(false);
+    } catch (err) {
+      showStatus(err.message, "error");
+    }
+  };
+
+  const handleRunDiff = async (baseId, compareId = null, isLive = false) => {
+    if (!baseId) {
+      showStatus("Please select a base backup to compare.", "error");
+      return;
+    }
+    if (!isLive && !compareId) {
+      showStatus("Please select a target backup to compare against.", "error");
+      return;
+    }
+    setDiffLoading(true);
+    setShowDiffModal(true);
+    setDiffResult(null);
+    try {
+      const swId = getActiveSwitchId();
+      const res = await fetch(`${API_URL}/switches/backups/diff`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        body: JSON.stringify({
+          backup_id_a: parseInt(baseId, 10),
+          backup_id_b: compareId ? parseInt(compareId, 10) : null,
+          compare_with_live: isLive,
+          switch_id: swId,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to compute configuration diff.");
+      setDiffResult(data.diff);
+    } catch (err) {
+      showStatus(err.message, "error");
+      setDiffResult({ error: err.message });
+    } finally {
+      setDiffLoading(false);
+    }
+  };
+
+  const handleDeleteBackup = async (backupId) => {
+    if (!isSuperAdmin) {
+      showStatus("Permission Denied: Only Super Administrators can delete configuration backups.", "error");
+      return;
+    }
+    if (!window.confirm(`Permanently delete configuration backup #${backupId}? This action cannot be undone.`)) {
+      return;
+    }
+    setDeletingBackupId(backupId);
+    try {
+      const res = await fetch(`${API_URL}/switches/backups/${backupId}`, {
+        method: "DELETE",
+        headers: getAuthHeaders ? getAuthHeaders() : {},
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to delete backup.");
+      showStatus(`Backup #${backupId} deleted successfully.`, "success");
+      await loadBackups();
+    } catch (err) {
+      showStatus(err.message, "error");
+    } finally {
+      setDeletingBackupId(null);
+    }
+  };
+
   // Get VLAN Color Theme
   const getVlanColor = (vid) => {
     switch (vid) {
@@ -517,6 +663,31 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
         >
           <span>🔌</span> 24-Port Switch Panel & Matrix
         </button>
+
+        {isAdmin && (
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab("backups");
+              loadBackups();
+            }}
+            style={{
+              padding: "10px 18px",
+              border: "none",
+              background: "transparent",
+              fontWeight: activeTab === "backups" ? "800" : "600",
+              color: activeTab === "backups" ? "#2563eb" : "#64748b",
+              borderBottom: activeTab === "backups" ? "3px solid #2563eb" : "3px solid transparent",
+              cursor: "pointer",
+              fontSize: "14px",
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+            }}
+          >
+            <span>📜</span> Config Backups & CLI Diff
+          </button>
+        )}
 
         {isAdmin && (
           <button
@@ -1295,6 +1466,310 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
       )}
 
       {/* ======================================================== */}
+      {/* TAB 4: CONFIG BACKUPS & CLI DIFF TRACKING                 */}
+      {/* ======================================================== */}
+      {activeTab === "backups" && (
+        <div>
+          {/* TOP ACTION BAR & SNAPSHOT CREATION */}
+          <div className="panel" style={{ marginBottom: "20px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "16px", marginBottom: "16px" }}>
+              <div>
+                <div style={{ fontSize: "17px", fontWeight: "800", color: "#0f172a", display: "flex", alignItems: "center", gap: "8px" }}>
+                  <span>📜</span>
+                  <span>Switch Running-Configuration Backups & CLI Diff Inspector</span>
+                </div>
+                <div style={{ fontSize: "13px", color: "#64748b", marginTop: "4px" }}>
+                  Active Target: <strong>{activeSwitch?.config?.name || "Core Switch 1"}</strong> (<code>{activeSwitch?.config?.management_ip || "192.168.0.2"}</code>) • Automated SHA-256 Checksumming & CLI Diff
+                </div>
+              </div>
+
+              <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                <button
+                  type="button"
+                  className="secondary-button small"
+                  onClick={loadBackups}
+                  disabled={loadingBackups}
+                  style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+                >
+                  <span>🔄</span> {loadingBackups ? "Refreshing..." : "Refresh Backups"}
+                </button>
+              </div>
+            </div>
+
+            {/* QUICK SNAPSHOT CREATOR */}
+            <form onSubmit={handleTakeBackup} style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "14px 16px" }}>
+              <div style={{ fontSize: "13px", fontWeight: "700", color: "#334155", marginBottom: "10px", display: "flex", alignItems: "center", gap: "6px" }}>
+                <span>📸</span> Create On-Demand Configuration Snapshot
+              </div>
+              <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", alignItems: "center" }}>
+                <input
+                  type="text"
+                  placeholder="Snapshot label (e.g. Pre-Maintenance VLAN Change, Weekly Baseline)..."
+                  value={backupNameInput}
+                  onChange={(e) => setBackupNameInput(e.target.value)}
+                  disabled={takingBackup}
+                  style={{
+                    flex: "1 1 300px",
+                    padding: "8px 12px",
+                    border: "1px solid #cbd5e1",
+                    borderRadius: "6px",
+                    fontSize: "13px",
+                  }}
+                />
+                <select
+                  value={backupTypeInput}
+                  onChange={(e) => setBackupTypeInput(e.target.value)}
+                  disabled={takingBackup}
+                  style={{
+                    padding: "8px 12px",
+                    border: "1px solid #cbd5e1",
+                    borderRadius: "6px",
+                    fontSize: "13px",
+                    background: "#fff",
+                  }}
+                >
+                  <option value="manual">Manual Snapshot</option>
+                  <option value="pre-change">Pre-Change Snapshot</option>
+                  <option value="post-change">Post-Change Snapshot</option>
+                  <option value="scheduled">Scheduled Baseline</option>
+                </select>
+                <button
+                  type="submit"
+                  className="primary-button small"
+                  disabled={takingBackup}
+                  style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "8px 16px", fontWeight: "700" }}
+                >
+                  <span>📥</span> {takingBackup ? "Pulling Running-Config..." : "Backup Running-Config Now"}
+                </button>
+              </div>
+            </form>
+          </div>
+
+          {/* QUICK DIFF INSPECTOR LAUNCHER */}
+          {backups.length > 0 && (
+            <div className="panel" style={{ marginBottom: "20px", background: "linear-gradient(135deg, #f8fafc 0%, #eff6ff 100%)", border: "1px solid #bfdbfe" }}>
+              <div style={{ fontSize: "15px", fontWeight: "800", color: "#1e3a8a", display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
+                <span>🔍</span> Interactive CLI Diff Comparator
+              </div>
+              <div style={{ fontSize: "12px", color: "#475569", marginBottom: "14px" }}>
+                Compare live running configuration against a known baseline, or compare two historical snapshots to identify exact command additions, removals, or unauthorized modifications.
+              </div>
+
+              <div style={{ display: "flex", gap: "14px", flexWrap: "wrap", alignItems: "center" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <label style={{ fontSize: "12px", fontWeight: "700", color: "#334155" }}>Base Version (Old):</label>
+                  <select
+                    value={selectedBackupA}
+                    onChange={(e) => setSelectedBackupA(e.target.value)}
+                    style={{ padding: "6px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12px", background: "#fff" }}
+                  >
+                    {backups.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        #{b.id} - {b.backup_name} ({b.created_at?.slice(0, 16)})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <label style={{ fontSize: "12px", fontWeight: "700", color: "#334155" }}>Compare Mode:</label>
+                  <select
+                    value={diffCompareMode}
+                    onChange={(e) => setDiffCompareMode(e.target.value)}
+                    style={{ padding: "6px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12px", background: "#fff", fontWeight: "600" }}
+                  >
+                    <option value="live">⚡ Live Active Switch vs Base</option>
+                    <option value="two_backups">⚖️ Compare Two Saved Backups</option>
+                  </select>
+                </div>
+
+                {diffCompareMode === "two_backups" && (
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <label style={{ fontSize: "12px", fontWeight: "700", color: "#334155" }}>Target Version (New):</label>
+                    <select
+                      value={selectedBackupB}
+                      onChange={(e) => setSelectedBackupB(e.target.value)}
+                      style={{ padding: "6px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12px", background: "#fff" }}
+                    >
+                      {backups.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          #{b.id} - {b.backup_name} ({b.created_at?.slice(0, 16)})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  className="primary-button small"
+                  style={{ background: "#2563eb", borderColor: "#1d4ed8", fontWeight: "700", display: "inline-flex", alignItems: "center", gap: "6px" }}
+                  onClick={() => {
+                    if (diffCompareMode === "live") {
+                      handleRunDiff(selectedBackupA, null, true);
+                    } else {
+                      handleRunDiff(selectedBackupA, selectedBackupB, false);
+                    }
+                  }}
+                  disabled={diffLoading}
+                >
+                  <span>🔍</span> {diffLoading ? "Analyzing Diff..." : (diffCompareMode === "live" ? "Compare Live Switch vs Base" : "Compare Two Snapshots")}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* HISTORICAL BACKUPS TABLE */}
+          <div className="panel">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
+              <div>
+                <div style={{ fontSize: "15px", fontWeight: "700", color: "#0f172a" }}>Configuration History ({backups.length} Backups)</div>
+                <div style={{ fontSize: "12px", color: "#64748b" }}>Immutable configuration archives with cryptographic checksums and change summaries.</div>
+              </div>
+            </div>
+
+            <div className="table-responsive">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Snapshot ID & Label</th>
+                    <th>Type</th>
+                    <th>Timestamp & Operator</th>
+                    <th>Size & Lines</th>
+                    <th>SHA-256 Checksum</th>
+                    <th>Change vs Preceding</th>
+                    <th style={{ textAlign: "right" }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {backups.length === 0 ? (
+                    <tr>
+                      <td colSpan="7" style={{ textAlign: "center", padding: "28px", color: "#64748b" }}>
+                        {loadingBackups ? "Loading switch backups..." : "No configuration backups found. Click 'Backup Running-Config Now' above to take the initial baseline snapshot."}
+                      </td>
+                    </tr>
+                  ) : (
+                    backups.map((b, idx) => {
+                      const prevB = backups[idx + 1];
+                      return (
+                        <tr key={b.id}>
+                          <td>
+                            <div style={{ fontWeight: "700", color: "#0f172a", fontSize: "13px" }}>{b.backup_name}</div>
+                            <div style={{ fontSize: "11px", color: "#64748b" }}>Snapshot #{b.id}</div>
+                          </td>
+                          <td>
+                            <span
+                              style={{
+                                fontSize: "11px",
+                                fontWeight: "700",
+                                padding: "2px 8px",
+                                borderRadius: "12px",
+                                background:
+                                  b.backup_type === "pre-change"
+                                    ? "#fef3c7"
+                                    : b.backup_type === "post-change"
+                                    ? "#ecfdf5"
+                                    : b.backup_type === "scheduled"
+                                    ? "#eff6ff"
+                                    : "#f1f5f9",
+                                color:
+                                  b.backup_type === "pre-change"
+                                    ? "#92400e"
+                                    : b.backup_type === "post-change"
+                                    ? "#065f46"
+                                    : b.backup_type === "scheduled"
+                                    ? "#1e40af"
+                                    : "#475569",
+                                border: "1px solid rgba(0,0,0,0.06)",
+                              }}
+                            >
+                              {b.backup_type}
+                            </span>
+                          </td>
+                          <td>
+                            <div style={{ fontSize: "12px", color: "#1e293b", fontWeight: "600" }}>{b.created_at?.slice(0, 19).replace("T", " ")}</div>
+                            <div style={{ fontSize: "11px", color: "#64748b" }}>By: <strong>{b.created_by || "System"}</strong></div>
+                          </td>
+                          <td>
+                            <div style={{ fontSize: "12px", color: "#1e293b", fontWeight: "600" }}>{b.lines_count} lines</div>
+                            <div style={{ fontSize: "11px", color: "#64748b" }}>{(b.size_bytes / 1024).toFixed(1)} KB</div>
+                          </td>
+                          <td>
+                            <code style={{ fontSize: "11px", background: "#f8fafc", padding: "2px 6px", borderRadius: "4px", color: "#475569" }} title={b.checksum}>
+                              {b.checksum?.slice(0, 10)}...{b.checksum?.slice(-6)}
+                            </code>
+                          </td>
+                          <td>
+                            <span style={{ fontSize: "12px", color: b.change_summary?.includes("Identical") ? "#64748b" : (b.change_summary?.includes("Baseline") ? "#2563eb" : "#059669"), fontWeight: "600" }}>
+                              {b.change_summary || "—"}
+                            </span>
+                          </td>
+                          <td style={{ textAlign: "right" }}>
+                            <div style={{ display: "inline-flex", gap: "6px", alignItems: "center" }}>
+                              <button
+                                type="button"
+                                className="secondary-button small"
+                                onClick={() => handleViewBackup(b.id)}
+                                title="View full running-configuration text"
+                              >
+                                👁️ View
+                              </button>
+                              <a
+                                href={`${API_URL}/switches/backups/${b.id}/download`}
+                                className="secondary-button small"
+                                style={{ textDecoration: "none", display: "inline-flex", alignItems: "center" }}
+                                title="Download .cfg file"
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                💾 Download
+                              </a>
+                              {prevB && (
+                                <button
+                                  type="button"
+                                  className="secondary-button small"
+                                  style={{ borderColor: "#93c5fd", color: "#1d4ed8" }}
+                                  onClick={() => handleRunDiff(prevB.id, b.id, false)}
+                                  title={`Compare changes between #${prevB.id} and #${b.id}`}
+                                >
+                                  🔍 Diff vs Prev
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                className="secondary-button small"
+                                style={{ borderColor: "#a7f3d0", color: "#065f46" }}
+                                onClick={() => handleRunDiff(b.id, null, true)}
+                                title="Diff live active switch against this backup"
+                              >
+                                ⚡ Diff vs Live
+                              </button>
+                              {isSuperAdmin && (
+                                <button
+                                  type="button"
+                                  className="secondary-button small"
+                                  style={{ color: "#dc2626", borderColor: "#fca5a5" }}
+                                  onClick={() => handleDeleteBackup(b.id)}
+                                  disabled={deletingBackupId === b.id}
+                                  title="Permanently delete this backup (Super Admin only)"
+                                >
+                                  {deletingBackupId === b.id ? "..." : "🗑️"}
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ======================================================== */}
       {/* MODAL: CREATE NEW VLAN ON SWITCH                         */}
       {/* ======================================================== */}
       {showCreateVlanModal && (
@@ -1709,6 +2184,228 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* MODAL: VIEW SWITCH RUNNING-CONFIG                         */}
+      {/* ======================================================== */}
+      {viewingBackup && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(15, 23, 42, 0.7)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 99999,
+            padding: "16px",
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: "#ffffff",
+              borderRadius: "12px",
+              width: "100%",
+              maxWidth: "850px",
+              maxHeight: "90vh",
+              display: "flex",
+              flexDirection: "column",
+              overflow: "hidden",
+              boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
+            }}
+          >
+            <div style={{ padding: "16px 20px", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "center", background: "#f8fafc" }}>
+              <div>
+                <div style={{ fontSize: "16px", fontWeight: "800", color: "#0f172a" }}>
+                  📜 {viewingBackup.backup_name}
+                </div>
+                <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>
+                  Snapshot #{viewingBackup.id} • {viewingBackup.lines_count} lines • {(viewingBackup.size_bytes / 1024).toFixed(1)} KB • Checksum: <code>{viewingBackup.checksum?.slice(0, 16)}...</code>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setViewingBackup(null)}
+                style={{ background: "transparent", border: "none", fontSize: "18px", cursor: "pointer", color: "#64748b" }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ flex: 1, overflowY: "auto", padding: "16px", background: "#0f172a" }}>
+              <pre style={{ margin: 0, color: "#f8fafc", fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace", fontSize: "12px", lineHeight: "1.6" }}>
+                {viewingBackup.config_text}
+              </pre>
+            </div>
+
+            <div style={{ padding: "12px 20px", borderTop: "1px solid #e2e8f0", background: "#f8fafc", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ fontSize: "12px", color: "#64748b" }}>
+                Archived: {viewingBackup.created_at?.slice(0, 19).replace("T", " ")} by {viewingBackup.created_by}
+              </div>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <button
+                  type="button"
+                  className="secondary-button small"
+                  onClick={() => {
+                    navigator.clipboard.writeText(viewingBackup.config_text);
+                    setCopiedConfig(true);
+                    setTimeout(() => setCopiedConfig(false), 2500);
+                  }}
+                >
+                  {copiedConfig ? "✓ Copied!" : "📋 Copy Config"}
+                </button>
+                <a
+                  href={`${API_URL}/switches/backups/${viewingBackup.id}/download`}
+                  className="primary-button small"
+                  style={{ textDecoration: "none" }}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  💾 Download .cfg
+                </a>
+                <button
+                  type="button"
+                  className="secondary-button small"
+                  onClick={() => setViewingBackup(null)}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* MODAL: CLI DIFF INSPECTOR                                 */}
+      {/* ======================================================== */}
+      {showDiffModal && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(15, 23, 42, 0.7)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 99999,
+            padding: "16px",
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: "#ffffff",
+              borderRadius: "12px",
+              width: "100%",
+              maxWidth: "920px",
+              maxHeight: "92vh",
+              display: "flex",
+              flexDirection: "column",
+              overflow: "hidden",
+              boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
+            }}
+          >
+            <div style={{ padding: "16px 20px", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "center", background: "#f8fafc" }}>
+              <div>
+                <div style={{ fontSize: "16px", fontWeight: "800", color: "#0f172a", display: "flex", alignItems: "center", gap: "8px" }}>
+                  <span>🔍</span> CLI Configuration Diff Analysis
+                </div>
+                {diffResult && !diffResult.error && (
+                  <div style={{ fontSize: "12px", color: "#64748b", marginTop: "3px", display: "flex", gap: "10px", alignItems: "center" }}>
+                    <span style={{ color: "#16a34a", fontWeight: "700" }}>+{diffResult.additions} Additions</span>
+                    <span style={{ color: "#dc2626", fontWeight: "700" }}>-{diffResult.deletions} Removals</span>
+                    <span>{diffResult.identical ? "✅ Configurations are 100% Identical" : "⚠️ Configuration Discrepancies Detected"}</span>
+                  </div>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowDiffModal(false)}
+                style={{ background: "transparent", border: "none", fontSize: "18px", cursor: "pointer", color: "#64748b" }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* SECURITY ALERTS IN DIFF */}
+            {diffResult?.security_alerts && diffResult.security_alerts.length > 0 && (
+              <div style={{ padding: "12px 20px", background: "#fffbeb", borderBottom: "1px solid #fde68a" }}>
+                <div style={{ fontSize: "12px", fontWeight: "700", color: "#92400e", marginBottom: "4px" }}>
+                  🚨 Security Discrepancies Flagged by NETOPS Inspector:
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                  {diffResult.security_alerts.map((alert, i) => (
+                    <div key={i} style={{ fontSize: "12px", color: "#78350f" }}>{alert}</div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* DIFF CODE CONTAINER */}
+            <div style={{ flex: 1, overflowY: "auto", padding: "16px", background: "#0f172a" }}>
+              {diffLoading ? (
+                <div style={{ textAlign: "center", padding: "40px", color: "#94a3b8" }}>
+                  Analyzing live running-configuration and computing line differences...
+                </div>
+              ) : diffResult?.error ? (
+                <div style={{ padding: "16px", background: "#450a0a", color: "#fca5a5", borderRadius: "8px" }}>
+                  Error calculating diff: {diffResult.error}
+                </div>
+              ) : diffResult?.diff_items ? (
+                <div style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace", fontSize: "12px", lineHeight: "1.5" }}>
+                  {diffResult.diff_items.map((item, idx) => {
+                    const isAdded = item.type === "added";
+                    const isRemoved = item.type === "removed";
+                    return (
+                      <div
+                        key={idx}
+                        style={{
+                          display: "flex",
+                          background: isAdded ? "rgba(16, 185, 129, 0.18)" : (isRemoved ? "rgba(239, 68, 68, 0.22)" : "transparent"),
+                          color: isAdded ? "#34d399" : (isRemoved ? "#f87171" : "#94a3b8"),
+                          padding: "1px 8px",
+                          borderLeft: isAdded ? "3px solid #10b981" : (isRemoved ? "3px solid #ef4444" : "3px solid transparent"),
+                        }}
+                      >
+                        <span style={{ width: "40px", textAlign: "right", paddingRight: "10px", color: "#475569", userSelect: "none" }}>
+                          {item.line_old || ""}
+                        </span>
+                        <span style={{ width: "40px", textAlign: "right", paddingRight: "12px", color: "#475569", userSelect: "none" }}>
+                          {item.line_new || ""}
+                        </span>
+                        <span style={{ width: "20px", fontWeight: "700", userSelect: "none" }}>
+                          {isAdded ? "+" : (isRemoved ? "-" : " ")}
+                        </span>
+                        <span style={{ flex: 1, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
+                          {item.text}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div style={{ color: "#94a3b8", textAlign: "center", padding: "20px" }}>No diff data available.</div>
+              )}
+            </div>
+
+            <div style={{ padding: "12px 20px", borderTop: "1px solid #e2e8f0", background: "#f8fafc", display: "flex", justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                className="secondary-button small"
+                onClick={() => setShowDiffModal(false)}
+              >
+                Close Inspector
+              </button>
+            </div>
           </div>
         </div>
       )}

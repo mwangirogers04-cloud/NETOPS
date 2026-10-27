@@ -52,3 +52,8 @@ class BaseSwitchDriver(ABC):
     ) -> dict[str, Any]:
         """Assign a physical switch interface to a specific VLAN."""
         pass
+
+    @abstractmethod
+    def get_running_config(self) -> str:
+        """Retrieve the live running configuration text from the switch."""
+        pass

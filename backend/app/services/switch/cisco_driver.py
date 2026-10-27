@@ -246,3 +246,21 @@ class CiscoSwitchDriver(BaseSwitchDriver):
                     "connected_mac": None,
                 })
         return interfaces if interfaces else self.fallback.get_interfaces()
+
+    def get_running_config(self) -> str:
+        """
+        Pull live running configuration from the Cisco switch via Netmiko.
+        Falls back to realistic simulated config if device is offline/unreachable.
+        """
+        params = self._get_connection_params()
+        try:
+            with ConnectHandler(**params) as conn:
+                if params.get("secret"):
+                    conn.enable()
+                output = conn.send_command("show running-config", read_timeout=30)
+                if output and "hostname" in output.lower():
+                    return output
+        except Exception as exc:
+            logger.warning("Cisco show running-config failed (%s): %s; falling back to simulation.", params.get("host"), exc)
+
+        return self.fallback.get_running_config()
