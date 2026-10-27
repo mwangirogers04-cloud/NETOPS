@@ -35,6 +35,11 @@ from ..services.firewall.manager import get_active_firewall_driver
 from ..services.l2_quarantine import quarantine_device_l2
 from ..services.sophos_enforcement import is_sophos_configured, sophos_block_device
 from ..services.device_troubleshooter import run_device_diagnostics, apply_diagnostic_fix
+from ..services.cve_scanner_service import (
+    get_device_vulnerabilities,
+    scan_device_for_cves,
+    scan_all_devices_for_cves,
+)
 
 
 
@@ -1392,6 +1397,55 @@ def apply_troubleshoot_fix(
             detail=result.get("message", "Failed to apply fix"),
         )
     return result
+
+
+# ------------------------------------------------------------
+# CVE VULNERABILITY SCANNER ENDPOINTS
+# ------------------------------------------------------------
+
+@router.post("/scan-cve-all")
+def scan_all_devices_cve_endpoint(
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+):
+    """Scan all network inventory devices for CVE vulnerabilities and return risk posture."""
+    return scan_all_devices_for_cves(db)
+
+
+@router.get("/vulnerabilities/summary")
+def get_vulnerabilities_summary_endpoint(
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+):
+    """Retrieve overall CVE risk breakdown across all network endpoints."""
+    return scan_all_devices_for_cves(db)
+
+
+@router.get("/{device_id}/vulnerabilities")
+def get_device_vulnerabilities_endpoint(
+    device_id: int,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+):
+    """Retrieve CVE security vulnerabilities and CVSS scores for a specific device."""
+    try:
+        return get_device_vulnerabilities(db, device_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.post("/{device_id}/scan-cve")
+def scan_single_device_cve_endpoint(
+    device_id: int,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+):
+    """Trigger an on-demand CVE vulnerability scan for a specific endpoint."""
+    try:
+        return scan_device_for_cves(db, device_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
 
 
 

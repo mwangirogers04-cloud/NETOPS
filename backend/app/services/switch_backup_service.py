@@ -1,7 +1,9 @@
 import difflib
 import hashlib
+import json
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
@@ -314,3 +316,145 @@ def delete_switch_backup(db: Session, backup_id: int) -> bool:
     db.delete(backup)
     db.commit()
     return True
+
+
+BACKUP_SCHEDULE_CONFIG_PATH = Path(__file__).resolve().parents[2] / "backup_schedule_settings.json"
+
+
+def get_backup_schedule_settings() -> dict[str, Any]:
+    """Retrieve automated switch backup policy settings."""
+    defaults = {
+        "enabled": True,
+        "interval_minutes": 60,  # Run every hour by default
+        "backup_only_on_change": True,  # Don't save duplicate snapshots if config unchanged
+        "alert_on_drift": True,
+        "last_run_at": None,
+        "last_run_status": "never_run",
+        "last_run_summary": None,
+    }
+    if BACKUP_SCHEDULE_CONFIG_PATH.exists():
+        try:
+            saved = json.loads(BACKUP_SCHEDULE_CONFIG_PATH.read_text(encoding="utf-8"))
+            if isinstance(saved, dict):
+                defaults.update({k: v for k, v in saved.items() if v is not None})
+        except Exception as exc:
+            logger.warning(f"Failed to read backup schedule config: {exc}")
+    return defaults
+
+
+def save_backup_schedule_settings(new_cfg: dict[str, Any]) -> dict[str, Any]:
+    """Save automated switch backup policy settings."""
+    current = get_backup_schedule_settings()
+    for k in current.keys():
+        if k in new_cfg and new_cfg[k] is not None:
+            current[k] = new_cfg[k]
+    BACKUP_SCHEDULE_CONFIG_PATH.write_text(json.dumps(current, indent=2), encoding="utf-8")
+    return current
+
+
+def execute_automated_backup_cycle(db: Session, triggered_by: str = "scheduler") -> dict[str, Any]:
+    """
+    Execute an automated configuration backup check across all registered active network switches.
+    Compares live running configuration against previous snapshot, records drift,
+    and dispatches alerts if sensitive discrepancies are found.
+    """
+    settings = get_backup_schedule_settings()
+    switches = list(db.scalars(select(SwitchConfig).where(SwitchConfig.is_active == True)).all())
+    if not switches:
+        # Fall back to all switches if none is explicitly marked active
+        switches = list(db.scalars(select(SwitchConfig)).all())
+
+    results = []
+    created_count = 0
+    drift_count = 0
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    for sw in switches:
+        try:
+            driver = create_switch_driver(sw)
+            live_config = driver.get_running_config()
+            if not live_config or len(live_config.strip()) < 10:
+                results.append({
+                    "switch_id": sw.id,
+                    "switch_name": sw.name,
+                    "management_ip": sw.management_ip,
+                    "status": "unreachable",
+                    "detail": "Failed to retrieve running configuration from switch",
+                })
+                continue
+
+            checksum = generate_config_checksum(live_config)
+
+            # Check most recent backup
+            latest_backup = db.scalar(
+                select(SwitchBackup)
+                .where(SwitchBackup.switch_id == sw.id)
+                .order_by(SwitchBackup.created_at.desc())
+                .limit(1)
+            )
+
+            is_identical = latest_backup is not None and latest_backup.checksum == checksum
+            if is_identical and settings.get("backup_only_on_change", True):
+                results.append({
+                    "switch_id": sw.id,
+                    "switch_name": sw.name,
+                    "management_ip": sw.management_ip,
+                    "status": "identical",
+                    "backup_id": latest_backup.id,
+                    "detail": "Live configuration matches active baseline (no changes detected)",
+                })
+                continue
+
+            # Changes detected or first baseline
+            now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+            backup_name = f"{sw.name} Auto-Backup ({now_str} UTC)"
+            new_backup = create_switch_backup(
+                db=db,
+                switch_id=sw.id,
+                backup_name=backup_name,
+                backup_type="scheduled",
+                created_by=f"system_{triggered_by}",
+            )
+            created_count += 1
+
+            discrepancies = []
+            if latest_backup:
+                drift_count += 1
+                discrepancies = detect_security_discrepancies(latest_backup.config_text, live_config)
+
+            results.append({
+                "switch_id": sw.id,
+                "switch_name": sw.name,
+                "management_ip": sw.management_ip,
+                "status": "backup_created",
+                "backup_id": new_backup.id,
+                "discrepancies_count": len(discrepancies),
+                "discrepancies": discrepancies,
+                "detail": new_backup.change_summary,
+            })
+        except Exception as exc:
+            logger.error(f"Error during auto-backup of switch {sw.name}: {exc}")
+            results.append({
+                "switch_id": sw.id,
+                "switch_name": sw.name,
+                "management_ip": sw.management_ip,
+                "status": "error",
+                "detail": str(exc),
+            })
+
+    cycle_summary = {
+        "executed_at": now_iso,
+        "switches_evaluated": len(switches),
+        "backups_created": created_count,
+        "drift_detected_count": drift_count,
+        "details": results,
+    }
+
+    save_backup_schedule_settings({
+        "last_run_at": now_iso,
+        "last_run_status": "success",
+        "last_run_summary": cycle_summary,
+    })
+
+    return cycle_summary

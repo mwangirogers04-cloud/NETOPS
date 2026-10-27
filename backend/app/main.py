@@ -30,9 +30,11 @@ from .api.auth import router as auth_router
 from .api.users import router as users_router
 from .api.switches import router as switches_router
 from .api.notifications import router as notifications_router
+from .api.radius import router as radius_router
 
 from .services.auth_service import seed_default_users
 from .services.webhook_service import dispatch_security_alert, map_event_type_to_trigger
+from .services.switch_backup_service import execute_automated_backup_cycle, get_backup_schedule_settings
 
 from .services.websocket_manager import manager
 from .services.schedule_enforcement import schedule_enforcement_loop
@@ -105,6 +107,7 @@ app.include_router(auth_router)
 app.include_router(users_router)
 app.include_router(switches_router)
 app.include_router(notifications_router)
+app.include_router(radius_router)
 
 
 # ---------------------------------------------------------
@@ -234,6 +237,40 @@ async def scheduled_patch_loop():
         await asyncio.sleep(3)
 
 
+async def scheduled_switch_backup_loop():
+    """Evaluate automated switch backup and CLI drift detection cycle."""
+    while True:
+        try:
+            cfg = get_backup_schedule_settings()
+            if cfg.get("enabled", True):
+                interval_secs = max(60, int(cfg.get("interval_minutes", 60)) * 60)
+                last_run_str = cfg.get("last_run_at")
+                should_run = False
+                if not last_run_str:
+                    should_run = True
+                else:
+                    try:
+                        last_run_dt = datetime.fromisoformat(last_run_str)
+                        if last_run_dt.tzinfo is None:
+                            last_run_dt = last_run_dt.replace(tzinfo=timezone.utc)
+                        now_dt = datetime.now(timezone.utc)
+                        if (now_dt - last_run_dt).total_seconds() >= interval_secs:
+                            should_run = True
+                    except Exception:
+                        should_run = True
+
+                if should_run:
+                    db = SessionLocal()
+                    try:
+                        execute_automated_backup_cycle(db, triggered_by="auto_loop")
+                    finally:
+                        db.close()
+        except Exception as err:
+            print(f"[SWITCH-BACKUP-SCHEDULER] Error in auto backup loop: {err}")
+
+        await asyncio.sleep(30)
+
+
 @app.on_event("startup")
 async def startup_event_broadcaster():
     # Seed default developer (super admin) and admin accounts
@@ -259,6 +296,10 @@ async def startup_event_broadcaster():
 
     asyncio.create_task(
         scheduled_patch_loop()
+    )
+
+    asyncio.create_task(
+        scheduled_switch_backup_loop()
     )
 
 

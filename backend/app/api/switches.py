@@ -28,6 +28,9 @@ from ..services.switch_backup_service import (
     compare_two_backups,
     compare_live_with_backup,
     delete_switch_backup,
+    execute_automated_backup_cycle,
+    get_backup_schedule_settings,
+    save_backup_schedule_settings,
 )
 
 logger = logging.getLogger(__name__)
@@ -747,6 +750,51 @@ def get_switch_backups(
     ]
 
 
+# -------------------------------------------------------------
+# AUTOMATED BACKUP SCHEDULE ENDPOINTS
+# -------------------------------------------------------------
+
+class BackupScheduleUpdateRequest(BaseModel):
+    enabled: bool | None = None
+    interval_minutes: int | None = None
+    backup_only_on_change: bool | None = None
+    alert_on_drift: bool | None = None
+
+
+@router.get("/backups/schedule")
+def get_backup_schedule_policy(current_user: User = Depends(require_admin)):
+    """Retrieve automated switch backup frequency and drift detection policy."""
+    return get_backup_schedule_settings()
+
+
+@router.post("/backups/schedule")
+def update_backup_schedule_policy(
+    req: BackupScheduleUpdateRequest,
+    current_user: User = Depends(require_admin),
+):
+    """Update automated switch backup policy (interval in minutes, change detection)."""
+    saved = save_backup_schedule_settings(req.model_dump())
+    return {
+        "success": True,
+        "message": "Automated switch backup policy updated successfully.",
+        "settings": saved,
+    }
+
+
+@router.post("/backups/run-cycle")
+def trigger_automated_backup_cycle(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Trigger an immediate automated configuration backup & drift check across all switches."""
+    summary = execute_automated_backup_cycle(db=db, triggered_by=f"manual_{current_user.username}")
+    return {
+        "success": True,
+        "message": f"Backup cycle complete: {summary['switches_evaluated']} switches evaluated, {summary['backups_created']} backups created, {summary['drift_detected_count']} drifts detected.",
+        "summary": summary,
+    }
+
+
 @router.get("/backups/{backup_id}")
 def get_backup_detail(
     backup_id: int,
@@ -834,6 +882,8 @@ def compare_switch_diff(
     except Exception as exc:
         logger.exception("Failed to calculate switch diff: %s", exc)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+
+
 
 
 @router.delete("/backups/{backup_id}")

@@ -51,6 +51,17 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
   const [showDiffModal, setShowDiffModal] = useState(false);
   const [copiedConfig, setCopiedConfig] = useState(false);
   const [deletingBackupId, setDeletingBackupId] = useState(null);
+  const [backupSchedule, setBackupSchedule] = useState({
+    enabled: true,
+    interval_minutes: 60,
+    backup_only_on_change: true,
+    alert_on_drift: true,
+    last_run_at: null,
+    last_run_status: "never_run",
+  });
+  const [savingSchedule, setSavingSchedule] = useState(false);
+  const [runningCycle, setRunningCycle] = useState(false);
+  const [cycleFeedback, setCycleFeedback] = useState(null);
 
   // Switch Config Form
   const [switchForm, setSwitchForm] = useState({
@@ -507,6 +518,62 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
     }
   };
 
+  const loadBackupSchedule = async () => {
+    try {
+      const res = await fetch(`${API_URL}/switches/backups/schedule`, {
+        headers: getAuthHeaders ? getAuthHeaders() : {},
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setBackupSchedule((prev) => ({ ...prev, ...data }));
+      }
+    } catch (_) {}
+  };
+
+  const handleSaveSchedule = async (updatedFields) => {
+    setSavingSchedule(true);
+    setCycleFeedback(null);
+    try {
+      const merged = { ...backupSchedule, ...updatedFields };
+      const res = await fetch(`${API_URL}/switches/backups/schedule`, {
+        method: "POST",
+        headers: getAuthHeaders ? getAuthHeaders({ "Content-Type": "application/json" }) : { "Content-Type": "application/json" },
+        body: JSON.stringify(merged),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to save schedule policy.");
+      setBackupSchedule(data.settings);
+      setCycleFeedback({ type: "success", text: "✅ Automated switch backup policy updated successfully." });
+    } catch (err) {
+      setCycleFeedback({ type: "error", text: err.message });
+    } finally {
+      setSavingSchedule(false);
+    }
+  };
+
+  const handleRunBackupCycle = async () => {
+    setRunningCycle(true);
+    setCycleFeedback(null);
+    try {
+      const res = await fetch(`${API_URL}/switches/backups/run-cycle`, {
+        method: "POST",
+        headers: getAuthHeaders ? getAuthHeaders() : {},
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to execute backup cycle.");
+      setCycleFeedback({
+        type: "success",
+        text: `✅ ${data.message}`,
+      });
+      await loadBackups();
+      await loadBackupSchedule();
+    } catch (err) {
+      setCycleFeedback({ type: "error", text: err.message });
+    } finally {
+      setRunningCycle(false);
+    }
+  };
+
   // Get VLAN Color Theme
   const getVlanColor = (vid) => {
     switch (vid) {
@@ -670,6 +737,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
             onClick={() => {
               setActiveTab("backups");
               loadBackups();
+              loadBackupSchedule();
             }}
             style={{
               padding: "10px 18px",
@@ -1487,13 +1555,96 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                 <button
                   type="button"
                   className="secondary-button small"
-                  onClick={loadBackups}
+                  onClick={handleRunBackupCycle}
+                  disabled={runningCycle}
+                  style={{ display: "inline-flex", alignItems: "center", gap: "6px", background: "#f0fdf4", borderColor: "#86efac", color: "#15803d", fontWeight: "700" }}
+                  title="Run instant automated backup and drift inspection across all switches"
+                >
+                  <span>⚡</span> {runningCycle ? "Auditing Switches..." : "Run Auto-Backup Cycle"}
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button small"
+                  onClick={() => { loadBackups(); loadBackupSchedule(); }}
                   disabled={loadingBackups}
                   style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
                 >
                   <span>🔄</span> {loadingBackups ? "Refreshing..." : "Refresh Backups"}
                 </button>
               </div>
+            </div>
+
+            {/* AUTOMATED BACKUP POLICY & DRIFT CONTROLS */}
+            <div style={{ background: "#f8fafc", border: "1px solid #cbd5e1", borderRadius: "10px", padding: "14px 16px", marginBottom: "16px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px", marginBottom: "10px" }}>
+                <div style={{ fontSize: "13px", fontWeight: "800", color: "#1e293b", display: "flex", alignItems: "center", gap: "6px" }}>
+                  <span>⏰</span> Automated Switch Backup &amp; CLI Drift Detection Daemon
+                </div>
+                <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", fontWeight: "700", cursor: "pointer", color: backupSchedule.enabled ? "#15803d" : "#64748b" }}>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(backupSchedule.enabled)}
+                      onChange={(e) => handleSaveSchedule({ enabled: e.target.checked })}
+                      disabled={savingSchedule}
+                    />
+                    {backupSchedule.enabled ? "Auto-Scheduler: Active" : "Auto-Scheduler: Paused"}
+                  </label>
+                  <select
+                    value={backupSchedule.interval_minutes || 60}
+                    onChange={(e) => handleSaveSchedule({ interval_minutes: Number(e.target.value) })}
+                    disabled={savingSchedule || !backupSchedule.enabled}
+                    style={{ padding: "4px 8px", fontSize: "12px", border: "1px solid #cbd5e1", borderRadius: "6px", background: "#fff", color: "#0f172a" }}
+                  >
+                    <option value={15}>Every 15 Minutes</option>
+                    <option value={60}>Every 1 Hour (Standard)</option>
+                    <option value={360}>Every 6 Hours</option>
+                    <option value={1440}>Every 24 Hours (Daily)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px", fontSize: "11px", color: "#64748b" }}>
+                <div style={{ display: "flex", gap: "16px", alignItems: "center", flexWrap: "wrap" }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(backupSchedule.backup_only_on_change)}
+                      onChange={(e) => handleSaveSchedule({ backup_only_on_change: e.target.checked })}
+                      disabled={savingSchedule}
+                    />
+                    Save only when CLI changes occur
+                  </label>
+                  <label style={{ display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(backupSchedule.alert_on_drift)}
+                      onChange={(e) => handleSaveSchedule({ alert_on_drift: e.target.checked })}
+                      disabled={savingSchedule}
+                    />
+                    Alert via Webhook &amp; Email on CLI drift
+                  </label>
+                </div>
+                <div>
+                  Last cycle: <strong>{backupSchedule.last_run_at ? new Date(backupSchedule.last_run_at).toLocaleString() : "Never run"}</strong>
+                </div>
+              </div>
+
+              {cycleFeedback && (
+                <div
+                  style={{
+                    marginTop: "10px",
+                    padding: "8px 12px",
+                    borderRadius: "6px",
+                    fontSize: "12px",
+                    background: cycleFeedback.type === "success" ? "#f0fdf4" : "#fef2f2",
+                    color: cycleFeedback.type === "success" ? "#166534" : "#991b1b",
+                    border: `1px solid ${cycleFeedback.type === "success" ? "#bbf7d0" : "#fecaca"}`,
+                  }}
+                >
+                  {cycleFeedback.text}
+                </div>
+              )}
             </div>
 
             {/* QUICK SNAPSHOT CREATOR */}

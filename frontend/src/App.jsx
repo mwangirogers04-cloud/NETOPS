@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import LoginPage from "./components/LoginPage";
 import UsersPage from "./components/UsersPage";
 import SwitchVlanPage from "./components/SwitchVlanPage";
+import NetworkTopologyMap from "./components/NetworkTopologyMap";
 import { NETOPS_FAQS, FAQ_CATEGORIES } from "./data/faqs";
 
 const API_URL =
@@ -323,6 +324,12 @@ function App() {
   const [troubleshootResult, setTroubleshootResult] = useState(null);
   const [troubleshootFixLoading, setTroubleshootFixLoading] = useState(false);
   const [troubleshootError, setTroubleshootError] = useState(null);
+
+  // CVE Vulnerability & Firmware Scanner
+  const [cveModalDevice, setCveModalDevice] = useState(null);
+  const [cveLoading, setCveLoading] = useState(false);
+  const [cveResult, setCveResult] = useState(null);
+  const [cveError, setCveError] = useState(null);
 
   const [alertSoundEnabled, setAlertSoundEnabled] = useState(() => {
     try {
@@ -1698,6 +1705,45 @@ const loadEvents = async () => {
       alert(`Remediation Error: ${err.message}`);
     } finally {
       setTroubleshootFixLoading(false);
+    }
+  };
+
+  const handleOpenCveModal = async (device) => {
+    if (!device) return;
+    setCveModalDevice(device);
+    setCveLoading(true);
+    setCveResult(null);
+    setCveError(null);
+    try {
+      const res = await fetch(`${API_URL}/devices/${device.id}/vulnerabilities`, {
+        headers: getAuthHeaders ? getAuthHeaders() : {},
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to load vulnerability assessment");
+      setCveResult(data);
+    } catch (err) {
+      setCveError(err.message);
+    } finally {
+      setCveLoading(false);
+    }
+  };
+
+  const handleRescanCve = async (device) => {
+    if (!device) return;
+    setCveLoading(true);
+    setCveError(null);
+    try {
+      const res = await fetch(`${API_URL}/devices/${device.id}/scan-cve`, {
+        method: "POST",
+        headers: getAuthHeaders ? getAuthHeaders() : {},
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to execute on-demand CVE scan");
+      setCveResult(data);
+    } catch (err) {
+      setCveError(err.message);
+    } finally {
+      setCveLoading(false);
     }
   };
 
@@ -3508,6 +3554,15 @@ const DevicesPage = () => {
                           flexWrap: "wrap",
                         }}
                       >
+                        <button
+                          type="button"
+                          className="secondary-button small"
+                          style={{ background: "#fef2f2", borderColor: "#fca5a5", color: "#b91c1c", fontWeight: "700" }}
+                          onClick={() => handleOpenCveModal(device)}
+                          title="Scan firmware, OS & open services against CVE vulnerability database"
+                        >
+                          🛡️ CVE Scan
+                        </button>
                         <button
                           type="button"
                           className="secondary-button small"
@@ -7599,6 +7654,37 @@ return (
   const [notifTestRecipient, setNotifTestRecipient] = useState("");
   const [notifTestLoading, setNotifTestLoading] = useState(false);
 
+  // 802.1X / RADIUS Dynamic VLAN States
+  const [radiusForm, setRadiusForm] = useState({
+    enabled: true,
+    auth_port: 1812,
+    acct_port: 1813,
+    shared_secret: "••••••••",
+    quarantine_vlan: 90,
+    mab_format: "lowercase_nodelim",
+    default_unregistered_policy: "quarantine",
+    auto_sync_enabled: true,
+  });
+  const [radiusSaving, setRadiusSaving] = useState(false);
+  const [radiusFeedback, setRadiusFeedback] = useState(null);
+  const [radiusSimMac, setRadiusSimMac] = useState("");
+  const [radiusSimLoading, setRadiusSimLoading] = useState(false);
+  const [radiusSimResult, setRadiusSimResult] = useState(null);
+  const [radiusUsersConfig, setRadiusUsersConfig] = useState(null);
+  const [radiusClientsConfig, setRadiusClientsConfig] = useState(null);
+  const [radiusConfigLoading, setRadiusConfigLoading] = useState(false);
+
+  const loadRadiusSettings = async () => {
+    if (!isAdmin) return;
+    try {
+      const res = await fetch(`${API_URL}/radius/settings`, { headers: getAuthHeaders() });
+      if (res.ok) {
+        const data = await res.json();
+        setRadiusForm((prev) => ({ ...prev, ...data }));
+      }
+    } catch (_) {}
+  };
+
   const loadNotificationSettings = async () => {
     if (!isAdmin) return;
     try {
@@ -7617,6 +7703,7 @@ return (
     loadFirewallData(false);
     checkLiveStatus();
     loadNotificationSettings();
+    loadRadiusSettings();
   }, [currentUser]);
 
   const SettingsPage = () => {
@@ -7757,6 +7844,17 @@ return (
             style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
           >
             <span>🔔</span> Webhooks &amp; Alert Gateways
+          </button>
+          <button
+            type="button"
+            className={activeTab === "radius" ? "primary-button small" : "secondary-button small"}
+            onClick={() => {
+              setActiveTab("radius");
+              loadRadiusSettings();
+            }}
+            style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+          >
+            <span>🔐</span> 802.1X / RADIUS Dynamic VLANs
           </button>
           <button
             type="button"
@@ -8770,7 +8868,315 @@ return (
           </div>
         )}
 
-        {/* TAB 5: FAQS & KNOWLEDGE BASE */}
+        {/* TAB: 802.1X / FREERADIUS DYNAMIC VLAN STEERING */}
+        {activeTab === "radius" && (
+          <div className="panel">
+            <div className="panel-header">
+              <div>
+                <div className="panel-title" style={{ fontSize: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
+                  <span>🔐</span> 802.1X / FreeRADIUS AAA &amp; MAC Authentication Bypass (MAB)
+                </div>
+                <div className="panel-subtitle">
+                  Dynamic switch port steering using RFC 2868 / RFC 3580 RADIUS attributes. Steers authorized workstations, VoIP phones, and cameras to their dedicated departmental VLANs while isolating rogue or quarantined devices to VLAN 90.
+                </div>
+              </div>
+            </div>
+
+            {radiusFeedback && (
+              <div
+                style={{
+                  margin: "0 18px 16px",
+                  padding: "12px 16px",
+                  borderRadius: "8px",
+                  background: radiusFeedback.type === "success" ? "rgba(16, 185, 129, 0.14)" : "rgba(239, 68, 68, 0.14)",
+                  border: `1px solid ${radiusFeedback.type === "success" ? "#10b981" : "#ef4444"}`,
+                  color: radiusFeedback.type === "success" ? "#10b981" : "#ef4444",
+                  fontSize: "13px",
+                  fontWeight: "600",
+                }}
+              >
+                {radiusFeedback.text}
+              </div>
+            )}
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: "20px", padding: "0 18px 18px" }}>
+              {/* CARD 1: SERVER & MAB SETTINGS */}
+              <div style={{ background: "#f8fafc", border: "1px solid #cbd5e1", borderRadius: "10px", padding: "18px" }}>
+                <div style={{ fontWeight: "700", fontSize: "14px", color: "#2563eb", marginBottom: "12px", display: "flex", alignItems: "center", gap: "6px" }}>
+                  <span>⚙️</span> FreeRADIUS Server &amp; MAB Format
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "10px" }}>
+                  <div>
+                    <label style={{ display: "block", fontSize: "11px", color: "#475569", marginBottom: "4px" }}>Authentication Port</label>
+                    <input
+                      type="number"
+                      value={radiusForm.auth_port || 1812}
+                      onChange={(e) => setRadiusForm({ ...radiusForm, auth_port: Number(e.target.value) })}
+                      style={{ width: "100%", padding: "8px 10px", background: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "6px", color: "#0f172a", fontSize: "12px" }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: "block", fontSize: "11px", color: "#475569", marginBottom: "4px" }}>Accounting Port</label>
+                    <input
+                      type="number"
+                      value={radiusForm.acct_port || 1813}
+                      onChange={(e) => setRadiusForm({ ...radiusForm, acct_port: Number(e.target.value) })}
+                      style={{ width: "100%", padding: "8px 10px", background: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "6px", color: "#0f172a", fontSize: "12px" }}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: "10px" }}>
+                  <label style={{ display: "block", fontSize: "11px", color: "#475569", marginBottom: "4px" }}>RADIUS Shared Secret (NAS Key)</label>
+                  <input
+                    type="password"
+                    placeholder="Enter RADIUS shared secret..."
+                    value={radiusForm.shared_secret || ""}
+                    onChange={(e) => setRadiusForm({ ...radiusForm, shared_secret: e.target.value })}
+                    style={{ width: "100%", padding: "8px 10px", background: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "6px", color: "#0f172a", fontSize: "12px", fontFamily: "monospace" }}
+                  />
+                </div>
+
+                <div style={{ marginBottom: "10px" }}>
+                  <label style={{ display: "block", fontSize: "11px", color: "#475569", marginBottom: "4px" }}>Switch MAB MAC Address Format</label>
+                  <select
+                    value={radiusForm.mab_format || "lowercase_nodelim"}
+                    onChange={(e) => setRadiusForm({ ...radiusForm, mab_format: e.target.value })}
+                    style={{ width: "100%", padding: "8px 10px", background: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "6px", color: "#0f172a", fontSize: "12px" }}
+                  >
+                    <option value="lowercase_nodelim">aabbccddeeff (Lowercase No Delimiter - Cisco standard)</option>
+                    <option value="colon">aa:bb:cc:dd:ee:ff (Colon Separated - Linux / Aruba)</option>
+                    <option value="hyphen">aa-bb-cc-dd-ee-ff (Hyphen Separated - Windows / HP)</option>
+                    <option value="cisco">aabb.ccdd.eeff (Cisco Dotted Decimal)</option>
+                    <option value="uppercase_nodelim">AABBCCDDEEFF (Uppercase No Delimiter)</option>
+                  </select>
+                </div>
+
+                <div style={{ marginBottom: "14px" }}>
+                  <label style={{ display: "block", fontSize: "11px", color: "#475569", marginBottom: "4px" }}>Unregistered / Rogue Device Policy</label>
+                  <select
+                    value={radiusForm.default_unregistered_policy || "quarantine"}
+                    onChange={(e) => setRadiusForm({ ...radiusForm, default_unregistered_policy: e.target.value })}
+                    style={{ width: "100%", padding: "8px 10px", background: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "6px", color: "#0f172a", fontSize: "12px" }}
+                  >
+                    <option value="quarantine">🛡️ Auto-Quarantine to Isolation VLAN 90 (Recommended)</option>
+                    <option value="reject">⛔ Strict Access-Reject (Drop switch port link)</option>
+                  </select>
+                </div>
+
+                <button
+                  type="button"
+                  className="primary-button"
+                  disabled={radiusSaving}
+                  onClick={async () => {
+                    setRadiusSaving(true);
+                    setRadiusFeedback(null);
+                    try {
+                      const res = await fetch(`${API_URL}/radius/settings`, {
+                        method: "POST",
+                        headers: getAuthHeaders({ "Content-Type": "application/json" }),
+                        body: JSON.stringify(radiusForm),
+                      });
+                      const data = await res.json();
+                      if (res.ok) {
+                        setRadiusFeedback({ type: "success", text: `✅ ${data.message}` });
+                        loadRadiusSettings();
+                      } else {
+                        setRadiusFeedback({ type: "error", text: data.detail || "Failed to save RADIUS settings." });
+                      }
+                    } catch (err) {
+                      setRadiusFeedback({ type: "error", text: err.message });
+                    } finally {
+                      setRadiusSaving(false);
+                    }
+                  }}
+                >
+                  {radiusSaving ? "Saving..." : "💾 Save FreeRADIUS Settings"}
+                </button>
+              </div>
+
+              {/* CARD 2: LIVE MAB SIMULATOR */}
+              <div style={{ background: "#f8fafc", border: "1px solid #cbd5e1", borderRadius: "10px", padding: "18px" }}>
+                <div style={{ fontWeight: "700", fontSize: "14px", color: "#059669", marginBottom: "12px", display: "flex", alignItems: "center", gap: "6px" }}>
+                  <span>🧪</span> Live 802.1X / MAB Authentication Simulator
+                </div>
+
+                <div style={{ fontSize: "12px", color: "#64748b", marginBottom: "12px" }}>
+                  Simulate an incoming 802.1X MAB Access-Request packet from any switch port to inspect dynamic VLAN assignment.
+                </div>
+
+                <div style={{ marginBottom: "10px" }}>
+                  <label style={{ display: "block", fontSize: "11px", color: "#475569", marginBottom: "4px" }}>
+                    Select Endpoint or Enter Custom MAC Address
+                  </label>
+                  <div style={{ display: "flex", gap: "8px" }}>
+                    <input
+                      type="text"
+                      placeholder="e.g. 00:1A:2B:3C:4D:5E or select below..."
+                      value={radiusSimMac}
+                      onChange={(e) => setRadiusSimMac(e.target.value)}
+                      style={{ flex: 1, padding: "8px 10px", background: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "6px", color: "#0f172a", fontSize: "12px", fontFamily: "monospace" }}
+                    />
+                    <select
+                      onChange={(e) => { if (e.target.value) setRadiusSimMac(e.target.value); }}
+                      style={{ padding: "8px 10px", background: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "6px", color: "#0f172a", fontSize: "12px", width: "160px" }}
+                    >
+                      <option value="">Pick Device...</option>
+                      {devices.slice(0, 15).map((d) => (
+                        <option key={d.id} value={d.mac_address}>
+                          {d.hostname || d.ip_address} ({d.mac_address})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={radiusSimLoading || !radiusSimMac.trim()}
+                  onClick={async () => {
+                    setRadiusSimLoading(true);
+                    setRadiusSimResult(null);
+                    try {
+                      const res = await fetch(`${API_URL}/radius/authenticate`, {
+                        method: "POST",
+                        headers: getAuthHeaders({ "Content-Type": "application/json" }),
+                        body: JSON.stringify({ mac_address: radiusSimMac.trim() }),
+                      });
+                      const data = await res.json();
+                      if (res.ok) {
+                        setRadiusSimResult(data);
+                      } else {
+                        alert(data.detail || "Authentication simulation failed.");
+                      }
+                    } catch (err) {
+                      alert(err.message);
+                    } finally {
+                      setRadiusSimLoading(false);
+                    }
+                  }}
+                  style={{ marginBottom: "12px" }}
+                >
+                  {radiusSimLoading ? "Simulating..." : "🚀 Simulate 802.1X MAB Auth Request"}
+                </button>
+
+                {radiusSimResult && (
+                  <div style={{ background: "#ffffff", border: `1.5px solid ${radiusSimResult.decision === "Access-Accept" ? "#10b981" : "#ef4444"}`, borderRadius: "8px", padding: "12px", fontSize: "12px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+                      <span style={{ fontWeight: "800", color: radiusSimResult.decision === "Access-Accept" ? "#166534" : "#991b1b" }}>
+                        DECISION: {radiusSimResult.decision}
+                      </span>
+                      <span style={{ background: radiusSimResult.assigned_vlan === 90 ? "#fee2e2" : "#eff6ff", color: radiusSimResult.assigned_vlan === 90 ? "#991b1b" : "#1d4ed8", padding: "2px 8px", borderRadius: "12px", fontWeight: "800" }}>
+                        Steered to VLAN {radiusSimResult.assigned_vlan || "REJECT"}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: "11px", color: "#64748b", marginBottom: "8px" }}>
+                      {radiusSimResult.reason}
+                    </div>
+                    <div style={{ background: "#0f172a", color: "#38bdf8", padding: "8px 10px", borderRadius: "6px", fontFamily: "monospace", fontSize: "11px", lineHeight: "1.4" }}>
+                      <div>RADIUS User-Name: {radiusSimResult.radius_username}</div>
+                      {Object.entries(radiusSimResult.radius_attributes || {}).map(([k, v]) => (
+                        <div key={k} style={{ color: "#a5f3fc" }}>{k} = {v}</div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* CARD 3: FREERADIUS CONFIG EXPORTS */}
+              <div style={{ background: "#f8fafc", border: "1px solid #cbd5e1", borderRadius: "10px", padding: "18px" }}>
+                <div style={{ fontWeight: "700", fontSize: "14px", color: "#8b5cf6", marginBottom: "12px", display: "flex", alignItems: "center", gap: "6px" }}>
+                  <span>📜</span> FreeRADIUS Policy Files &amp; Synchronization
+                </div>
+
+                <div style={{ fontSize: "12px", color: "#64748b", marginBottom: "14px" }}>
+                  Generate and inspect standard FreeRADIUS production dictionary and NAS configurations containing dynamic VLAN steering rules for all network switches.
+                </div>
+
+                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "12px" }}>
+                  <button
+                    type="button"
+                    className="secondary-button small"
+                    onClick={async () => {
+                      setRadiusConfigLoading(true);
+                      try {
+                        const res = await fetch(`${API_URL}/radius/config/users`, { headers: getAuthHeaders() });
+                        const text = await res.text();
+                        setRadiusUsersConfig(text);
+                        setRadiusClientsConfig(null);
+                      } catch (err) {
+                        alert(err.message);
+                      } finally {
+                        setRadiusConfigLoading(false);
+                      }
+                    }}
+                  >
+                    📄 View &apos;users&apos; Dictionary
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button small"
+                    onClick={async () => {
+                      setRadiusConfigLoading(true);
+                      try {
+                        const res = await fetch(`${API_URL}/radius/config/clients`, { headers: getAuthHeaders() });
+                        const text = await res.text();
+                        setRadiusClientsConfig(text);
+                        setRadiusUsersConfig(null);
+                      } catch (err) {
+                        alert(err.message);
+                      } finally {
+                        setRadiusConfigLoading(false);
+                      }
+                    }}
+                  >
+                    📄 View &apos;clients.conf&apos;
+                  </button>
+                  <button
+                    type="button"
+                    className="primary-button small"
+                    onClick={async () => {
+                      try {
+                        const res = await fetch(`${API_URL}/radius/sync`, { method: "POST", headers: getAuthHeaders() });
+                        const data = await res.json();
+                        setRadiusFeedback({ type: "success", text: `✅ ${data.message}` });
+                        loadRadiusSettings();
+                      } catch (err) {
+                        alert(err.message);
+                      }
+                    }}
+                  >
+                    🔄 Sync Policy
+                  </button>
+                </div>
+
+                {(radiusUsersConfig || radiusClientsConfig) && (
+                  <div style={{ position: "relative" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px", fontSize: "11px", fontWeight: "700", color: "#475569" }}>
+                      <span>{radiusUsersConfig ? "FreeRADIUS 'users' File:" : "FreeRADIUS 'clients.conf' File:"}</span>
+                      <button
+                        type="button"
+                        style={{ background: "transparent", border: "none", color: "#2563eb", cursor: "pointer", fontSize: "11px", fontWeight: "700" }}
+                        onClick={() => {
+                          navigator.clipboard.writeText(radiusUsersConfig || radiusClientsConfig);
+                          alert("Copied to clipboard!");
+                        }}
+                      >
+                        📋 Copy Config
+                      </button>
+                    </div>
+                    <pre style={{ background: "#0f172a", color: "#e2e8f0", padding: "10px", borderRadius: "6px", fontSize: "11px", maxHeight: "200px", overflowY: "auto", fontFamily: "monospace" }}>
+                      {radiusUsersConfig || radiusClientsConfig}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         {activeTab === "faqs" && (
           <div className="panel">
             <div className="panel-header">
@@ -10536,6 +10942,19 @@ const EndpointUpdatesPage = () => {
       case "vlans":
         return <SwitchVlanPage API_URL={API_URL} currentUser={currentUser} getAuthHeaders={getAuthHeaders} devices={devices} />;
 
+      case "topology":
+        return (
+          <NetworkTopologyMap
+            API_URL={API_URL}
+            currentUser={currentUser}
+            devices={devices}
+            getAuthHeaders={getAuthHeaders}
+            handleOpenCveModal={handleOpenCveModal}
+            handleRunTroubleshoot={handleRunTroubleshoot}
+            refreshAll={refreshAll}
+          />
+        );
+
       case "reports":
         return ReportsPage();
 
@@ -11957,6 +12376,198 @@ const EndpointUpdatesPage = () => {
                 setTroubleshootModalDevice(null);
                 setTroubleshootResult(null);
                 setTroubleshootError(null);
+              }}
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // ------------------------------------------------------------
+  // CVE VULNERABILITY & FIRMWARE SECURITY MODAL
+  // ------------------------------------------------------------
+
+  const renderCveModal = () => {
+    if (!cveModalDevice) return null;
+
+    const dev = cveModalDevice;
+    const res = cveResult;
+
+    const getRiskColor = (risk) => {
+      switch (risk) {
+        case "CRITICAL": return { bg: "#fef2f2", text: "#991b1b", border: "#f87171", badge: "#dc2626" };
+        case "HIGH": return { bg: "#fff7ed", text: "#9a3412", border: "#fdba74", badge: "#ea580c" };
+        case "MEDIUM": return { bg: "#fefce8", text: "#854d0e", border: "#fde047", badge: "#ca8a04" };
+        case "LOW": return { bg: "#eff6ff", text: "#1e40af", border: "#93c5fd", badge: "#3b82f6" };
+        default: return { bg: "#f0fdf4", text: "#166534", border: "#86efac", badge: "#16a34a" };
+      }
+    };
+
+    const riskTheme = res ? getRiskColor(res.overall_risk) : { bg: "#f8fafc", text: "#0f172a", border: "#cbd5e1", badge: "#64748b" };
+
+    return (
+      <div
+        className="modal-overlay"
+        onClick={() => {
+          if (!cveLoading) {
+            setCveModalDevice(null);
+            setCveResult(null);
+            setCveError(null);
+          }
+        }}
+      >
+        <div
+          className="automation-modal"
+          onClick={(e) => e.stopPropagation()}
+          style={{ maxWidth: "840px", width: "95%", maxHeight: "90vh", display: "flex", flexDirection: "column" }}
+        >
+          {/* Header */}
+          <div className="automation-modal-header" style={{ borderBottom: "1px solid #e2e8f0", paddingBottom: "12px" }}>
+            <div>
+              <div className="automation-label" style={{ color: "#dc2626", fontWeight: "800", fontSize: "11px", letterSpacing: "0.5px" }}>
+                🛡️ ZERO-TRUST FIRMWARE &amp; OS VULNERABILITY AUDIT
+              </div>
+              <div className="automation-title" style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "18px" }}>
+                <span>🔍</span>
+                CVE Security Scan: {dev.hostname || dev.ip_address || `Device #${dev.id}`}
+              </div>
+            </div>
+            <button
+              type="button"
+              style={{ background: "transparent", border: "none", color: "#64748b", fontSize: "22px", cursor: "pointer" }}
+              onClick={() => {
+                setCveModalDevice(null);
+                setCveResult(null);
+                setCveError(null);
+              }}
+            >
+              ×
+            </button>
+          </div>
+
+          {/* Modal Content */}
+          <div style={{ overflowY: "auto", padding: "16px 0", flex: 1 }}>
+            {/* Device Context Card */}
+            <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "12px 16px", marginBottom: "16px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "10px", fontSize: "12px" }}>
+              <div><span style={{ color: "#64748b" }}>MAC Address:</span> <br/><strong style={{ fontFamily: "monospace" }}>{dev.mac_address}</strong></div>
+              <div><span style={{ color: "#64748b" }}>IP Address:</span> <br/><strong>{dev.ip_address || "None"}</strong></div>
+              <div><span style={{ color: "#64748b" }}>Vendor / Hardware:</span> <br/><strong>{dev.vendor || "Generic Endpoint"}</strong></div>
+              <div><span style={{ color: "#64748b" }}>Device Type / VLAN:</span> <br/><strong>{dev.device_type?.toUpperCase() || "UNKNOWN"} • VLAN {dev.vlan_id || 90}</strong></div>
+            </div>
+
+            {cveLoading && (
+              <div style={{ textAlign: "center", padding: "36px 16px", color: "#64748b" }}>
+                <div style={{ fontSize: "28px", marginBottom: "8px" }}>⏳</div>
+                <div style={{ fontWeight: "600", fontSize: "14px" }}>Correlating device firmware, services &amp; OS against CVE knowledge base...</div>
+              </div>
+            )}
+
+            {cveError && (
+              <div style={{ padding: "12px 16px", borderRadius: "8px", background: "#fef2f2", border: "1px solid #fecaca", color: "#991b1b", fontSize: "13px" }}>
+                ❌ {cveError}
+              </div>
+            )}
+
+            {!cveLoading && res && (
+              <>
+                {/* Risk Posture Banner */}
+                <div style={{ background: riskTheme.bg, border: `1.5px solid ${riskTheme.border}`, borderRadius: "10px", padding: "16px", marginBottom: "20px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px" }}>
+                  <div>
+                    <div style={{ fontSize: "11px", fontWeight: "800", color: riskTheme.text, textTransform: "uppercase" }}>
+                      Overall Device Threat Level
+                    </div>
+                    <div style={{ fontSize: "22px", fontWeight: "900", color: riskTheme.text, display: "flex", alignItems: "center", gap: "8px" }}>
+                      <span>{res.overall_risk === "CLEAN" ? "✅" : "⚠️"}</span>
+                      {res.overall_risk} RISK
+                    </div>
+                    <div style={{ fontSize: "12px", color: riskTheme.text, marginTop: "2px" }}>
+                      {res.vulnerabilities_count === 0 ? "No known critical CVEs matched for this device profile." : `${res.vulnerabilities_count} known security vulnerability/ies detected across running stack.`}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontSize: "11px", color: riskTheme.text, fontWeight: "700" }}>MAX CVSS v3.1 SCORE</div>
+                    <div style={{ fontSize: "28px", fontWeight: "900", color: riskTheme.text }}>
+                      {res.max_cvss_score?.toFixed(1) || "0.0"} <span style={{ fontSize: "14px", fontWeight: "600" }}>/ 10.0</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Findings List */}
+                <div style={{ fontSize: "14px", fontWeight: "800", color: "#0f172a", marginBottom: "12px", display: "flex", alignItems: "center", gap: "6px" }}>
+                  <span>📋</span> Vulnerability Disclosures &amp; Patch Remediations ({res.vulnerabilities?.length || 0})
+                </div>
+
+                {res.vulnerabilities?.length === 0 ? (
+                  <div style={{ padding: "24px", background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0", textAlign: "center", color: "#64748b" }}>
+                    🎉 No active CVE advisories matched this hardware/firmware profile.
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                    {res.vulnerabilities.map((v) => {
+                      const vColor = getRiskColor(v.severity);
+                      return (
+                        <div key={v.cve_id} style={{ background: "#ffffff", border: `1px solid ${vColor.border}`, borderRadius: "8px", padding: "14px", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "8px", marginBottom: "6px" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                              <span style={{ background: vColor.badge || "#dc2626", color: "#fff", padding: "2px 8px", borderRadius: "4px", fontSize: "11px", fontWeight: "800", fontFamily: "monospace" }}>
+                                {v.cve_id}
+                              </span>
+                              <span style={{ fontSize: "12px", fontWeight: "700", color: "#475569" }}>
+                                {v.affected_component || "System"}
+                              </span>
+                              {v.exploit_available && (
+                                <span style={{ background: "#fee2e2", color: "#991b1b", border: "1px solid #fecaca", padding: "2px 6px", borderRadius: "4px", fontSize: "10px", fontWeight: "800" }}>
+                                  ⚡ Public Exploit Known
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ fontWeight: "800", fontSize: "12px", color: vColor.text }}>
+                              CVSS {v.cvss_score} ({v.severity})
+                            </div>
+                          </div>
+
+                          <div style={{ fontWeight: "700", fontSize: "13px", color: "#0f172a", marginBottom: "6px" }}>
+                            {v.title}
+                          </div>
+
+                          <div style={{ fontSize: "12px", color: "#475569", lineHeight: "1.5", marginBottom: "10px" }}>
+                            {v.description}
+                          </div>
+
+                          {v.remediation && (
+                            <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "6px", padding: "8px 12px", fontSize: "11px", color: "#166534" }}>
+                              <strong>🛠️ Recommended Remediation:</strong> {v.remediation}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* Footer */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "16px", paddingTop: "12px", borderTop: "1px solid #e2e8f0" }}>
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={cveLoading}
+              onClick={() => handleRescanCve(dev)}
+            >
+              🔄 Re-Scan Firmware &amp; OS
+            </button>
+            <button
+              type="button"
+              className="primary-button"
+              onClick={() => {
+                setCveModalDevice(null);
+                setCveResult(null);
+                setCveError(null);
               }}
             >
               Close
@@ -13590,6 +14201,17 @@ const EndpointUpdatesPage = () => {
                 />
 
                 <NavItem
+                  icon="🗺️"
+                  label="Topology Map"
+                  active={
+                    activePage === "topology"
+                  }
+                  onClick={() =>
+                    setActivePage("topology")
+                  }
+                />
+
+                <NavItem
                   icon="R"
                   label="Reports"
                   active={
@@ -13999,6 +14621,7 @@ const EndpointUpdatesPage = () => {
         {renderAutomationResult()}
         {renderPatchModals()}
         {renderTroubleshootModal()}
+        {renderCveModal()}
 
 
         {showChangePasswordModal && (
@@ -14598,6 +15221,7 @@ function getPageTitle(page) {
     access: "Access Control",
     "endpoint-updates": "Endpoint Updates",
     vlans: "VLAN Automation",
+    topology: "Interactive Network Topology Map",
     reports: "Network Reports",
     users: "User Management & RBAC Access",
     settings: "System Settings",

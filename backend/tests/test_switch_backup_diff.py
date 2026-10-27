@@ -255,3 +255,33 @@ def test_backup_delete_role_restriction():
     db2 = TestingSessionLocal()
     assert db2.get(SwitchBackup, b_id) is None
     db2.close()
+
+
+def test_automated_backup_policy_and_cycle_api():
+    """Verify reading and saving backup schedule policy, and running an automated backup cycle."""
+    adm_hdr = auth_headers("net_admin", "admin")
+
+    # 1. GET schedule policy
+    res = client.get("/switches/backups/schedule", headers=adm_hdr)
+    assert res.status_code == 200
+    cfg = res.json()
+    assert "enabled" in cfg
+    assert "interval_minutes" in cfg
+
+    # 2. POST update schedule policy
+    res_up = client.post(
+        "/switches/backups/schedule",
+        headers=adm_hdr,
+        json={"enabled": True, "interval_minutes": 15, "backup_only_on_change": True},
+    )
+    assert res_up.status_code == 200
+    assert res_up.json()["settings"]["interval_minutes"] == 15
+
+    # 3. POST run automated backup cycle
+    res_run = client.post("/switches/backups/run-cycle", headers=adm_hdr)
+    assert res_run.status_code == 200
+    data = res_run.json()
+    assert data["success"] is True
+    assert "summary" in data
+    assert data["summary"]["switches_evaluated"] >= 1
+    assert data["summary"]["backups_created"] >= 1

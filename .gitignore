@@ -28,6 +28,8 @@ frontend/dist/
 *.orig
 *.db
 backend/notification_settings.json
+backend/backup_schedule_settings.json
+backend/radius_settings.json
 
 # Test & Temporary exports
 *.xlsx
