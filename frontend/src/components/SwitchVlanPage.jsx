@@ -35,6 +35,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
   const [isTrunk, setIsTrunk] = useState(false);
   const [assigningPort, setAssigningPort] = useState(false);
   const [configuringUplinks, setConfiguringUplinks] = useState(false);
+  const [portTableFilter, setPortTableFilter] = useState("all");
 
   // Config Backups & CLI Diff States
   const [backups, setBackups] = useState([]);
@@ -82,6 +83,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
   const [testingSwitch, setTestingSwitch] = useState(false);
   const [testResult, setTestResult] = useState(null);
   const [savingSwitch, setSavingSwitch] = useState(false);
+  const [switchingDensity, setSwitchingDensity] = useState(false);
 
   const showStatus = (text, type = "success") => {
     setStatusMessage({ text, type });
@@ -272,9 +274,9 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
     }
   };
 
-  // Handle Quick Configuration of Last Two Ports as Trunk Uplinks
+  // Handle Quick Configuration of Uplink Ports as Trunk Uplinks
   const handleConfigureUplinks = async () => {
-    if (!window.confirm("Configure the last two ports of this switch as 802.1Q Trunk Uplinks? This will configure them to carry all active VLANs.")) {
+    if (!window.confirm("Configure switch uplink ports as 802.1Q Trunk Uplinks? This will configure them to carry all active VLANs upstream to distribution or firewall.")) {
       return;
     }
     setConfiguringUplinks(true);
@@ -292,6 +294,27 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
       showStatus(err.message, "error");
     } finally {
       setConfiguringUplinks(false);
+    }
+  };
+
+  // Handle Switch Chassis Density Switch (24-Port vs 48-Port)
+  const handleSwitchDensity = async (targetDensity) => {
+    if (!isAdmin) return;
+    setSwitchingDensity(true);
+    try {
+      const res = await fetch(`${API_URL}/switches/ports/density`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        body: JSON.stringify({ total_ports: targetDensity }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to switch chassis density.");
+      showStatus(data.message || `Switched to ${targetDensity}-Port Chassis layout.`, "success");
+      await loadAllData();
+    } catch (err) {
+      showStatus(err.message, "error");
+    } finally {
+      setSwitchingDensity(false);
     }
   };
 
@@ -728,7 +751,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
             gap: "8px",
           }}
         >
-          <span>🔌</span> 24-Port Switch Panel & Matrix
+          <span>🔌</span> Switch Panel & Port Matrix ({activeSwitch?.config?.total_ports || (ports.length > 24 ? 48 : 24)}P)
         </button>
 
         {isAdmin && (
@@ -942,21 +965,291 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
       )}
 
       {/* ======================================================== */}
-      {/* TAB 2: 24-PORT SWITCH MATRIX & FRONT PANEL               */}
+      {/* TAB 2: SWITCH MATRIX & FRONT PANEL (24/48-PORT CHASSIS)   */}
       {/* ======================================================== */}
-      {activeTab === "ports" && (
-        <div>
-          <div className="panel" style={{ marginBottom: "20px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px", flexWrap: "wrap", gap: "10px" }}>
-              <div>
-                <div style={{ fontSize: "16px", fontWeight: "800", color: "#0f172a" }}>
-                  Physical Switch Front Panel (24 Ports)
+      {activeTab === "ports" && (() => {
+        const is48Port = (activeSwitch?.config?.total_ports === 48) || (ports.length > 24);
+        const totalChassisPorts = is48Port ? (ports.length > 48 ? ports.length : 48) : 24;
+
+        const getPortNum = (p, fallback) => {
+          if (!p) return fallback;
+          const match = String(p.port || p.short_name || "").match(/(\d+)$/);
+          return match ? parseInt(match[1], 10) : fallback;
+        };
+
+        const sortedChassisPorts = [...ports].sort((a, b) => getPortNum(a, 0) - getPortNum(b, 0));
+        const copperPorts = sortedChassisPorts.filter((p) => !p.is_sfp && !String(p.port || "").toLowerCase().startsWith("te"));
+        const sfpPorts = sortedChassisPorts.filter((p) => p.is_sfp || String(p.port || "").toLowerCase().startsWith("te"));
+
+        const topRowOddPorts = copperPorts.filter((p, i) => getPortNum(p, i + 1) % 2 === 1);
+        const bottomRowEvenPorts = copperPorts.filter((p, i) => getPortNum(p, i + 1) % 2 === 0);
+        const numCols = Math.max(12, Math.max(topRowOddPorts.length, bottomRowEvenPorts.length));
+
+        const sfpTopRow = sfpPorts.filter((p, i) => i % 2 === 0);
+        const sfpBottomRow = sfpPorts.filter((p, i) => i % 2 === 1);
+
+        const filteredPorts = ports.filter((p) => {
+          const num = getPortNum(p, 0);
+          const isSfp = p.is_sfp || String(p.port || "").toLowerCase().startsWith("te");
+          const isTrunkPort = p.mode === "trunk" || !!p.is_uplink;
+
+          if (portTableFilter === "bank1") return !isSfp && num >= 1 && num <= 24;
+          if (portTableFilter === "bank2") return !isSfp && num >= 25 && num <= 48;
+          if (portTableFilter === "sfp") return isSfp;
+          if (portTableFilter === "trunk") return isTrunkPort;
+          if (portTableFilter === "quarantine") return p.vlan === 90;
+          return true;
+        });
+
+        const renderChassisPort = (p) => {
+          const isUp = p.status === "connected";
+          const isQuarantine = p.vlan === 90;
+          const isTrunkPort = p.mode === "trunk" || !!p.is_uplink;
+          const theme = getVlanColor(p.vlan);
+
+          return (
+            <div
+              key={p.port}
+              onClick={() => {
+                if (isAdmin) {
+                  setSelectedPort(p);
+                  setTargetVlanId(String(p.vlan || 1));
+                  setIsTrunk(p.mode === "trunk" || !!p.is_uplink);
+                }
+              }}
+              style={{
+                background: isTrunkPort ? "#2e1065" : "#1e293b",
+                border: `2px solid ${isQuarantine ? "#ef4444" : isTrunkPort ? "#8b5cf6" : isUp ? theme.border : "#334155"}`,
+                borderRadius: "8px",
+                padding: "8px 4px",
+                textAlign: "center",
+                cursor: isAdmin ? "pointer" : "default",
+                transition: "all 0.15s ease",
+                boxShadow: isTrunkPort ? "0 0 8px rgba(139, 92, 246, 0.4)" : "none",
+                minWidth: is48Port ? "38px" : "48px",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = "translateY(-2px)";
+                e.currentTarget.style.boxShadow = "0 4px 6px rgba(0,0,0,0.3)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = "none";
+                e.currentTarget.style.boxShadow = isTrunkPort ? "0 0 8px rgba(139, 92, 246, 0.4)" : "none";
+              }}
+              title={`Click to configure ${p.port} (${isTrunkPort ? "TRUNK UPLINK" : `VLAN ${p.vlan}`})`}
+            >
+              {/* LINK LED */}
+              <div style={{ display: "flex", justifyContent: "center", marginBottom: "4px" }}>
+                <span
+                  style={{
+                    width: "8px",
+                    height: "8px",
+                    borderRadius: "50%",
+                    background: isTrunkPort ? "#a855f7" : isUp ? "#10b981" : "#475569",
+                    boxShadow: isTrunkPort ? "0 0 6px #a855f7" : isUp ? "0 0 6px #10b981" : "none",
+                    display: "inline-block",
+                  }}
+                />
+              </div>
+
+              {/* PORT NUMBER */}
+              <div style={{ fontSize: is48Port ? "10px" : "11px", fontWeight: "800", color: "#f8fafc", whiteSpace: "nowrap" }}>
+                {p.short_name || p.port}
+              </div>
+
+              {/* CURRENT VLAN / TRUNK BADGE */}
+              <div
+                style={{
+                  marginTop: "6px",
+                  fontSize: isTrunkPort ? "9px" : "10px",
+                  fontWeight: "800",
+                  background: isQuarantine ? "#ef4444" : isTrunkPort ? "#7c3aed" : theme.chip,
+                  color: "#ffffff",
+                  borderRadius: "4px",
+                  padding: "1px 2px",
+                  letterSpacing: isTrunkPort ? "0.5px" : "normal",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {isTrunkPort ? "TRUNK" : `V${p.vlan}`}
+              </div>
+            </div>
+          );
+        };
+
+        const renderSfpPort = (p) => {
+          const isUp = p.status === "connected";
+          const isQuarantine = p.vlan === 90;
+          const isTrunkPort = p.mode === "trunk" || !!p.is_uplink;
+
+          return (
+            <div
+              key={p.port}
+              onClick={() => {
+                if (isAdmin) {
+                  setSelectedPort(p);
+                  setTargetVlanId(String(p.vlan || 1));
+                  setIsTrunk(p.mode === "trunk" || !!p.is_uplink);
+                }
+              }}
+              style={{
+                background: "#1e1b4b",
+                border: `2px solid ${isQuarantine ? "#ef4444" : isUp ? "#c084fc" : "#4f46e5"}`,
+                borderRadius: "8px",
+                padding: "8px 6px",
+                textAlign: "center",
+                cursor: isAdmin ? "pointer" : "default",
+                transition: "all 0.15s ease",
+                boxShadow: isUp ? "0 0 10px rgba(192, 132, 252, 0.5)" : "none",
+                minWidth: "52px",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = "translateY(-2px)";
+                e.currentTarget.style.boxShadow = "0 4px 6px rgba(0,0,0,0.3)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = "none";
+                e.currentTarget.style.boxShadow = isUp ? "0 0 10px rgba(192, 132, 252, 0.5)" : "none";
+              }}
+              title={`Click to configure 10G SFP+ Uplink ${p.port} (${p.status})`}
+            >
+              {/* SFP 10G LED */}
+              <div style={{ display: "flex", justifyContent: "center", marginBottom: "4px" }}>
+                <span
+                  style={{
+                    width: "8px",
+                    height: "8px",
+                    borderRadius: "50%",
+                    background: isUp ? "#c084fc" : "#475569",
+                    boxShadow: isUp ? "0 0 8px #c084fc" : "none",
+                    display: "inline-block",
+                  }}
+                />
+              </div>
+
+              {/* SFP NAME */}
+              <div style={{ fontSize: "11px", fontWeight: "800", color: "#f8fafc" }}>
+                {p.short_name || p.port}
+              </div>
+
+              {/* 10G BADGE */}
+              <div
+                style={{
+                  marginTop: "6px",
+                  fontSize: "9px",
+                  fontWeight: "800",
+                  background: isQuarantine ? "#ef4444" : "#7c3aed",
+                  color: "#ffffff",
+                  borderRadius: "4px",
+                  padding: "1px 2px",
+                  letterSpacing: "0.5px",
+                }}
+              >
+                10G SFP+
+              </div>
+            </div>
+          );
+        };
+
+        return (
+          <div>
+            <div className="panel" style={{ marginBottom: "20px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px", flexWrap: "wrap", gap: "10px" }}>
+                <div>
+                  <div style={{ fontSize: "16px", fontWeight: "800", color: "#0f172a", display: "flex", alignItems: "center", gap: "8px" }}>
+                    <span>Physical Switch Front Panel ({totalChassisPorts} Ports)</span>
+                    <span
+                      style={{
+                        fontSize: "11px",
+                        fontWeight: "700",
+                        padding: "2px 8px",
+                        borderRadius: "12px",
+                        background: is48Port ? "#ede9fe" : "#eff6ff",
+                        color: is48Port ? "#6d28d9" : "#1d4ed8",
+                        border: `1px solid ${is48Port ? "#c4b5fd" : "#bfdbfe"}`,
+                      }}
+                    >
+                      {is48Port ? "48-Port Enterprise + 10G SFP+" : "24-Port Standard"}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: "12px", color: "#64748b" }}>
+                    Live port visualization. Click any port to change its VLAN assignment without console login.
+                  </div>
                 </div>
-                <div style={{ fontSize: "12px", color: "#64748b" }}>
-                  Live port visualization. Click any port to change its VLAN assignment without console login.
+
+                {/* DENSITY SELECTOR & UPLINKS ACTION */}
+                <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+                  {isAdmin && (
+                    <div style={{ display: "flex", alignItems: "center", gap: "4px", background: "#f8fafc", padding: "3px", borderRadius: "8px", border: "1px solid #cbd5e1" }}>
+                      <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", paddingLeft: "6px", paddingRight: "4px" }}>
+                        Chassis:
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleSwitchDensity(24)}
+                        disabled={switchingDensity}
+                        style={{
+                          padding: "4px 10px",
+                          fontSize: "12px",
+                          fontWeight: "700",
+                          borderRadius: "6px",
+                          border: "none",
+                          cursor: "pointer",
+                          background: !is48Port ? "#2563eb" : "transparent",
+                          color: !is48Port ? "#ffffff" : "#64748b",
+                          boxShadow: !is48Port ? "0 1px 2px rgba(0,0,0,0.1)" : "none",
+                          transition: "all 0.15s ease",
+                        }}
+                      >
+                        24 Ports
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSwitchDensity(48)}
+                        disabled={switchingDensity}
+                        style={{
+                          padding: "4px 10px",
+                          fontSize: "12px",
+                          fontWeight: "700",
+                          borderRadius: "6px",
+                          border: "none",
+                          cursor: "pointer",
+                          background: is48Port ? "#2563eb" : "transparent",
+                          color: is48Port ? "#ffffff" : "#64748b",
+                          boxShadow: is48Port ? "0 1px 2px rgba(0,0,0,0.1)" : "none",
+                          transition: "all 0.15s ease",
+                        }}
+                      >
+                        48 Ports (+ SFP+)
+                      </button>
+                    </div>
+                  )}
+
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      className="secondary-button small"
+                      onClick={handleConfigureUplinks}
+                      disabled={configuringUplinks}
+                      style={{
+                        background: "#f5f3ff",
+                        color: "#6d28d9",
+                        borderColor: "#c4b5fd",
+                        fontWeight: "700",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "6px",
+                      }}
+                      title="Automatically configure switch uplink ports as 802.1Q Trunk Uplinks"
+                    >
+                      <span>🔀</span> {configuringUplinks ? "Configuring Uplinks..." : (is48Port ? "Set 10G SFP+ as Trunk Uplinks" : "Set Last 2 Ports as Trunk Uplinks")}
+                    </button>
+                  )}
                 </div>
               </div>
-              <div style={{ display: "flex", gap: "12px", alignItems: "center", fontSize: "12px", flexWrap: "wrap" }}>
+
+              {/* LEGEND BADGES */}
+              <div style={{ display: "flex", gap: "14px", alignItems: "center", fontSize: "12px", flexWrap: "wrap", marginBottom: "14px" }}>
                 <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
                   <span style={{ width: "10px", height: "10px", borderRadius: "50%", background: "#10b981", display: "inline-block" }}></span> Connected
                 </span>
@@ -966,149 +1259,47 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                 <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
                   <span style={{ width: "10px", height: "10px", borderRadius: "50%", background: "#a855f7", display: "inline-block" }}></span> 🔀 Trunk Uplink
                 </span>
+                {is48Port && (
+                  <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                    <span style={{ width: "10px", height: "10px", borderRadius: "50%", background: "#c084fc", display: "inline-block" }}></span> ⚡ 10G SFP+
+                  </span>
+                )}
                 <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
                   <span style={{ width: "10px", height: "10px", borderRadius: "50%", background: "#ef4444", display: "inline-block" }}></span> Quarantine (90)
                 </span>
-
-                {isAdmin && (
-                  <button
-                    type="button"
-                    className="secondary-button small"
-                    onClick={handleConfigureUplinks}
-                    disabled={configuringUplinks}
-                    style={{
-                      background: "#f5f3ff",
-                      color: "#6d28d9",
-                      borderColor: "#c4b5fd",
-                      fontWeight: "700",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "6px",
-                      marginLeft: "8px",
-                    }}
-                    title="Automatically configure the last 2 ports of this switch chassis as 802.1Q Trunk Uplinks"
-                  >
-                    <span>🔀</span> {configuringUplinks ? "Configuring Uplinks..." : "Set Last 2 Ports as Trunk Uplinks"}
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* SWITCH CHASSIS RACK SIMULATOR */}
-            <div
-              style={{
-                background: "#0f172a",
-                borderRadius: "12px",
-                padding: "20px",
-                boxShadow: "inset 0 2px 4px rgba(0,0,0,0.5)",
-                border: "2px solid #334155",
-                overflowX: "auto",
-              }}
-            >
-              <div style={{ display: "flex", justifyContent: "space-between", color: "#94a3b8", fontSize: "11px", marginBottom: "16px", fontWeight: "700", letterSpacing: "1px", flexWrap: "wrap", gap: "8px" }}>
-                <span>SWITCH CHASSIS 24-PORT GIGABIT PANEL</span>
-                <span style={{ color: "#a855f7" }}>STANDARD LAYOUT: TOP = ODD (1, 3, 5...), BOTTOM = EVEN (2, 4, 6...) | PORTS 23 & 24 = TRUNK UPLINKS</span>
-                <span style={{ color: "#38bdf8" }}>MANAGEMENT: {activeSwitch?.config?.management_ip || "192.168.0.2"}</span>
               </div>
 
-              {/* CHASSIS RACK CONTAINER */}
-              {(() => {
-                const getPortNum = (p, fallback) => {
-                  if (!p) return fallback;
-                  const match = String(p.port || p.short_name || "").match(/(\d+)$/);
-                  return match ? parseInt(match[1], 10) : fallback;
-                };
+              {/* SWITCH CHASSIS RACK SIMULATOR */}
+              <div
+                style={{
+                  background: "#0f172a",
+                  borderRadius: "12px",
+                  padding: "20px",
+                  boxShadow: "inset 0 2px 4px rgba(0,0,0,0.5)",
+                  border: "2px solid #334155",
+                  overflowX: "auto",
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", color: "#94a3b8", fontSize: "11px", marginBottom: "16px", fontWeight: "700", letterSpacing: "1px", flexWrap: "wrap", gap: "8px" }}>
+                  <span>SWITCH CHASSIS {is48Port ? "48-PORT ENTERPRISE GIGABIT PANEL (+ 4x 10G SFP+)" : "24-PORT GIGABIT PANEL"}</span>
+                  <span style={{ color: "#a855f7" }}>
+                    {is48Port ? "LAYOUT: TOP = ODD (1-47), BOTTOM = EVEN (2-48) | PORTS 47, 48 & SFP+ Te0/49-52 = TRUNK UPLINKS" : "LAYOUT: TOP = ODD (1-23), BOTTOM = EVEN (2-24) | PORTS 23 & 24 = TRUNK UPLINKS"}
+                  </span>
+                  <span style={{ color: "#38bdf8" }}>MANAGEMENT: {activeSwitch?.config?.management_ip || "192.168.0.2"}</span>
+                </div>
 
-                const sortedChassisPorts = [...ports].sort((a, b) => getPortNum(a, 0) - getPortNum(b, 0));
-                const topRowOddPorts = sortedChassisPorts.filter((p, i) => getPortNum(p, i + 1) % 2 === 1);
-                const bottomRowEvenPorts = sortedChassisPorts.filter((p, i) => getPortNum(p, i + 1) % 2 === 0);
-                const numCols = Math.max(12, Math.max(topRowOddPorts.length, bottomRowEvenPorts.length));
-
-                const renderChassisPort = (p) => {
-                  const isUp = p.status === "connected";
-                  const isQuarantine = p.vlan === 90;
-                  const isTrunkPort = p.mode === "trunk" || !!p.is_uplink;
-                  const theme = getVlanColor(p.vlan);
-
-                  return (
-                    <div
-                      key={p.port}
-                      onClick={() => {
-                        if (isAdmin) {
-                          setSelectedPort(p);
-                          setTargetVlanId(String(p.vlan || 1));
-                          setIsTrunk(p.mode === "trunk" || !!p.is_uplink);
-                        }
-                      }}
-                      style={{
-                        background: isTrunkPort ? "#2e1065" : "#1e293b",
-                        border: `2px solid ${isQuarantine ? "#ef4444" : isTrunkPort ? "#8b5cf6" : isUp ? theme.border : "#334155"}`,
-                        borderRadius: "8px",
-                        padding: "8px 4px",
-                        textAlign: "center",
-                        cursor: isAdmin ? "pointer" : "default",
-                        transition: "all 0.15s ease",
-                        boxShadow: isTrunkPort ? "0 0 8px rgba(139, 92, 246, 0.4)" : "none",
-                        minWidth: "48px",
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.transform = "translateY(-2px)";
-                        e.currentTarget.style.boxShadow = "0 4px 6px rgba(0,0,0,0.3)";
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.transform = "none";
-                        e.currentTarget.style.boxShadow = isTrunkPort ? "0 0 8px rgba(139, 92, 246, 0.4)" : "none";
-                      }}
-                      title={`Click to configure ${p.port} (${isTrunkPort ? "TRUNK UPLINK" : `VLAN ${p.vlan}`})`}
-                    >
-                      {/* LINK LED */}
-                      <div style={{ display: "flex", justifyContent: "center", marginBottom: "4px" }}>
-                        <span
-                          style={{
-                            width: "8px",
-                            height: "8px",
-                            borderRadius: "50%",
-                            background: isTrunkPort ? "#a855f7" : isUp ? "#10b981" : "#475569",
-                            boxShadow: isTrunkPort ? "0 0 6px #a855f7" : isUp ? "0 0 6px #10b981" : "none",
-                            display: "inline-block",
-                          }}
-                        />
-                      </div>
-
-                      {/* PORT NUMBER */}
-                      <div style={{ fontSize: "11px", fontWeight: "800", color: "#f8fafc" }}>
-                        {p.short_name || p.port}
-                      </div>
-
-                      {/* CURRENT VLAN / TRUNK BADGE */}
-                      <div
-                        style={{
-                          marginTop: "6px",
-                          fontSize: isTrunkPort ? "9px" : "10px",
-                          fontWeight: "800",
-                          background: isQuarantine ? "#ef4444" : isTrunkPort ? "#7c3aed" : theme.chip,
-                          color: "#ffffff",
-                          borderRadius: "4px",
-                          padding: "1px 2px",
-                          letterSpacing: isTrunkPort ? "0.5px" : "normal",
-                        }}
-                      >
-                        {isTrunkPort ? "TRUNK" : `V${p.vlan}`}
-                      </div>
-                    </div>
-                  );
-                };
-
-                return (
-                  <div>
-                    {/* TOP ROW: ODD NUMBERED PORTS (1, 3, 5 ... 23) */}
+                {/* CHASSIS RACK CONTAINER */}
+                <div style={{ display: "flex", gap: "16px", alignItems: "stretch" }}>
+                  {/* COPPER GIGABIT MATRIX */}
+                  <div style={{ flex: 1 }}>
+                    {/* TOP ROW: ODD NUMBERED PORTS */}
                     <div style={{ marginBottom: "6px" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
                         <span style={{ fontSize: "10px", fontWeight: "800", color: "#64748b", textTransform: "uppercase", letterSpacing: "1px" }}>
-                          ▲ Top Row (Odd Ports: 1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23)
+                          ▲ Top Row (Odd Gigabit Ports: 1, 3, 5 ... {topRowOddPorts[topRowOddPorts.length - 1]?.short_name || (is48Port ? "Gi0/47" : "Gi0/23")})
                         </span>
                       </div>
-                      <div style={{ display: "grid", gridTemplateColumns: `repeat(${numCols}, minmax(44px, 1fr))`, gap: "8px" }}>
+                      <div style={{ display: "grid", gridTemplateColumns: `repeat(${numCols}, minmax(36px, 1fr))`, gap: "6px" }}>
                         {topRowOddPorts.map(renderChassisPort)}
                       </div>
                     </div>
@@ -1125,59 +1316,220 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                       }}
                     />
 
-                    {/* BOTTOM ROW: EVEN NUMBERED PORTS (2, 4, 6 ... 24) */}
+                    {/* BOTTOM ROW: EVEN NUMBERED PORTS */}
                     <div>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
                         <span style={{ fontSize: "10px", fontWeight: "800", color: "#64748b", textTransform: "uppercase", letterSpacing: "1px" }}>
-                          ▼ Bottom Row (Even Ports: 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24)
+                          ▼ Bottom Row (Even Gigabit Ports: 2, 4, 6 ... {bottomRowEvenPorts[bottomRowEvenPorts.length - 1]?.short_name || (is48Port ? "Gi0/48" : "Gi0/24")})
                         </span>
                       </div>
-                      <div style={{ display: "grid", gridTemplateColumns: `repeat(${numCols}, minmax(44px, 1fr))`, gap: "8px" }}>
+                      <div style={{ display: "grid", gridTemplateColumns: `repeat(${numCols}, minmax(36px, 1fr))`, gap: "6px" }}>
                         {bottomRowEvenPorts.map(renderChassisPort)}
                       </div>
                     </div>
                   </div>
-                );
-              })()}
-            </div>
-          </div>
 
-          {/* PORTS TABLE */}
-          <div className="panel" style={{ padding: 0 }}>
-            <div style={{ padding: "16px 20px", borderBottom: "1px solid #e2e8f0" }}>
-              <div style={{ fontSize: "15px", fontWeight: "700", color: "#0f172a" }}>
-                Switch Interface Directory & VLAN Mapping
+                  {/* SFP+ 10G UPLINK CAGE BAY (Rendered on 48-port enterprise switches or when SFP cages present) */}
+                  {sfpPorts.length > 0 && (
+                    <div
+                      style={{
+                        borderLeft: "2px dashed #475569",
+                        paddingLeft: "16px",
+                        display: "flex",
+                        flexDirection: "column",
+                        justifyContent: "space-between",
+                        background: "rgba(30, 27, 75, 0.4)",
+                        borderRadius: "8px",
+                        padding: "10px",
+                        border: "1px solid #4338ca",
+                      }}
+                    >
+                      {/* SFP TOP ROW */}
+                      <div style={{ marginBottom: "6px" }}>
+                        <div style={{ fontSize: "10px", fontWeight: "800", color: "#c084fc", textTransform: "uppercase", letterSpacing: "1px", marginBottom: "4px" }}>
+                          ⚡ 10G SFP+ (Top)
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.max(1, sfpTopRow.length)}, minmax(48px, 1fr))`, gap: "6px" }}>
+                          {sfpTopRow.map(renderSfpPort)}
+                        </div>
+                      </div>
+
+                      {/* SFP RAIL */}
+                      <div
+                        style={{
+                          height: "6px",
+                          background: "#4338ca",
+                          borderRadius: "3px",
+                          margin: "8px 0",
+                        }}
+                      />
+
+                      {/* SFP BOTTOM ROW */}
+                      <div>
+                        <div style={{ fontSize: "10px", fontWeight: "800", color: "#c084fc", textTransform: "uppercase", letterSpacing: "1px", marginBottom: "4px" }}>
+                          ⚡ 10G SFP+ (Bottom)
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.max(1, sfpBottomRow.length)}, minmax(48px, 1fr))`, gap: "6px" }}>
+                          {sfpBottomRow.map(renderSfpPort)}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
-            <div className="table-responsive">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Interface</th>
-                    <th>Link Status</th>
-                    <th>Assigned VLAN</th>
-                    <th>Port Mode</th>
-                    <th>Speed / Duplex</th>
-                    <th>Connected Device MAC</th>
-                    {isAdmin && <th style={{ textAlign: "right" }}>Actions</th>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {ports.map((p) => {
-                    const theme = getVlanColor(p.vlan);
-                    const isTrunkPort = p.mode === "trunk" || !!p.is_uplink;
+            {/* PORTS TABLE */}
+            <div className="panel" style={{ padding: 0 }}>
+              <div style={{ padding: "16px 20px", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px" }}>
+                <div>
+                  <div style={{ fontSize: "15px", fontWeight: "700", color: "#0f172a" }}>
+                    Switch Interface Directory & VLAN Mapping
+                  </div>
+                  <div style={{ fontSize: "12px", color: "#64748b" }}>
+                    Showing {filteredPorts.length} of {ports.length} total interfaces
+                  </div>
+                </div>
 
-                    return (
-                      <tr key={p.port}>
-                        <td>
-                          <strong>{p.port}</strong>
-                          {isTrunkPort && (
-                            <span style={{ marginLeft: "6px", fontSize: "10px", background: "#f5f3ff", color: "#6d28d9", border: "1px solid #c4b5fd", padding: "1px 5px", borderRadius: "4px", fontWeight: "800" }}>
-                              UPLINK
-                            </span>
-                          )}
-                        </td>
+                {/* TABLE FILTER PILLS */}
+                <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
+                  <button
+                    type="button"
+                    onClick={() => setPortTableFilter("all")}
+                    style={{
+                      padding: "4px 10px",
+                      fontSize: "12px",
+                      fontWeight: "700",
+                      borderRadius: "6px",
+                      border: "none",
+                      cursor: "pointer",
+                      background: portTableFilter === "all" ? "#2563eb" : "#f1f5f9",
+                      color: portTableFilter === "all" ? "#ffffff" : "#475569",
+                    }}
+                  >
+                    All ({ports.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPortTableFilter("bank1")}
+                    style={{
+                      padding: "4px 10px",
+                      fontSize: "12px",
+                      fontWeight: "700",
+                      borderRadius: "6px",
+                      border: "none",
+                      cursor: "pointer",
+                      background: portTableFilter === "bank1" ? "#2563eb" : "#f1f5f9",
+                      color: portTableFilter === "bank1" ? "#ffffff" : "#475569",
+                    }}
+                  >
+                    Ports 1–24
+                  </button>
+                  {is48Port && (
+                    <button
+                      type="button"
+                      onClick={() => setPortTableFilter("bank2")}
+                      style={{
+                        padding: "4px 10px",
+                        fontSize: "12px",
+                        fontWeight: "700",
+                        borderRadius: "6px",
+                        border: "none",
+                        cursor: "pointer",
+                        background: portTableFilter === "bank2" ? "#2563eb" : "#f1f5f9",
+                        color: portTableFilter === "bank2" ? "#ffffff" : "#475569",
+                      }}
+                    >
+                      Ports 25–48
+                    </button>
+                  )}
+                  {sfpPorts.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setPortTableFilter("sfp")}
+                      style={{
+                        padding: "4px 10px",
+                        fontSize: "12px",
+                        fontWeight: "700",
+                        borderRadius: "6px",
+                        border: "none",
+                        cursor: "pointer",
+                        background: portTableFilter === "sfp" ? "#7c3aed" : "#f1f5f9",
+                        color: portTableFilter === "sfp" ? "#ffffff" : "#475569",
+                      }}
+                    >
+                      ⚡ 10G SFP+ ({sfpPorts.length})
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setPortTableFilter("trunk")}
+                    style={{
+                      padding: "4px 10px",
+                      fontSize: "12px",
+                      fontWeight: "700",
+                      borderRadius: "6px",
+                      border: "none",
+                      cursor: "pointer",
+                      background: portTableFilter === "trunk" ? "#7c3aed" : "#f1f5f9",
+                      color: portTableFilter === "trunk" ? "#ffffff" : "#475569",
+                    }}
+                  >
+                    Trunks
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPortTableFilter("quarantine")}
+                    style={{
+                      padding: "4px 10px",
+                      fontSize: "12px",
+                      fontWeight: "700",
+                      borderRadius: "6px",
+                      border: "none",
+                      cursor: "pointer",
+                      background: portTableFilter === "quarantine" ? "#ef4444" : "#f1f5f9",
+                      color: portTableFilter === "quarantine" ? "#ffffff" : "#475569",
+                    }}
+                  >
+                    Quarantine (90)
+                  </button>
+                </div>
+              </div>
+
+              <div className="table-responsive">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Interface</th>
+                      <th>Link Status</th>
+                      <th>Assigned VLAN</th>
+                      <th>Port Mode</th>
+                      <th>Speed / Duplex</th>
+                      <th>Connected Device MAC</th>
+                      {isAdmin && <th style={{ textAlign: "right" }}>Actions</th>}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredPorts.map((p) => {
+                      const theme = getVlanColor(p.vlan);
+                      const isTrunkPort = p.mode === "trunk" || !!p.is_uplink;
+                      const isSfp = p.is_sfp || String(p.port || "").toLowerCase().startsWith("te");
+
+                      return (
+                        <tr key={p.port}>
+                          <td>
+                            <strong>{p.port}</strong>
+                            {isSfp && (
+                              <span style={{ marginLeft: "6px", fontSize: "10px", background: "#f5f3ff", color: "#6d28d9", border: "1px solid #c4b5fd", padding: "1px 5px", borderRadius: "4px", fontWeight: "800" }}>
+                                ⚡ 10G SFP+
+                              </span>
+                            )}
+                            {isTrunkPort && !isSfp && (
+                              <span style={{ marginLeft: "6px", fontSize: "10px", background: "#f5f3ff", color: "#6d28d9", border: "1px solid #c4b5fd", padding: "1px 5px", borderRadius: "4px", fontWeight: "800" }}>
+                                UPLINK
+                              </span>
+                            )}
+                          </td>
                         <td>
                           {p.status === "connected" ? (
                             <span className="status-badge online" style={{ fontSize: "10px" }}>🟢 connected</span>
@@ -1261,7 +1613,8 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
             </div>
           </div>
         </div>
-      )}
+      );
+    })()}
 
       {/* ======================================================== */}
       {/* TAB 3: MULTI-VENDOR SWITCH CONFIGURATION (SETTINGS)      */}
@@ -1423,6 +1776,18 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                     value={switchForm.enable_secret}
                     onChange={(e) => setSwitchForm({ ...switchForm, enable_secret: e.target.value })}
                   />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Chassis Density & Port Count</label>
+                  <select
+                    className="login-input"
+                    value={switchForm.total_ports || 24}
+                    onChange={(e) => setSwitchForm({ ...switchForm, total_ports: parseInt(e.target.value, 10) || 24 })}
+                  >
+                    <option value={24}>24 Ports (Standard 1U Access Switch)</option>
+                    <option value={48}>48 Ports (Enterprise High-Density + 4x 10G SFP+ Uplinks)</option>
+                  </select>
                 </div>
               </div>
 

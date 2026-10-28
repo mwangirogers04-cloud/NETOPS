@@ -21,6 +21,7 @@ from ..services.switch.manager import (
     list_supported_switch_vendors,
     probe_switch_connection,
 )
+from ..services.switch.simulation_driver import SimulationSwitchDriver
 from ..services.switch_backup_service import (
     create_switch_backup,
     list_switch_backups,
@@ -91,6 +92,10 @@ class ConfigureUplinksRequest(BaseModel):
     ports: list[str] | None = None
     native_vlan: int = Field(1, ge=1, le=4094)
     mode: str = Field("trunk")
+
+
+class SetSwitchDensityRequest(BaseModel):
+    total_ports: int = Field(..., description="Switch chassis density: 24 or 48 ports")
 
 
 class SwitchBackupCreateRequest(BaseModel):
@@ -304,16 +309,17 @@ def get_active_switch(db: Session = Depends(get_db)):
     driver = get_active_switch_driver(db)
 
     test_res = driver.test_connection()
+    total_ports = active_cfg.total_ports if active_cfg else (getattr(driver, "get_total_ports", lambda: 24)())
     return {
         "has_active_switch": active_cfg is not None,
         "config": {
             "id": active_cfg.id if active_cfg else None,
-            "name": active_cfg.name if active_cfg else "Default Switch Environment / Simulator",
+            "name": active_cfg.name if active_cfg else f"Default Switch Environment / Simulator ({total_ports}-Port)",
             "vendor": active_cfg.vendor if active_cfg else driver.get_vendor_id(),
             "management_ip": active_cfg.management_ip if active_cfg else "127.0.0.1",
             "port": active_cfg.port if active_cfg else 22,
-            "model": active_cfg.model if active_cfg else "Catalyst 2960-X",
-            "total_ports": active_cfg.total_ports if active_cfg else 24,
+            "model": active_cfg.model if active_cfg else ("Cisco Catalyst 2960X-48TS-L" if total_ports == 48 else "Catalyst 2960-X"),
+            "total_ports": total_ports,
         },
         "driver_title": driver.get_vendor_title(),
         "connection": test_res,
@@ -552,10 +558,55 @@ def delete_switch_vlan(
 # -------------------------------------------------------------
 
 @router.get("/ports")
-def list_switch_ports(db: Session = Depends(get_db)):
+def list_switch_ports(
+    density: int | None = None,
+    db: Session = Depends(get_db),
+):
     """Retrieve all physical switch ports with their assigned VLANs and link status."""
+    if density in (24, 48):
+        SimulationSwitchDriver.reprovision_ports(density)
     driver = get_active_switch_driver(db)
     return driver.get_interfaces()
+
+
+@router.post("/ports/density")
+def set_switch_density(
+    req: SetSwitchDensityRequest,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Switch chassis density between 24-Port and 48-Port layouts dynamically.
+    Enables support for companies with 48-port switches or 24-port switches.
+    """
+    target_density = 48 if req.total_ports == 48 else 24
+    SimulationSwitchDriver.reprovision_ports(target_density)
+
+    # Also update active switch config if one exists
+    active_cfg = db.scalar(select(SwitchConfig).where(SwitchConfig.is_active == True).limit(1))
+    if active_cfg:
+        active_cfg.total_ports = target_density
+        if target_density == 48 and "24" in (active_cfg.model or ""):
+            active_cfg.model = active_cfg.model.replace("24", "48")
+        elif target_density == 24 and "48" in (active_cfg.model or ""):
+            active_cfg.model = active_cfg.model.replace("48", "24")
+        db.commit()
+
+    create_event(
+        db=db,
+        event_type="switch_density_changed",
+        message=f"Switch chassis density updated to {target_density} ports by {current_user.role} '{current_user.username}'.",
+        device_id=None,
+        actor=current_user.username,
+    )
+    db.commit()
+
+    return {
+        "success": True,
+        "total_ports": target_density,
+        "message": f"Switch chassis successfully configured for {target_density}-Port layout.",
+        "interfaces_count": len(SimulationSwitchDriver._ports_cache),
+    }
 
 
 @router.post("/ports/assign")
@@ -598,8 +649,10 @@ def configure_switch_uplinks(
     db: Session = Depends(get_db),
 ):
     """
-    Automatically configure the last two ports of the switch chassis as 802.1Q Trunk Uplinks.
-    Carries all active VLANs to another switch or core router.
+    Automatically configure the uplink trunk ports of the switch chassis as 802.1Q Trunk Uplinks.
+    On 48-port enterprise switches, targets SFP+ 10G uplink cages (or copper uplinks).
+    On 24-port switches, targets the last 2 ports (e.g. Ports 23 & 24).
+    Carries all active VLANs to upstream distribution switch, core router, or firewall.
     """
     native_vlan = req.native_vlan if req else 1
     mode = req.mode if req else "trunk"
@@ -609,20 +662,34 @@ def configure_switch_uplinks(
     if not interfaces:
         raise HTTPException(status_code=400, detail="No interfaces available on active switch.")
 
-    # Target the last two ports of the switch (e.g. Ports 23 & 24 on a 24-port switch)
     if req and req.ports:
         target_ports = req.ports
     else:
-        def get_port_num(p: dict[str, Any]) -> int:
-            import re
-            m = re.search(r"(\d+)$", p.get("port", ""))
-            return int(m.group(1)) if m else 0
+        def is_sfp_or_10g(p: dict[str, Any]) -> bool:
+            if p.get("is_sfp"):
+                return True
+            p_name = p.get("port", "").lower()
+            s_name = p.get("short_name", "").lower()
+            return (
+                p_name.startswith("tengigabit")
+                or s_name.startswith("te")
+                or "sfp" in p.get("type", "").lower()
+            )
 
-        sorted_interfaces = sorted(interfaces, key=get_port_num)
-        if len(sorted_interfaces) >= 2:
-            target_ports = [sorted_interfaces[-2]["port"], sorted_interfaces[-1]["port"]]
+        sfp_ports = [p["port"] for p in interfaces if is_sfp_or_10g(p)]
+        if sfp_ports:
+            target_ports = sfp_ports
         else:
-            target_ports = [sorted_interfaces[-1]["port"]]
+            def get_port_num(p: dict[str, Any]) -> int:
+                import re
+                m = re.search(r"(\d+)$", p.get("port", ""))
+                return int(m.group(1)) if m else 0
+
+            sorted_interfaces = sorted(interfaces, key=get_port_num)
+            if len(sorted_interfaces) >= 2:
+                target_ports = [sorted_interfaces[-2]["port"], sorted_interfaces[-1]["port"]]
+            else:
+                target_ports = [sorted_interfaces[-1]["port"]]
 
     results = []
     for p_name in target_ports:

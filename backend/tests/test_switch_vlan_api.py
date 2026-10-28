@@ -563,5 +563,84 @@ def test_update_vlan_custom_department(client, db_session):
     assert v35["subnet"] == "192.168.35.0/24"
 
 
+def test_switch_density_48_ports_and_sfp_uplinks(client, db_session):
+    """
+    Test switching chassis density dynamically between 24-Port and 48-Port layouts.
+    Verifies 48-port high-density layout with 48 copper ports and 4 SFP+ 10G uplink cages.
+    """
+    admin = User(
+        username="chassis_admin",
+        email="chassis_admin@netops.local",
+        hashed_password=hash_password("Admin@1234"),
+        role="admin",
+        is_active=True,
+        is_verified=True,
+    )
+    db_session.add(admin)
+    db_session.commit()
+
+    token = create_access_token({"sub": admin.username, "role": admin.role, "user_id": admin.id})
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # 1. Switch density to 48 ports
+    density_res = client.post(
+        "/switches/ports/density",
+        headers=headers,
+        json={"total_ports": 48},
+    )
+    assert density_res.status_code == 200
+    density_data = density_res.json()
+    assert density_data["success"] is True
+    assert density_data["total_ports"] == 48
+
+    # 2. Verify ports endpoint returns 48 Gigabit copper ports + 4 SFP+ 10G uplink cages
+    ports_res = client.get("/switches/ports")
+    assert ports_res.status_code == 200
+    ports = ports_res.json()
+    assert len(ports) == 52  # 48 copper + 4 SFP+ cages
+
+    gi1 = next((p for p in ports if p["port"] == "GigabitEthernet0/1"), None)
+    gi48 = next((p for p in ports if p["port"] == "GigabitEthernet0/48"), None)
+    te49 = next((p for p in ports if p["port"] == "TenGigabitEthernet0/49"), None)
+    te52 = next((p for p in ports if p["port"] == "TenGigabitEthernet0/52"), None)
+
+    assert gi1 is not None and gi1["short_name"] == "Gi0/1"
+    assert gi48 is not None and gi48["short_name"] == "Gi0/48"
+    assert te49 is not None and te49["short_name"] == "Te0/49" and te49["is_sfp"] is True
+    assert te52 is not None and te52["short_name"] == "Te0/52" and te52["is_sfp"] is True
+
+    # 3. Test active switch metadata reflects 48 ports
+    active_res = client.get("/switches/active")
+    assert active_res.status_code == 200
+    active_data = active_res.json()
+    assert active_data["config"]["total_ports"] == 48
+
+    # 4. Test configure uplinks on 48-port switch targets SFP+ cages
+    uplink_res = client.post(
+        "/switches/ports/configure-uplinks",
+        headers=headers,
+        json={"native_vlan": 1, "mode": "trunk"},
+    )
+    assert uplink_res.status_code == 200
+    uplink_data = uplink_res.json()
+    assert uplink_data["success"] is True
+    assert any("TenGigabitEthernet0/49" in p for p in uplink_data["ports"])
+
+    # 5. Switch back to 24 ports and verify clean transition
+    back_res = client.post(
+        "/switches/ports/density",
+        headers=headers,
+        json={"total_ports": 24},
+    )
+    assert back_res.status_code == 200
+    assert back_res.json()["total_ports"] == 24
+
+    ports_24 = client.get("/switches/ports").json()
+    assert len(ports_24) == 24
+    assert any(p["port"] == "GigabitEthernet0/24" for p in ports_24)
+    assert not any("TenGigabitEthernet" in p["port"] for p in ports_24)
+
+
+
 
 

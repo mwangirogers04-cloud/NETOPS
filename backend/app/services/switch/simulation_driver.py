@@ -21,26 +21,93 @@ class SimulationSwitchDriver(BaseSwitchDriver):
     """
     Simulated switch driver providing in-memory state for development,
     demonstration, and environments where physical switch hardware is offline.
+    Supports dynamic chassis density: 24-Port and 48-Port Enterprise layouts.
     """
 
     _vlans_cache: list[dict[str, Any]] = []
     _ports_cache: list[dict[str, Any]] = []
+    _current_density: int = 24
 
     def __init__(self, config: Any | None = None):
         super().__init__(config)
-        self._init_state()
+        if config:
+            if isinstance(config, dict):
+                density = config.get("total_ports") or self.__class__._current_density
+            else:
+                density = getattr(config, "total_ports", None) or self.__class__._current_density
+        else:
+            density = self.__class__._current_density
+        density = 48 if density == 48 else 24
+        self._init_state(density)
 
     @classmethod
-    def _init_state(cls):
-        if not cls._vlans_cache:
-            cls._vlans_cache = [dict(v) for v in DEFAULT_SIMULATED_VLANS]
+    def generate_simulated_ports(cls, total_ports: int = 24) -> list[dict[str, Any]]:
+        ports = []
+        if total_ports == 48:
+            # 48 Gigabit Ethernet ports (Gi0/1 - Gi0/48)
+            for i in range(1, 49):
+                name = f"GigabitEthernet0/{i}"
+                short_name = f"Gi0/{i}"
+                if 1 <= i <= 6:
+                    vlan = 10
+                elif 7 <= i <= 24:
+                    vlan = 20
+                elif 25 <= i <= 28:
+                    vlan = 30
+                elif 29 <= i <= 32:
+                    vlan = 40
+                elif 33 <= i <= 38:
+                    vlan = 50
+                elif 39 <= i <= 42:
+                    vlan = 60
+                elif 43 <= i <= 44:
+                    vlan = 90
+                else:
+                    vlan = 1
 
-        if not cls._ports_cache:
-            ports = []
+                # Ports 47 and 48 are default copper trunk uplinks
+                is_uplink = (i in (47, 48))
+                mode = "trunk" if is_uplink else "access"
+                status = "connected" if (i <= 28 or is_uplink) else "notconnect"
+                ports.append({
+                    "port": name,
+                    "short_name": short_name,
+                    "status": status,
+                    "vlan": vlan,
+                    "duplex": "a-full" if status == "connected" else "auto",
+                    "speed": "a-1000" if status == "connected" else "auto",
+                    "type": "10/100/1000BaseTX",
+                    "mode": mode,
+                    "is_uplink": is_uplink,
+                    "is_sfp": False,
+                    "allowed_vlans": "ALL (1-4094)" if is_uplink else f"VLAN {vlan}",
+                    "connected_mac": f"AA:BB:CC:DD:EE:{i:02X}" if status == "connected" else None,
+                })
+
+            # 4 SFP+ 10-Gigabit Uplink Cages (Te0/49 .. Te0/52)
+            for j, sfp_id in enumerate(range(49, 53), start=1):
+                name = f"TenGigabitEthernet0/{sfp_id}"
+                short_name = f"Te0/{sfp_id}"
+                sfp_status = "connected" if j <= 2 else "notconnect"
+                ports.append({
+                    "port": name,
+                    "short_name": short_name,
+                    "status": sfp_status,
+                    "vlan": 1,
+                    "duplex": "full" if sfp_status == "connected" else "auto",
+                    "speed": "10000" if sfp_status == "connected" else "auto",
+                    "type": "10GBase-SR/LR SFP+",
+                    "mode": "trunk",
+                    "is_uplink": True,
+                    "is_sfp": True,
+                    "allowed_vlans": "ALL (1-4094)",
+                    "connected_mac": f"CC:10:DE:AD:00:{sfp_id:02X}" if sfp_status == "connected" else None,
+                })
+        else:
+            # 24 Gigabit Ethernet ports (Gi0/1 - Gi0/24)
             for i in range(1, 25):
                 name = f"GigabitEthernet0/{i}"
                 short_name = f"Gi0/{i}"
-                vlan = 20
                 if i in (1, 2, 3):
                     vlan = 10
                 elif i in (4, 5, 6, 7, 8):
@@ -72,26 +139,48 @@ class SimulationSwitchDriver(BaseSwitchDriver):
                     "type": "10/100/1000BaseTX",
                     "mode": mode,
                     "is_uplink": is_uplink,
+                    "is_sfp": False,
                     "allowed_vlans": "ALL (1-4094)" if is_uplink else f"VLAN {vlan}",
                     "connected_mac": f"AA:BB:CC:DD:EE:{i:02X}" if status == "connected" else None,
                 })
-            cls._ports_cache = ports
+        return ports
+
+    @classmethod
+    def reprovision_ports(cls, total_ports: int = 24):
+        """Reprovision the in-memory switch ports cache to match 24 or 48 ports."""
+        total_ports = 48 if total_ports == 48 else 24
+        cls._current_density = total_ports
+        cls._ports_cache = cls.generate_simulated_ports(total_ports)
+
+    @classmethod
+    def _init_state(cls, requested_ports: int = 24):
+        if not cls._vlans_cache:
+            cls._vlans_cache = [dict(v) for v in DEFAULT_SIMULATED_VLANS]
+
+        if not cls._ports_cache or cls._current_density != requested_ports:
+            cls.reprovision_ports(requested_ports)
+
+    def get_total_ports(self) -> int:
+        return getattr(self.__class__, "_current_density", 24) or 24
 
     def get_vendor_id(self) -> str:
         return "simulation"
 
     def get_vendor_title(self) -> str:
-        return "Software Switch Simulator (Netmiko/Cisco Emulation)"
+        density = self.get_total_ports()
+        return f"Software Switch Simulator (Netmiko/Cisco Emulation - {density} Ports)"
 
     def test_connection(self) -> dict[str, Any]:
+        density = self.get_total_ports()
+        model_name = "Cisco Catalyst 2960X-48TS-L (Simulated)" if density == 48 else "Cisco Catalyst 2960-X (Simulated)"
         return {
             "success": True,
             "status": "connected",
-            "message": "Successfully connected to Simulated Switch (Cisco IOS-XE Emulation)",
+            "message": f"Successfully connected to Simulated Switch (Cisco IOS-XE Emulation - {density}-Port Chassis)",
             "vendor": "simulation",
-            "switch_model": "Cisco Catalyst 2960-X (Simulated)",
+            "switch_model": model_name,
             "version": "15.2(7)E3",
-            "total_ports": 24,
+            "total_ports": density,
             "vlans_count": len(self._vlans_cache),
         }
 
@@ -228,11 +317,14 @@ class SimulationSwitchDriver(BaseSwitchDriver):
         switch_name = getattr(self.config, "name", "Core-Switch-1") or "Core-Switch-1"
         hostname = switch_name.replace(" ", "-").replace("(", "").replace(")", "").upper()
         mgmt_ip = getattr(self.config, "management_ip", "192.168.0.2") or "192.168.0.2"
-        model = getattr(self.config, "model", "WS-C2960X-24TS-L") or "WS-C2960X-24TS-L"
+        density = self.get_total_ports()
+        default_model = "WS-C2960X-48TS-L" if density == 48 else "WS-C2960X-24TS-L"
+        model = getattr(self.config, "model", None) or default_model
 
         lines = [
             f"! Current configuration : Cisco IOS Software, C2960X Software (C2960X-UNIVERSALK9-M), Version 15.2(7)E7",
             f"! Technical Support: http://www.cisco.com/techsupport",
+            f"! Device Model: {model} ({density} Ports)",
             f"! Managed by NETOPS Network Operations Platform",
             f"!",
             f"version 15.2",
