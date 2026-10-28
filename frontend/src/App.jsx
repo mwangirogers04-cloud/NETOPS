@@ -4,6 +4,7 @@ import UsersPage from "./components/UsersPage";
 import SwitchVlanPage from "./components/SwitchVlanPage";
 import NetworkTopologyMap from "./components/NetworkTopologyMap";
 import { NETOPS_FAQS, FAQ_CATEGORIES } from "./data/faqs";
+import { getDeviceInternetStatus, DeviceInterfaceBadge } from "./utils/networkInterfaceStatus";
 
 const API_URL =
   window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
@@ -2446,6 +2447,9 @@ const DevicesPage = () => {
                             device.ip_address ||
                             device.mac_address}
                         </strong>
+                        <div style={{ marginTop: "3px" }}>
+                          <DeviceInterfaceBadge device={device} compact={true} />
+                        </div>
                       </td>
 
                       <td>
@@ -2566,6 +2570,9 @@ const DevicesPage = () => {
                         </div>
                         <div className="device-secondary">
                           {device.ip_address || "-"} • {device.mac_address || "-"}
+                        </div>
+                        <div style={{ marginTop: "3px" }}>
+                          <DeviceInterfaceBadge device={device} compact={true} />
                         </div>
                       </td>
 
@@ -3173,6 +3180,10 @@ const DevicesPage = () => {
                         {device.mac_address || "-"}
                       </div>
 
+                      <div style={{ marginTop: "4px" }}>
+                        <DeviceInterfaceBadge device={device} compact={true} />
+                      </div>
+
                       {(isDeviceScheduledForUpdates(device) || isDeviceScheduledForAccess(device)) && (
                         <div style={{ display: "flex", gap: "4px", flexWrap: "wrap", marginTop: "4px" }}>
                           {isDeviceScheduledForUpdates(device) && (
@@ -3228,7 +3239,7 @@ const DevicesPage = () => {
                             padding: "2px 8px",
                           }}
                         >
-                          <span className="status-dot online" /> ONLINE
+                          <span className="status-dot online" /> ONLINE ({getDeviceInternetStatus(device).isWireless ? "📶 Wi-Fi" : "🔌 Wired"})
                         </span>
                       ) : (
                         <div style={{ display: "inline-flex", flexDirection: "column", gap: "4px", alignItems: "flex-start" }}>
@@ -3243,7 +3254,7 @@ const DevicesPage = () => {
                               padding: "2px 8px",
                             }}
                           >
-                            <span className="status-dot offline" /> OFFLINE
+                            <span className="status-dot offline" /> OFFLINE ({getDeviceInternetStatus(device).isWireless ? "📶 Wi-Fi Disconnected" : "🔌 Cable Disconnected"})
                           </span>
                           <button
                             type="button"
@@ -3506,15 +3517,44 @@ const DevicesPage = () => {
                       )}
                     </td>
                     <td>
-                      {device.internet_access_authorized ? (
-                        <span className="status-badge allowed">
-                          Authorized
-                        </span>
-                      ) : (
-                        <span className="status-badge blocked">
-                          Not Authorized
-                        </span>
-                      )}
+                      {(() => {
+                        const istat = getDeviceInternetStatus(device);
+                        if (device.internet_access_authorized && !istat.hasNoInternet) {
+                          return (
+                            <span
+                              className="status-badge allowed"
+                              style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}
+                              title="Internet access is permitted and actively routed"
+                            >
+                              <span>{istat.isWireless ? "📶🌐" : "🔌🌐"}</span>
+                              Authorized
+                            </span>
+                          );
+                        }
+                        return (
+                          <div style={{ display: "flex", flexDirection: "column", gap: "2px", alignItems: "flex-start" }}>
+                            <span
+                              className="status-badge blocked"
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "4px",
+                                background: istat.badgeBg,
+                                borderColor: istat.badgeBorder,
+                                color: istat.badgeColor,
+                                fontWeight: "700",
+                              }}
+                              title={istat.reason}
+                            >
+                              <span>{istat.statusIcon}</span>
+                              No Internet
+                            </span>
+                            <span style={{ fontSize: "10px", color: istat.badgeColor, fontWeight: "600" }}>
+                              {istat.shortReason}
+                            </span>
+                          </div>
+                        );
+                      })()}
                     </td>
 
                     <td>
@@ -4290,26 +4330,7 @@ const LanScannerPage = () => {
                                   {device.vendor}
                                 </span>
                               )}
-                              <span
-                                style={{
-                                  fontSize: "10px",
-                                  padding: "1px 6px",
-                                  borderRadius: "4px",
-                                  background:
-                                    device.network_interface === "wlan0"
-                                      ? "rgba(16, 185, 129, 0.2)"
-                                      : "rgba(59, 130, 246, 0.2)",
-                                  color:
-                                    device.network_interface === "wlan0"
-                                      ? "#34d399"
-                                      : "#2563eb",
-                                  fontWeight: "700",
-                                }}
-                              >
-                                {device.network_interface === "wlan0"
-                                  ? "📶 WLAN0 (Wi-Fi)"
-                                  : `🔌 ${(device.network_interface || "eth0").toUpperCase()} (LAN)`}
-                              </span>
+                              <DeviceInterfaceBadge device={device} compact={true} />
                               <span
                                 style={{
                                   fontSize: "10px",
@@ -4347,7 +4368,7 @@ const LanScannerPage = () => {
                               padding: "2px 8px",
                             }}
                           >
-                            <span className="status-dot online" /> ONLINE
+                            <span className="status-dot online" /> ONLINE ({getDeviceInternetStatus(device).isWireless ? "📶 Wi-Fi" : "🔌 Wired"})
                           </span>
                         ) : (
                           <div style={{ display: "inline-flex", flexDirection: "column", gap: "4px", alignItems: "flex-start" }}>
@@ -4362,7 +4383,7 @@ const LanScannerPage = () => {
                                 padding: "2px 8px",
                               }}
                             >
-                              <span className="status-dot offline" /> OFFLINE
+                              <span className="status-dot offline" /> OFFLINE ({getDeviceInternetStatus(device).isWireless ? "📶 Wi-Fi Disconnected" : "🔌 Cable Disconnected"})
                             </span>
                             <button
                               type="button"
@@ -4489,47 +4510,64 @@ const LanScannerPage = () => {
 
                       {/* FIREWALL ACCESS */}
                       <td>
-                        <div>
-                          {isAllowed ? (
-                            <span
-                              style={{
-                                color: "#10b981",
-                                fontWeight: "700",
-                                display: "inline-flex",
-                                alignItems: "center",
-                                gap: "6px",
-                                fontSize: "12px",
-                              }}
-                            >
-                              <span className="status-dot online" /> {isDeviceScheduledForAccess(device) ? "🟢 Allowed (Scheduled)" : "Allowed"}
-                            </span>
-                          ) : (
-                            <span
-                              style={{
-                                color: "#ef4444",
-                                fontWeight: "700",
-                                display: "inline-flex",
-                                alignItems: "center",
-                                gap: "6px",
-                                fontSize: "12px",
-                              }}
-                            >
-                              <span className="status-dot offline" /> {isDeviceScheduledForAccess(device) ? "🕒 Quarantined (Scheduled)" : "Quarantined"}
-                            </span>
-                          )}
-
-                          <div
-                            style={{
-                              fontSize: "11px",
-                              color: "#64748b",
-                              marginTop: "2px",
-                            }}
-                          >
-                            {isAllowed
-                              ? "Firewall: Active Traffic"
-                              : "Firewall: Dropped by Rule"}
-                          </div>
-                          {schedule && schedule.is_active && (
+                        {(() => {
+                          const istat = getDeviceInternetStatus(device);
+                          if (isAllowed && !istat.hasNoInternet) {
+                            return (
+                              <div>
+                                <span
+                                  style={{
+                                    color: "#10b981",
+                                    fontWeight: "700",
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: "6px",
+                                    fontSize: "12px",
+                                  }}
+                                >
+                                  <span className="status-dot online" /> {istat.statusIcon} {isDeviceScheduledForAccess(device) ? "🟢 Allowed (Scheduled)" : "Allowed"}
+                                </span>
+                                <div
+                                  style={{
+                                    fontSize: "11px",
+                                    color: "#64748b",
+                                    marginTop: "2px",
+                                  }}
+                                >
+                                  Firewall: Active Traffic ({istat.ifaceLabel})
+                                </div>
+                              </div>
+                            );
+                          }
+                          return (
+                            <div>
+                              <span
+                                style={{
+                                  color: istat.badgeColor,
+                                  fontWeight: "700",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "6px",
+                                  fontSize: "12px",
+                                }}
+                                title={istat.reason}
+                              >
+                                <span className="status-dot offline" /> {istat.statusIcon} {isDeviceScheduledForAccess(device) ? "🕒 Quarantined (Scheduled)" : `No Internet (${istat.shortReason})`}
+                              </span>
+                              <div
+                                style={{
+                                  fontSize: "11px",
+                                  color: istat.badgeColor,
+                                  marginTop: "2px",
+                                  fontWeight: "600",
+                                }}
+                              >
+                                Firewall: Blocked / {istat.shortReason}
+                              </div>
+                            </div>
+                          );
+                        })()}
+                        {schedule && schedule.is_active && (
                             <div
                               style={{
                                 fontSize: "11px",
@@ -4541,7 +4579,6 @@ const LanScannerPage = () => {
                               ⏱️ {schedule.start_time} - {schedule.end_time}
                             </div>
                           )}
-                        </div>
                       </td>
 
                       {/* ACTIONS */}

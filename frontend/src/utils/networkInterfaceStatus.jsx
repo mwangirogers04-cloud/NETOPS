@@ -1,0 +1,170 @@
+import React from "react";
+
+/**
+ * Computes network interface type and real-time internet connectivity status
+ * for any LAN or WLAN (Wi-Fi) device.
+ *
+ * Honors the security invariant:
+ * A device connected to WLAN0 or ETH0 has NO INTERNET ACCESS when:
+ * 1. It is Quarantined (enforcement_status == "quarantined" or vlan_id == 90 or access_decision == "quarantine")
+ * 2. It is Security Isolated (enforcement_status == "isolated" or access_decision == "isolated")
+ * 3. It is Disconnected / Offline (status == "offline" or status == "disconnected")
+ * 4. It is Pending / Unapproved (approval_status == "pending" or rejected or not approved)
+ * 5. It is Unauthorized (internet_access_authorized == false)
+ */
+export const getDeviceInternetStatus = (device) => {
+  if (!device) {
+    return {
+      isWireless: false,
+      hasNoInternet: true,
+      reason: "Device data unavailable",
+      shortReason: "Offline",
+      statusIcon: "🔌⚪",
+      badgeColor: "#64748b",
+      badgeBg: "rgba(100, 116, 139, 0.15)",
+      badgeBorder: "#94a3b8",
+      ifaceLabel: "LAN (eth0)",
+    };
+  }
+
+  const iface = device.network_interface || "";
+  const isWireless = Boolean(
+    iface === "wlan0" ||
+    iface.startsWith("wl") ||
+    device.medium === "wireless" ||
+    ["access_point", "ap", "wifi_ap", "smartphone", "phone", "mobile"].includes(device.device_type)
+  );
+
+  const isDisconnected = device.status === "offline" || device.status === "disconnected";
+  const isQuarantined =
+    device.enforcement_status === "quarantined" ||
+    device.vlan_id === 90 ||
+    device.access_decision === "quarantine";
+  const isIsolated =
+    device.enforcement_status === "isolated" ||
+    device.access_decision === "isolated" ||
+    device.status === "isolated";
+  const isPending =
+    device.approval_status === "pending" ||
+    device.approval_status === "rejected" ||
+    (device.approval_status && device.approval_status !== "approved");
+  const isUnauthorized = device.internet_access_authorized === false;
+
+  const hasNoInternet = isDisconnected || isQuarantined || isIsolated || isPending || isUnauthorized;
+
+  let reason = "Internet Access Active";
+  let shortReason = "Active";
+  let statusIcon = isWireless ? "📶" : "🔌";
+  let badgeColor = "#059669";
+  let badgeBg = "rgba(16, 185, 129, 0.15)";
+  let badgeBorder = "#10b981";
+
+  if (isDisconnected) {
+    reason = isWireless ? "Wi-Fi Disconnected / Offline" : "Wired Cable Disconnected / Offline";
+    shortReason = "Offline";
+    statusIcon = isWireless ? "📶⚪" : "🔌⚪";
+    badgeColor = "#64748b";
+    badgeBg = "rgba(100, 116, 139, 0.15)";
+    badgeBorder = "#94a3b8";
+  } else if (isQuarantined) {
+    reason = "Quarantined in VLAN 90 (Zero-Trust NAC: No Internet Access)";
+    shortReason = "Quarantined (VLAN 90)";
+    statusIcon = isWireless ? "📶🚫" : "🔌🚫";
+    badgeColor = "#dc2626";
+    badgeBg = "rgba(220, 38, 38, 0.15)";
+    badgeBorder = "#ef4444";
+  } else if (isIsolated) {
+    reason = "Isolated by Security Policy (No Internet Access)";
+    shortReason = "Isolated";
+    statusIcon = isWireless ? "📶🔒" : "🔌🔒";
+    badgeColor = "#9333ea";
+    badgeBg = "rgba(147, 51, 234, 0.15)";
+    badgeBorder = "#a855f7";
+  } else if (isPending) {
+    reason = "Pending Approval (Unapproved Device: No Internet Access)";
+    shortReason = "Pending Approval";
+    statusIcon = isWireless ? "📶⚠️" : "🔌⚠️";
+    badgeColor = "#d97706";
+    badgeBg = "rgba(217, 119, 6, 0.15)";
+    badgeBorder = "#f59e0b";
+  } else if (isUnauthorized) {
+    reason = "Internet Access Not Authorized (Firewall Blocked)";
+    shortReason = "Not Authorized";
+    statusIcon = isWireless ? "📶🚫" : "🔌🚫";
+    badgeColor = "#dc2626";
+    badgeBg = "rgba(220, 38, 38, 0.15)";
+    badgeBorder = "#ef4444";
+  }
+
+  const ifaceLabel = isWireless ? "WLAN0 (Wi-Fi)" : `${(iface || "eth0").toUpperCase()} (LAN)`;
+
+  return {
+    isWireless,
+    hasNoInternet,
+    isDisconnected,
+    isQuarantined,
+    isIsolated,
+    isPending,
+    isUnauthorized,
+    reason,
+    shortReason,
+    statusIcon,
+    badgeColor,
+    badgeBg,
+    badgeBorder,
+    ifaceLabel,
+  };
+};
+
+export const DeviceInterfaceBadge = ({ device, compact = false }) => {
+  const status = getDeviceInternetStatus(device);
+  return (
+    <span
+      style={{
+        fontSize: compact ? "10px" : "11px",
+        padding: compact ? "1px 6px" : "2px 8px",
+        borderRadius: "4px",
+        background: status.badgeBg,
+        color: status.badgeColor,
+        border: `1px solid ${status.badgeBorder}`,
+        fontWeight: "700",
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "4px",
+        verticalAlign: "middle",
+      }}
+      title={`${status.ifaceLabel} • ${status.reason}`}
+    >
+      <span style={{ fontSize: compact ? "11px" : "13px" }}>{status.statusIcon}</span>
+      <span>{status.ifaceLabel}</span>
+      {status.hasNoInternet ? (
+        <span
+          style={{
+            fontSize: "9px",
+            padding: "1px 5px",
+            borderRadius: "3px",
+            background: status.badgeColor,
+            color: "#ffffff",
+            fontWeight: "800",
+            letterSpacing: "0.2px",
+          }}
+        >
+          NO INTERNET
+        </span>
+      ) : (
+        <span
+          style={{
+            fontSize: "9px",
+            padding: "1px 5px",
+            borderRadius: "3px",
+            background: "#059669",
+            color: "#ffffff",
+            fontWeight: "800",
+          }}
+        >
+          INTERNET ACTIVE
+        </span>
+      )}
+    </span>
+  );
+};

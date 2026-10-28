@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
+import { getDeviceInternetStatus, DeviceInterfaceBadge } from "../utils/networkInterfaceStatus";
 
 export default function NetworkTopologyMap({
   API_URL,
@@ -538,9 +539,10 @@ export default function NetworkTopologyMap({
                                   <div style={{ fontSize: "11px", fontWeight: "700", color: "#0f172a", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                                     {d.hostname || d.ip_address || "LAN Device"}
                                   </div>
-                                  <div style={{ fontSize: "10px", color: "#64748b", fontFamily: "monospace" }}>
+                                  <div style={{ fontSize: "10px", color: "#64748b", fontFamily: "monospace", marginBottom: "3px" }}>
                                     {d.ip_address || "No IP"}
                                   </div>
+                                  <DeviceInterfaceBadge device={d} compact={true} />
                                 </div>
                                 <div>
                                   <span
@@ -668,6 +670,14 @@ export default function NetworkTopologyMap({
                   <div style={{ color: "#64748b", fontSize: "10px" }}>VENDOR &amp; HARDWARE TYPE</div>
                   <div style={{ fontWeight: "700" }}>
                     {selectedNode.data.vendor || "Generic Hardware"} ({selectedNode.data.device_type || "computer"})
+                  </div>
+                </div>
+
+                <div style={{ background: "#f8fafc", padding: "8px 10px", borderRadius: "6px" }}>
+                  <div style={{ color: "#64748b", fontSize: "10px", marginBottom: "4px" }}>NETWORK INTERFACE &amp; INTERNET ACCESS</div>
+                  <DeviceInterfaceBadge device={selectedNode.data} />
+                  <div style={{ fontSize: "11px", color: getDeviceInternetStatus(selectedNode.data).badgeColor, marginTop: "4px", fontWeight: "600" }}>
+                    {getDeviceInternetStatus(selectedNode.data).reason}
                   </div>
                 </div>
 

@@ -727,9 +727,10 @@ def save_discovered_devices(
                 except Exception:
                     pass
                 if not is_still_reachable:
-                    preferred_iface = existing_device.network_interface or scanned_interface or "eth0"
+                    fallback_iface = get_default_interface()
+                    preferred_iface = existing_device.network_interface or (scanned_interface if scanned_interface and scanned_interface != "all" else fallback_iface)
                     ifaces_to_try = [preferred_iface]
-                    for alt_iface in ("eth0", "wlan0"):
+                    for alt_iface in ("wlan0", "eth0"):
                         if alt_iface not in ifaces_to_try:
                             ifaces_to_try.append(alt_iface)
 
@@ -927,7 +928,7 @@ def save_discovered_devices(
             if vendor:
                 existing_device.vendor = vendor
 
-            disc_iface = discovered.get("interface") or scanned_interface
+            disc_iface = discovered.get("interface") or (scanned_interface if scanned_interface and scanned_interface != "all" else get_default_interface())
             if disc_iface:
                 existing_device.network_interface = disc_iface
 
@@ -1108,7 +1109,7 @@ def save_discovered_devices(
                 hostname=hostname,
                 vendor=vendor,
                 device_type=device_type,
-                network_interface=discovered.get("interface") or scanned_interface,
+                network_interface=discovered.get("interface") or (scanned_interface if scanned_interface and scanned_interface != "all" else get_default_interface()),
                 classification_status="normal",
                 status="offline",
                 approval_status="pending",
