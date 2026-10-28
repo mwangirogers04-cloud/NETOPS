@@ -397,6 +397,11 @@ function App() {
         }
         if (Array.isArray(data.interfaces)) {
           setDetectedInterfaces(data.interfaces);
+          const physicalIfaces = data.interfaces.filter((i) => !i.is_virtual);
+          // If the only active physical interface is wireless (e.g. wlan0), auto-focus it
+          if (physicalIfaces.length === 1 && physicalIfaces[0].is_wireless) {
+            setSelectedInterface(physicalIfaces[0].interface);
+          }
         }
       }
     } catch (err) {
@@ -2300,18 +2305,21 @@ const DevicesPage = () => {
             </div>
           </div>
 
-          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
             <button
               className="primary-button"
               type="button"
-              onClick={() => scanAllLanDevices(detectedSubnet, "eth0")}
+              onClick={() => {
+                setSelectedInterface("all");
+                scanAllLanDevices(detectedSubnet, "all");
+              }}
               disabled={lanDevicesScanning}
               style={{
                 fontWeight: "700",
-                background: selectedInterface === "eth0" ? "#2563eb" : "#1e40af",
+                background: selectedInterface === "all" ? "#2563eb" : "#1e40af",
               }}
             >
-              {lanDevicesScanning && selectedInterface === "eth0" ? "🔄 Scanning LAN (eth0)..." : "🔌 Scan All LAN (eth0) Devices"}
+              {lanDevicesScanning && selectedInterface === "all" ? "🔄 Scanning All Interfaces..." : "🌐 Scan All Active Interfaces"}
             </button>
             <button
               className="primary-button"
@@ -2327,7 +2335,21 @@ const DevicesPage = () => {
                 borderColor: "#10b981",
               }}
             >
-              {lanDevicesScanning && selectedInterface === "wlan0" ? "🔄 Scanning WLAN0 (Wi-Fi)..." : "📶 Scan All WLAN0 (Wi-Fi) Devices"}
+              {lanDevicesScanning && selectedInterface === "wlan0" ? "🔄 Scanning Wi-Fi (wlan0)..." : "📶 Scan Wi-Fi (wlan0)"}
+            </button>
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={() => {
+                setSelectedInterface("eth0");
+                scanAllLanDevices(detectedSubnet, "eth0");
+              }}
+              disabled={lanDevicesScanning}
+              style={{
+                fontWeight: "700",
+              }}
+            >
+              {lanDevicesScanning && selectedInterface === "eth0" ? "🔄 Scanning eth0..." : "🔌 Scan Wired (eth0)"}
             </button>
           </div>
         </div>
@@ -3953,13 +3975,13 @@ const LanScannerPage = () => {
             </div>
           </div>
 
-          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
             <button
               className="primary-button"
               type="button"
               onClick={() => {
-                setSelectedInterface("eth0");
-                scanAllLanDevices(detectedSubnet, "eth0");
+                setSelectedInterface("all");
+                scanAllLanDevices(detectedSubnet, "all");
               }}
               disabled={lanDevicesScanning}
               style={{
@@ -3969,20 +3991,20 @@ const LanScannerPage = () => {
                 display: "inline-flex",
                 alignItems: "center",
                 gap: "8px",
-                background: selectedInterface === "eth0" ? "#2563eb" : "#1e40af",
+                background: selectedInterface === "all" ? "#2563eb" : "#1e40af",
                 boxShadow: "0 4px 14px rgba(59, 130, 246, 0.3)",
                 cursor: lanDevicesScanning ? "not-allowed" : "pointer",
               }}
             >
-              {lanDevicesScanning && selectedInterface === "eth0" ? (
+              {lanDevicesScanning && selectedInterface === "all" ? (
                 <>
                   <span style={{ display: "inline-block", animation: "spin 1s linear infinite" }}>🔄</span>
-                  Scanning LAN (eth0)...
+                  Scanning All Interfaces...
                 </>
               ) : (
                 <>
-                  <span>🔌</span>
-                  Scan All LAN (eth0) Devices
+                  <span>🌐</span>
+                  Scan All Active Interfaces
                 </>
               )}
             </button>
@@ -4016,7 +4038,38 @@ const LanScannerPage = () => {
               ) : (
                 <>
                   <span>📶</span>
-                  Scan All WLAN0 Devices
+                  Scan Wi-Fi (wlan0)
+                </>
+              )}
+            </button>
+
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={() => {
+                setSelectedInterface("eth0");
+                scanAllLanDevices(detectedSubnet, "eth0");
+              }}
+              disabled={lanDevicesScanning}
+              style={{
+                fontSize: "13px",
+                fontWeight: "700",
+                padding: "10px 18px",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "8px",
+                cursor: lanDevicesScanning ? "not-allowed" : "pointer",
+              }}
+            >
+              {lanDevicesScanning && selectedInterface === "eth0" ? (
+                <>
+                  <span style={{ display: "inline-block", animation: "spin 1s linear infinite" }}>🔄</span>
+                  Scanning eth0...
+                </>
+              ) : (
+                <>
+                  <span>🔌</span>
+                  Scan Wired (eth0)
                 </>
               )}
             </button>

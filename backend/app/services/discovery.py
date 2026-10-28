@@ -198,6 +198,16 @@ def _run_arp_scan_on_interface(network: str | None, target_iface: str | None) ->
         cmd.append("--localnet")
 
     is_wireless = is_wireless_interface(target_iface) if target_iface else False
+    if is_wireless and network:
+        # Pre-sweep with fping to awaken sleeping Wi-Fi mobile devices (802.11 PSM / DTIM)
+        try:
+            cmd_fping = ["fping", "-a", "-g", network, "-r", "1", "-t", "80"]
+            if target_iface:
+                cmd_fping.extend(["-I", target_iface])
+            subprocess.run(cmd_fping, capture_output=True, check=False, timeout=5)
+        except Exception:
+            pass
+
     if is_wireless:
         # Smartphones (Android/iOS) on Wi-Fi use power-saving sleep (802.11 PSM / DTIM)
         # Using 4 retries and 1200ms timeout ensures sleeping phones wake up and respond
