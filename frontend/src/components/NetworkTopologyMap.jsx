@@ -10,8 +10,11 @@ export default function NetworkTopologyMap({
   refreshAll,
 }) {
   const [switches, setSwitches] = useState([]);
+  const [activeSwitchData, setActiveSwitchData] = useState(null);
+  const [switchPorts, setSwitchPorts] = useState([]);
   const [activeFirewall, setActiveFirewall] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [switchingDensity, setSwitchingDensity] = useState(false);
   const [selectedNode, setSelectedNode] = useState(null);
   const [vlanFilter, setVlanFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -22,14 +25,24 @@ export default function NetworkTopologyMap({
     setLoading(true);
     try {
       const headers = getAuthHeaders ? getAuthHeaders() : {};
-      const [swRes, fwRes] = await Promise.all([
+      const [swRes, activeSwRes, portRes, fwRes] = await Promise.all([
         fetch(`${API_URL}/switches/configs`, { headers }).catch(() => null),
+        fetch(`${API_URL}/switches/active`, { headers }).catch(() => null),
+        fetch(`${API_URL}/switches/ports`, { headers }).catch(() => null),
         fetch(`${API_URL}/firewall/config`, { headers }).catch(() => null),
       ]);
 
       if (swRes && swRes.ok) {
         const swData = await swRes.json();
         setSwitches(Array.isArray(swData) ? swData : []);
+      }
+      if (activeSwRes && activeSwRes.ok) {
+        const activeData = await activeSwRes.json();
+        setActiveSwitchData(activeData);
+      }
+      if (portRes && portRes.ok) {
+        const portData = await portRes.json();
+        setSwitchPorts(Array.isArray(portData) ? portData : []);
       }
       if (fwRes && fwRes.ok) {
         const fwData = await fwRes.json();
@@ -38,6 +51,26 @@ export default function NetworkTopologyMap({
     } catch (_) {
     } finally {
       setLoading(false);
+    }
+  };
+
+  const isAdmin = currentUser?.role === "admin" || currentUser?.role === "super_admin" || currentUser?.role === "developer";
+
+  const handleSwitchChassisDensity = async (targetDensity) => {
+    if (!isAdmin) return;
+    setSwitchingDensity(true);
+    try {
+      const res = await fetch(`${API_URL}/switches/ports/density`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        body: JSON.stringify({ total_ports: targetDensity }),
+      });
+      if (res.ok) {
+        await loadTopologyData();
+      }
+    } catch (_) {
+    } finally {
+      setSwitchingDensity(false);
     }
   };
 
@@ -91,12 +124,26 @@ export default function NetworkTopologyMap({
     return groups;
   }, [filteredDevices]);
 
-  const activeSwitch = switches.find((s) => s.is_active) || switches[0] || {
-    name: "Core Switch 1 (Cisco Catalyst)",
-    management_ip: "192.168.0.2",
-    vendor: "cisco_ios",
-    total_ports: 24,
-  };
+  const activeSwitch = useMemo(() => {
+    if (activeSwitchData?.config) {
+      return activeSwitchData.config;
+    }
+    const saved = switches.find((s) => s.is_active) || switches[0];
+    if (saved) return saved;
+    const is48 = switchPorts.length > 24;
+    return {
+      name: `Core Switch 1 (${is48 ? "Cisco Catalyst 48-Port" : "Cisco Catalyst 24-Port"})`,
+      management_ip: "192.168.0.2",
+      vendor: "cisco_ios",
+      model: is48 ? "Cisco Catalyst 2960X-48TS-L" : "Cisco Catalyst 2960-X",
+      total_ports: is48 ? 48 : 24,
+    };
+  }, [activeSwitchData, switches, switchPorts]);
+
+  const is48PortSwitch = (activeSwitch?.total_ports === 48) || (switchPorts.length > 24);
+  const totalPortCount = is48PortSwitch ? 48 : 24;
+  const sfpUplinkPorts = switchPorts.filter((p) => p.is_sfp || String(p.port || "").toLowerCase().startsWith("te"));
+  const connectedPorts = switchPorts.filter((p) => p.status === "connected");
 
   const getDeviceIcon = (type) => {
     switch (type) {
@@ -127,6 +174,50 @@ export default function NetworkTopologyMap({
         </div>
 
         <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+          {isAdmin && (
+            <div style={{ display: "flex", alignItems: "center", gap: "4px", background: "#f8fafc", padding: "3px", borderRadius: "8px", border: "1px solid #cbd5e1" }}>
+              <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", paddingLeft: "4px", paddingRight: "2px" }}>
+                Switch:
+              </span>
+              <button
+                type="button"
+                onClick={() => handleSwitchChassisDensity(24)}
+                disabled={switchingDensity}
+                style={{
+                  padding: "3px 8px",
+                  fontSize: "11px",
+                  fontWeight: "700",
+                  borderRadius: "5px",
+                  border: "none",
+                  cursor: "pointer",
+                  background: !is48PortSwitch ? "#2563eb" : "transparent",
+                  color: !is48PortSwitch ? "#ffffff" : "#475569",
+                  boxShadow: !is48PortSwitch ? "0 1px 2px rgba(0,0,0,0.1)" : "none",
+                }}
+              >
+                24-Port
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSwitchChassisDensity(48)}
+                disabled={switchingDensity}
+                style={{
+                  padding: "3px 8px",
+                  fontSize: "11px",
+                  fontWeight: "700",
+                  borderRadius: "5px",
+                  border: "none",
+                  cursor: "pointer",
+                  background: is48PortSwitch ? "#2563eb" : "transparent",
+                  color: is48PortSwitch ? "#ffffff" : "#475569",
+                  boxShadow: is48PortSwitch ? "0 1px 2px rgba(0,0,0,0.1)" : "none",
+                }}
+              >
+                48-Port (+ SFP+)
+              </button>
+            </div>
+          )}
+
           <button
             type="button"
             className={viewMode === "diagram" ? "primary-button small" : "secondary-button small"}
@@ -148,9 +239,9 @@ export default function NetworkTopologyMap({
               loadTopologyData();
               if (refreshAll) refreshAll();
             }}
-            disabled={loading}
+            disabled={loading || switchingDensity}
           >
-            {loading ? "Refreshing..." : "🔄 Refresh Topology"}
+            {loading || switchingDensity ? "Refreshing..." : "🔄 Refresh Topology"}
           </button>
         </div>
       </div>
@@ -161,7 +252,21 @@ export default function NetworkTopologyMap({
           {/* Quick Metrics */}
           <div style={{ display: "flex", gap: "16px", alignItems: "center", fontSize: "12px", flexWrap: "wrap" }}>
             <div><span style={{ color: "#64748b" }}>Gateway:</span> <strong>{activeFirewall?.vendor_title || "Sophos SFOS"}</strong></div>
-            <div><span style={{ color: "#64748b" }}>Core Switch:</span> <strong>{activeSwitch.name}</strong></div>
+            <div>
+              <span style={{ color: "#64748b" }}>Core Switch:</span> <strong>{activeSwitch.name}</strong>{" "}
+              <span
+                style={{
+                  fontSize: "10px",
+                  padding: "1px 6px",
+                  borderRadius: "8px",
+                  background: is48PortSwitch ? "#ede9fe" : "#eff6ff",
+                  color: is48PortSwitch ? "#6d28d9" : "#1d4ed8",
+                  fontWeight: "800",
+                }}
+              >
+                {totalPortCount} Ports {is48PortSwitch ? "(+ 4x 10G SFP+)" : ""}
+              </span>
+            </div>
             <div><span style={{ color: "#64748b" }}>Visible Devices:</span> <strong>{filteredDevices.length} / {devices.length}</strong></div>
             <div>
               <span style={{ color: "#64748b" }}>Quarantined:</span>{" "}
@@ -273,36 +378,90 @@ export default function NetworkTopologyMap({
 
               {/* VERTICAL TRUNK LINE 1 */}
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-                <div style={{ width: "3px", height: "28px", background: "#3b82f6" }} />
-                <div style={{ background: "#eff6ff", border: "1px solid #93c5fd", color: "#1d4ed8", fontSize: "10px", padding: "2px 8px", borderRadius: "10px", fontWeight: "700" }}>
-                  802.1Q Trunk Link (Tagged VLANs 10, 20, 30, 90)
+                <div style={{ width: "3px", height: "24px", background: is48PortSwitch ? "#8b5cf6" : "#3b82f6" }} />
+                <div
+                  style={{
+                    background: is48PortSwitch ? "#f5f3ff" : "#eff6ff",
+                    border: `1.5px solid ${is48PortSwitch ? "#c4b5fd" : "#93c5fd"}`,
+                    color: is48PortSwitch ? "#6d28d9" : "#1d4ed8",
+                    fontSize: "10px",
+                    padding: "3px 12px",
+                    borderRadius: "12px",
+                    fontWeight: "800",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    boxShadow: is48PortSwitch ? "0 0 10px rgba(139, 92, 246, 0.25)" : "none",
+                  }}
+                >
+                  <span>{is48PortSwitch ? "⚡" : "🔀"}</span>
+                  <span>
+                    {is48PortSwitch
+                      ? "10G SFP+ High-Speed Trunk Uplink (Te0/49-52 • Tagged VLANs 10, 20, 30, 90)"
+                      : "802.1Q Gigabit Trunk Uplink (Ports 23 & 24 • Tagged VLANs 10, 20, 30, 90)"}
+                  </span>
                 </div>
-                <div style={{ width: "3px", height: "28px", background: "#3b82f6" }} />
+                <div style={{ width: "3px", height: "24px", background: is48PortSwitch ? "#8b5cf6" : "#3b82f6" }} />
               </div>
 
               {/* TIER 2: MANAGED SWITCH NODE */}
               <div
-                onClick={() => setSelectedNode({ type: "switch", data: activeSwitch })}
+                onClick={() => setSelectedNode({
+                  type: "switch",
+                  data: {
+                    ...activeSwitch,
+                    total_ports: totalPortCount,
+                    is_48_port: is48PortSwitch,
+                    sfp_count: sfpUplinkPorts.length,
+                    connected_count: connectedPorts.length,
+                  },
+                })}
                 style={{
                   background: "#ffffff",
-                  border: "2px solid #6366f1",
+                  border: `2px solid ${is48PortSwitch ? "#7c3aed" : "#6366f1"}`,
                   borderRadius: "12px",
-                  padding: "14px 24px",
-                  boxShadow: "0 4px 6px -1px rgba(0,0,0,0.08)",
+                  padding: "16px 24px",
+                  boxShadow: is48PortSwitch ? "0 6px 16px rgba(124, 58, 237, 0.18)" : "0 4px 6px -1px rgba(0,0,0,0.08)",
                   textAlign: "center",
                   cursor: "pointer",
-                  width: "380px",
+                  width: "440px",
+                  transition: "all 0.15s ease",
                 }}
               >
-                <div style={{ fontSize: "26px", marginBottom: "4px" }}>🔀</div>
-                <div style={{ fontSize: "14px", fontWeight: "800", color: "#0f172a" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "8px", marginBottom: "4px" }}>
+                  <span style={{ fontSize: "28px" }}>🔀</span>
+                  <span
+                    style={{
+                      fontSize: "10px",
+                      fontWeight: "800",
+                      padding: "2px 8px",
+                      borderRadius: "10px",
+                      background: is48PortSwitch ? "#ede9fe" : "#eff6ff",
+                      color: is48PortSwitch ? "#6d28d9" : "#1d4ed8",
+                      border: `1px solid ${is48PortSwitch ? "#c4b5fd" : "#bfdbfe"}`,
+                    }}
+                  >
+                    {is48PortSwitch ? "48-PORT ENTERPRISE + 4x 10G SFP+" : "24-PORT STANDARD SWITCH"}
+                  </span>
+                </div>
+                <div style={{ fontSize: "15px", fontWeight: "800", color: "#0f172a" }}>
                   {activeSwitch.name}
                 </div>
                 <div style={{ fontSize: "11px", color: "#64748b", marginTop: "2px" }}>
-                  Management IP: <code>{activeSwitch.management_ip || "192.168.0.2"}</code> • 24-Port Switch
+                  Management IP: <code>{activeSwitch.management_ip || "192.168.0.2"}</code> • Model: <strong>{activeSwitch.model || (is48PortSwitch ? "Catalyst 2960X-48TS-L" : "Catalyst 2960-X")}</strong>
                 </div>
-                <div style={{ marginTop: "6px", display: "inline-block", background: "#eff6ff", color: "#2563eb", fontSize: "10px", padding: "2px 8px", borderRadius: "10px", fontWeight: "700" }}>
-                  802.1X / RADIUS MAB &amp; BPDU Guard Active
+                <div style={{ display: "flex", justifyContent: "center", gap: "6px", marginTop: "8px", flexWrap: "wrap" }}>
+                  <span style={{ background: "#f0fdf4", color: "#166534", border: "1px solid #bbf7d0", fontSize: "10px", padding: "2px 8px", borderRadius: "10px", fontWeight: "700" }}>
+                    🟢 {connectedPorts.length || (is48PortSwitch ? 28 : 14)} / {switchPorts.length || (is48PortSwitch ? 52 : 24)} Ports Connected
+                  </span>
+                  {is48PortSwitch && (
+                    <span style={{ background: "#faf5ff", color: "#7c3aed", border: "1px solid #e9d5ff", fontSize: "10px", padding: "2px 8px", borderRadius: "10px", fontWeight: "700" }}>
+                      ⚡ 4x 10G SFP+ Uplinks Ready
+                    </span>
+                  )}
+                  <span style={{ background: "#eff6ff", color: "#2563eb", border: "1px solid #bfdbfe", fontSize: "10px", padding: "2px 8px", borderRadius: "10px", fontWeight: "700" }}>
+                    802.1X / RADIUS MAB Active
+                  </span>
                 </div>
               </div>
 
@@ -547,16 +706,61 @@ export default function NetworkTopologyMap({
             {selectedNode.type === "switch" && (
               <div style={{ display: "flex", flexDirection: "column", gap: "10px", fontSize: "12px" }}>
                 <div style={{ background: "#f8fafc", padding: "8px 10px", borderRadius: "6px" }}>
+                  <div style={{ color: "#64748b", fontSize: "10px" }}>CHASSIS ARCHITECTURE &amp; DENSITY</div>
+                  <div style={{ fontWeight: "800", color: is48PortSwitch ? "#6d28d9" : "#1d4ed8" }}>
+                    {is48PortSwitch ? "48-Port Enterprise Chassis (High-Density 1U)" : "24-Port Standard Chassis (1U)"}
+                  </div>
+                </div>
+
+                <div style={{ background: "#f8fafc", padding: "8px 10px", borderRadius: "6px" }}>
+                  <div style={{ color: "#64748b", fontSize: "10px" }}>SWITCH MODEL &amp; VENDOR</div>
+                  <div style={{ fontWeight: "700" }}>
+                    {selectedNode.data.model || (is48PortSwitch ? "Cisco Catalyst 2960X-48TS-L" : "Cisco Catalyst 2960-X")} ({selectedNode.data.vendor})
+                  </div>
+                </div>
+
+                <div style={{ background: "#f8fafc", padding: "8px 10px", borderRadius: "6px" }}>
                   <div style={{ color: "#64748b", fontSize: "10px" }}>MANAGEMENT IP</div>
-                  <div style={{ fontWeight: "700", fontFamily: "monospace" }}>{selectedNode.data.management_ip}</div>
+                  <div style={{ fontWeight: "700", fontFamily: "monospace" }}>{selectedNode.data.management_ip || "192.168.0.2"}</div>
                 </div>
+
                 <div style={{ background: "#f8fafc", padding: "8px 10px", borderRadius: "6px" }}>
-                  <div style={{ color: "#64748b", fontSize: "10px" }}>VENDOR ARCHITECTURE</div>
-                  <div style={{ fontWeight: "700" }}>{selectedNode.data.vendor}</div>
+                  <div style={{ color: "#64748b", fontSize: "10px" }}>PHYSICAL INTERFACES BREAKDOWN</div>
+                  <div style={{ fontWeight: "700", marginTop: "2px" }}>
+                    • {is48PortSwitch ? "48x 10/100/1000BaseTX Copper Ports (Gi0/1 - Gi0/48)" : "24x 10/100/1000BaseTX Copper Ports (Gi0/1 - Gi0/24)"}
+                  </div>
+                  {is48PortSwitch && (
+                    <div style={{ fontWeight: "700", color: "#7c3aed", marginTop: "2px" }}>
+                      • 4x 10-Gigabit SFP+ Optical Cages (Te0/49 - Te0/52)
+                    </div>
+                  )}
                 </div>
+
                 <div style={{ background: "#f8fafc", padding: "8px 10px", borderRadius: "6px" }}>
-                  <div style={{ color: "#64748b", fontSize: "10px" }}>TOTAL PORTS</div>
-                  <div style={{ fontWeight: "700" }}>{selectedNode.data.total_ports || 24} Ports (802.1Q Active)</div>
+                  <div style={{ color: "#64748b", fontSize: "10px" }}>PORT UTILIZATION &amp; LINK HEALTH</div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "4px" }}>
+                    <span style={{ fontWeight: "700" }}>
+                      {connectedPorts.length || (is48PortSwitch ? 28 : 14)} of {switchPorts.length || (is48PortSwitch ? 52 : 24)} Ports Active
+                    </span>
+                    <span style={{ fontSize: "11px", fontWeight: "800", color: "#166534" }}>
+                      {Math.round(((connectedPorts.length || (is48PortSwitch ? 28 : 14)) / (switchPorts.length || (is48PortSwitch ? 52 : 24))) * 100)}%
+                    </span>
+                  </div>
+                  <div style={{ height: "6px", background: "#e2e8f0", borderRadius: "3px", marginTop: "6px", overflow: "hidden" }}>
+                    <div
+                      style={{
+                        height: "100%",
+                        width: `${Math.round(((connectedPorts.length || (is48PortSwitch ? 28 : 14)) / (switchPorts.length || (is48PortSwitch ? 52 : 24))) * 100)}%`,
+                        background: is48PortSwitch ? "#8b5cf6" : "#2563eb",
+                        borderRadius: "3px",
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ background: "#f8fafc", padding: "8px 10px", borderRadius: "6px" }}>
+                  <div style={{ color: "#64748b", fontSize: "10px" }}>SECURITY &amp; NAC PROTOCOLS</div>
+                  <div style={{ fontWeight: "700" }}>IEEE 802.1X • RADIUS MAB • Rapid-PVST+ • BPDU Guard Active</div>
                 </div>
               </div>
             )}
