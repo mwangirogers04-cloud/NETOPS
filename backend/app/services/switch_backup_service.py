@@ -158,6 +158,12 @@ def compute_config_diff(
     }
 
 
+def detect_security_discrepancies(old_config: str, new_config: str) -> list[str]:
+    """Extract security-sensitive discrepancies between two switch configurations."""
+    diff_res = compute_config_diff(old_config, new_config)
+    return diff_res.get("security_alerts", [])
+
+
 def create_switch_backup(
     db: Session,
     switch_id: int,

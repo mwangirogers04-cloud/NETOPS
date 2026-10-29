@@ -368,6 +368,8 @@ def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
     user = db.scalar(
         select(User).where(
             or_(
+                User.username == req.username.strip(),
+                User.email == req.username.strip(),
                 func.lower(User.username) == ident,
                 func.lower(User.email) == ident,
             )
@@ -457,6 +459,12 @@ def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
         or (request.client.host if request.client else "127.0.0.1")
     )
     user_agent = request.headers.get("user-agent", "Unknown")[:250]
+
+    # Deactivate prior active sessions for this user to keep session lookups fast
+    db.query(UserSession).filter(
+        UserSession.user_id == user.id,
+        UserSession.is_active == True,
+    ).update({"is_active": False})
 
     session = UserSession(
         user_id=user.id,
@@ -1146,6 +1154,12 @@ def change_expired_password(
         or (request.client.host if request.client else "127.0.0.1")
     )
     user_agent = request.headers.get("user-agent", "Unknown")[:250]
+
+    # Deactivate prior active sessions for this user to keep session lookups fast
+    db.query(UserSession).filter(
+        UserSession.user_id == user.id,
+        UserSession.is_active == True,
+    ).update({"is_active": False})
 
     session = UserSession(
         user_id=user.id,

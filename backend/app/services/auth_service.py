@@ -387,10 +387,10 @@ def send_email_message(to_email: str, subject: str, html_body: str, plain_body: 
         password = password.replace(" ", "")
     from_email = (cfg.get("smtp_from_email") or user or "noreply@netops.local").strip()
 
-    if not host:
+    if not host or (not host.startswith("http") and (not user or not password)):
         return (
             False,
-            "SMTP Email Server is not configured yet. Configure SMTP in Settings → Email & SMS Gateways.",
+            "SMTP Email Server is not fully configured (missing host, user, or password). Configure SMTP in Settings → Email & SMS Gateways.",
         )
 
     # Support HTTPS Email Relay / Google Apps Script Web App over TCP 443 (bypasses ISP Port 587 blocks)

@@ -59,6 +59,7 @@ export default function LoginPage({
   }, [identifier, password]);
 
   // Track failed login attempts: lock and prompt contact admin on 3rd failure
+  const [authSuccess, setAuthSuccess] = useState(false);
   const [failedAttempts, setFailedAttempts] = useState(() => {
     try {
       const saved = sessionStorage.getItem("netops_failed_login_attempts");
@@ -295,6 +296,7 @@ export default function LoginPage({
       // Successful sign in: reset failed attempts
       setFailedAttempts(0);
       setIsLockedOut(false);
+      setAuthSuccess(true);
       try {
         sessionStorage.removeItem("netops_failed_login_attempts");
       } catch (_) {}
@@ -1119,9 +1121,16 @@ export default function LoginPage({
             <button
               type="submit"
               className="login-submit-btn"
-              disabled={loading || isLockedOut}
+              disabled={loading || isLockedOut || authSuccess}
               style={
-                isLockedOut
+                authSuccess
+                  ? {
+                      background: "#10b981",
+                      borderColor: "#059669",
+                      color: "#ffffff",
+                      fontWeight: "700",
+                    }
+                  : isLockedOut
                   ? {
                       background: "#7f1d1d",
                       borderColor: "#ef4444",
@@ -1132,8 +1141,10 @@ export default function LoginPage({
                   : {}
               }
             >
-              {loading
-                ? "Authenticating..."
+              {authSuccess
+                ? "✅ Authenticated! Opening Console..."
+                : loading
+                ? "⏳ Verifying Credentials..."
                 : isLockedOut
                 ? "🔒 Locked — Please Contact Administrator"
                 : "Sign In to Console →"}
