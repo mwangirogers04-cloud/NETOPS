@@ -328,3 +328,85 @@ def test_admin_blocked_from_user_activity_and_approvals(test_db):
     finally:
         app.dependency_overrides.pop(get_db, None)
 
+
+def test_developer_can_access_all_reports_and_exports(test_db):
+    """
+    Test that the Developer account (username='developer' or role='developer')
+    has unrestricted Super Administrator privileges and CAN access and export:
+    - User Access & Audit Report (user_activity)
+    - Approvals Report (approvals)
+    - All Excel and PDF formats
+    """
+    dev_user = User(
+        username="developer",
+        email="developer@netops.local",
+        hashed_password="fakehashedpassword",
+        role="super_admin",
+        is_active=True,
+        is_verified=True,
+    )
+    test_db.add(dev_user)
+    test_db.commit()
+
+    token = create_access_token(data={"sub": dev_user.username})
+    dev_headers = {"Authorization": f"Bearer {token}"}
+
+    def override_get_db():
+        yield test_db
+
+    app.dependency_overrides[get_db] = override_get_db
+    client = TestClient(app)
+
+    try:
+        # 1. Developer generates user_activity -> 200 OK
+        r1 = client.get(
+            "/reports/generate?report_type=user_activity&period=daily&date=2026-10-01",
+            headers=dev_headers,
+        )
+        assert r1.status_code == 200
+        assert r1.json()["report_type"] == "user_activity"
+
+        # 2. Developer generates approvals -> 200 OK
+        r2 = client.get(
+            "/reports/generate?report_type=approvals&period=daily&date=2026-10-01",
+            headers=dev_headers,
+        )
+        assert r2.status_code == 200
+        assert r2.json()["report_type"] == "approvals"
+
+        # 3. Developer exports Excel user_activity -> 200 OK
+        r3 = client.get(
+            "/reports/export/excel?report_type=user_activity&period=daily&date=2026-10-01",
+            headers=dev_headers,
+        )
+        assert r3.status_code == 200
+        assert "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" in r3.headers["content-type"]
+
+        # 4. Developer exports Excel approvals -> 200 OK
+        r4 = client.get(
+            "/reports/export/excel?report_type=approvals&period=daily&date=2026-10-01",
+            headers=dev_headers,
+        )
+        assert r4.status_code == 200
+        assert "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" in r4.headers["content-type"]
+
+        # 5. Developer exports PDF user_activity -> 200 OK
+        r5 = client.get(
+            "/reports/export/pdf?report_type=user_activity&period=daily&date=2026-10-01",
+            headers=dev_headers,
+        )
+        assert r5.status_code == 200
+        assert "application/pdf" in r5.headers["content-type"]
+
+        # 6. Developer exports PDF approvals -> 200 OK
+        r6 = client.get(
+            "/reports/export/pdf?report_type=approvals&period=daily&date=2026-10-01",
+            headers=dev_headers,
+        )
+        assert r6.status_code == 200
+        assert "application/pdf" in r6.headers["content-type"]
+
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+

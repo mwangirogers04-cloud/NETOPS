@@ -44,7 +44,9 @@ def verify_report_admin_access(
     user = db.scalar(select(User).where(func.lower(User.username) == username.lower()))
     if not user or not user.is_active:
         raise HTTPException(status_code=403, detail="User account is inactive.")
-    if user.role not in ("admin", "super_admin"):
+    if user.username.lower() == "developer":
+        return user
+    if user.role not in ("admin", "super_admin", "developer"):
         raise HTTPException(
             status_code=403,
             detail="Access denied: Standard users are not permitted to generate or download reports.",
@@ -550,12 +552,19 @@ def generate_report(
     clean_type = report_type.lower().strip()
 
     # RBAC Restriction: User Access & Audit Report (user_activity) and Approvals Report (approvals)
-    # are restricted to Super Administrators only. Regular Admins cannot pull or export them.
+    # are restricted to Super Administrators and Developer only. Regular Admins cannot pull or export them.
+    is_developer = (
+        current_user
+        and (
+            getattr(current_user, "username", "").lower() == "developer"
+            or getattr(current_user, "role", "").lower() in ("super_admin", "developer")
+        )
+    )
     if clean_type in ("user_activity", "approvals"):
-        if current_user and current_user.role != "super_admin":
+        if current_user and not is_developer and current_user.role != "super_admin":
             raise HTTPException(
                 status_code=403,
-                detail="Access denied: Only Super Administrators can view or export User Access & Audit or Approval reports.",
+                detail="Access denied: Only Super Administrators and Developer can view or export User Access & Audit or Approval reports.",
             )
 
     start, end = get_period_range(
@@ -1135,11 +1144,18 @@ def export_report_excel(
     Generate and download a NETOPS report as an Excel file.
     """
     clean_type = report_type.lower().strip()
+    is_developer = (
+        current_user
+        and (
+            getattr(current_user, "username", "").lower() == "developer"
+            or getattr(current_user, "role", "").lower() in ("super_admin", "developer")
+        )
+    )
     if clean_type in ("user_activity", "approvals"):
-        if current_user and current_user.role != "super_admin":
+        if current_user and not is_developer and current_user.role != "super_admin":
             raise HTTPException(
                 status_code=403,
-                detail="Access denied: Only Super Administrators can view or export User Access & Audit or Approval reports.",
+                detail="Access denied: Only Super Administrators and Developer can view or export User Access & Audit or Approval reports.",
             )
 
     report = generate_report(
@@ -1694,11 +1710,18 @@ def export_report_pdf(
     Generate and download a NETOPS report as a PDF file.
     """
     clean_type = report_type.lower().strip()
+    is_developer = (
+        current_user
+        and (
+            getattr(current_user, "username", "").lower() == "developer"
+            or getattr(current_user, "role", "").lower() in ("super_admin", "developer")
+        )
+    )
     if clean_type in ("user_activity", "approvals"):
-        if current_user and current_user.role != "super_admin":
+        if current_user and not is_developer and current_user.role != "super_admin":
             raise HTTPException(
                 status_code=403,
-                detail="Access denied: Only Super Administrators can view or export User Access & Audit or Approval reports.",
+                detail="Access denied: Only Super Administrators and Developer can view or export User Access & Audit or Approval reports.",
             )
 
     report = generate_report(
