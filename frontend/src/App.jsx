@@ -5801,6 +5801,13 @@ const AccessPage = () => {
   const [auditCategoryFilter, setAuditCategoryFilter] = useState("all");
 
   const ReportsPage = () => {
+    useEffect(() => {
+      if (!isSuperAdmin && (reportType === "user_activity" || reportType === "approvals")) {
+        setReportType("network_activity");
+        setReportData(null);
+      }
+    }, [isSuperAdmin, reportType]);
+
   const ipPhoneDevices = devices.filter(
     (device) => device.device_type === "ip_phone"
   ).length;
@@ -5926,6 +5933,10 @@ const enforcedAllowed = devices.filter(
     if (!validateReportDates()) {
       return;
     }
+    if (!isSuperAdmin && (reportType === "user_activity" || reportType === "approvals")) {
+      setReportError("Access denied: Only Super Administrators can view or export User Access & Audit or Approval reports.");
+      return;
+    }
     setReportLoading(true);
     setReportError("");
     setReportData(null);
@@ -5960,7 +5971,8 @@ if (reportType === "isp_internet_usage") {
       );
 
       if (!response.ok) {
-        throw new Error("Failed to generate report.");
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.detail || "Failed to generate report.");
       }
 
       const data = await response.json();
@@ -6257,9 +6269,11 @@ return (
               <option value="isp_internet_usage">
                 🌐 ISP Internet Usage & Firewall Bandwidth
               </option>
-              <option value="user_activity">
-                User Access & Audit Report
-              </option>
+              {isSuperAdmin && (
+                <option value="user_activity">
+                  User Access & Audit Report (Super Admin)
+                </option>
+              )}
               <option value="network_activity">
                 Network Activity
               </option>
@@ -6275,9 +6289,11 @@ return (
               <option value="access_enforcement">
                 Access Enforcement
               </option>
-              <option value="approvals">
-                Approvals
-              </option>
+              {isSuperAdmin && (
+                <option value="approvals">
+                  Approvals (Super Admin)
+                </option>
+              )}
               <option value="quarantine">
                 Quarantine
               </option>
@@ -6495,6 +6511,10 @@ return (
                 className="primary-button"
                 onClick={() => {
                   if (!isAdmin) return;
+                  if (!isSuperAdmin && (reportType === "user_activity" || reportType === "approvals")) {
+                    alert("Access denied: Only Super Administrators can export User Access & Audit or Approval reports.");
+                    return;
+                  }
                   if (!validateReportDates()) return;
                   const params = new URLSearchParams({
                     report_type: reportType,
@@ -6535,6 +6555,10 @@ return (
                 className="secondary-button"
                 onClick={() => {
                   if (!isAdmin) return;
+                  if (!isSuperAdmin && (reportType === "user_activity" || reportType === "approvals")) {
+                    alert("Access denied: Only Super Administrators can export User Access & Audit or Approval reports.");
+                    return;
+                  }
                   if (!validateReportDates()) return;
                   const params = new URLSearchParams({
                     report_type: reportType,

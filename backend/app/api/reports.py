@@ -538,6 +538,7 @@ def generate_report(
     start_datetime: str | None = None,
     end_datetime: str | None = None,
     isp: str = "all",
+    current_user: User | None = Depends(verify_report_admin_access),
     db: Session = Depends(get_db),
 ):
     """
@@ -546,6 +547,17 @@ def generate_report(
     Historical event-based reports use the events table.
     Device inventory reports use the current devices table.
     """
+    clean_type = report_type.lower().strip()
+
+    # RBAC Restriction: User Access & Audit Report (user_activity) and Approvals Report (approvals)
+    # are restricted to Super Administrators only. Regular Admins cannot pull or export them.
+    if clean_type in ("user_activity", "approvals"):
+        if current_user and current_user.role != "super_admin":
+            raise HTTPException(
+                status_code=403,
+                detail="Access denied: Only Super Administrators can view or export User Access & Audit or Approval reports.",
+            )
+
     start, end = get_period_range(
         period,
         date,
@@ -555,7 +567,7 @@ def generate_report(
         end_datetime,
     )
 
-    report_type = report_type.lower().strip()
+    report_type = clean_type
 
     # -----------------------------------------------------
     # ISP INTERNET USAGE & FIREWALL BANDWIDTH REPORT
@@ -1116,23 +1128,32 @@ def export_report_excel(
     start_datetime: str | None = None,
     end_datetime: str | None = None,
     isp: str = "all",
+    current_user: User | None = Depends(verify_report_admin_access),
     db: Session = Depends(get_db),
 ):
     """
     Generate and download a NETOPS report as an Excel file.
     """
+    clean_type = report_type.lower().strip()
+    if clean_type in ("user_activity", "approvals"):
+        if current_user and current_user.role != "super_admin":
+            raise HTTPException(
+                status_code=403,
+                detail="Access denied: Only Super Administrators can view or export User Access & Audit or Approval reports.",
+            )
 
     report = generate_report(
-    report_type=report_type,
-    period=period,
-    date=date,
-    start_date=start_date,
-    end_date=end_date,
-    start_datetime=start_datetime,
-    end_datetime=end_datetime,
-    isp=isp,
-    db=db,
-)
+        report_type=report_type,
+        period=period,
+        date=date,
+        start_date=start_date,
+        end_date=end_date,
+        start_datetime=start_datetime,
+        end_datetime=end_datetime,
+        isp=isp,
+        current_user=current_user,
+        db=db,
+    )
 
 
     workbook = Workbook()
@@ -1666,23 +1687,32 @@ def export_report_pdf(
     start_datetime: str | None = None,
     end_datetime: str | None = None,
     isp: str = "all",
+    current_user: User | None = Depends(verify_report_admin_access),
     db: Session = Depends(get_db),
 ):
     """
     Generate and download a NETOPS report as a PDF file.
     """
+    clean_type = report_type.lower().strip()
+    if clean_type in ("user_activity", "approvals"):
+        if current_user and current_user.role != "super_admin":
+            raise HTTPException(
+                status_code=403,
+                detail="Access denied: Only Super Administrators can view or export User Access & Audit or Approval reports.",
+            )
 
     report = generate_report(
-    report_type=report_type,
-    period=period,
-    date=date,
-    start_date=start_date,
-    end_date=end_date,
-    start_datetime=start_datetime,
-    end_datetime=end_datetime,
-    isp=isp,
-    db=db,
-)
+        report_type=report_type,
+        period=period,
+        date=date,
+        start_date=start_date,
+        end_date=end_date,
+        start_datetime=start_datetime,
+        end_datetime=end_datetime,
+        isp=isp,
+        current_user=current_user,
+        db=db,
+    )
 
     output = BytesIO()
 

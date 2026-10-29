@@ -239,3 +239,92 @@ def test_audit_trail_comprehensive_attribution(test_db, auth_headers):
 
     finally:
         app.dependency_overrides.pop(get_db, None)
+
+
+def test_admin_blocked_from_user_activity_and_approvals(test_db):
+    """
+    Test that standard 'admin' role CANNOT generate or export:
+    - User Access & Audit Report (user_activity)
+    - Approvals Report (approvals)
+    And gets HTTP 403 Forbidden.
+    """
+    admin_user = User(
+        username="standard_admin_role",
+        email="standard_admin@netops.local",
+        hashed_password="fakehashedpassword",
+        role="admin",
+        is_active=True,
+        is_verified=True,
+    )
+    test_db.add(admin_user)
+    test_db.commit()
+
+    token = create_access_token(data={"sub": admin_user.username})
+    admin_headers = {"Authorization": f"Bearer {token}"}
+
+    def override_get_db():
+        yield test_db
+
+    app.dependency_overrides[get_db] = override_get_db
+    client = TestClient(app)
+
+    try:
+        # 1. Attempt generate user_activity -> 403 Forbidden
+        r1 = client.get(
+            "/reports/generate?report_type=user_activity&period=daily&date=2026-10-01",
+            headers=admin_headers,
+        )
+        assert r1.status_code == 403
+        assert "Only Super Administrators" in r1.json()["detail"]
+
+        # 2. Attempt generate approvals -> 403 Forbidden
+        r2 = client.get(
+            "/reports/generate?report_type=approvals&period=daily&date=2026-10-01",
+            headers=admin_headers,
+        )
+        assert r2.status_code == 403
+        assert "Only Super Administrators" in r2.json()["detail"]
+
+        # 3. Attempt export excel user_activity -> 403 Forbidden
+        r3 = client.get(
+            "/reports/export/excel?report_type=user_activity&period=daily&date=2026-10-01",
+            headers=admin_headers,
+        )
+        assert r3.status_code == 403
+        assert "Only Super Administrators" in r3.json()["detail"]
+
+        # 4. Attempt export excel approvals -> 403 Forbidden
+        r4 = client.get(
+            "/reports/export/excel?report_type=approvals&period=daily&date=2026-10-01",
+            headers=admin_headers,
+        )
+        assert r4.status_code == 403
+        assert "Only Super Administrators" in r4.json()["detail"]
+
+        # 5. Attempt export pdf user_activity -> 403 Forbidden
+        r5 = client.get(
+            "/reports/export/pdf?report_type=user_activity&period=daily&date=2026-10-01",
+            headers=admin_headers,
+        )
+        assert r5.status_code == 403
+        assert "Only Super Administrators" in r5.json()["detail"]
+
+        # 6. Attempt export pdf approvals -> 403 Forbidden
+        r6 = client.get(
+            "/reports/export/pdf?report_type=approvals&period=daily&date=2026-10-01",
+            headers=admin_headers,
+        )
+        assert r6.status_code == 403
+        assert "Only Super Administrators" in r6.json()["detail"]
+
+        # 7. Standard Admin CAN access operational reports (e.g. device_inventory, network_activity)
+        r7 = client.get(
+            "/reports/generate?report_type=device_inventory&period=daily&date=2026-10-01",
+            headers=admin_headers,
+        )
+        assert r7.status_code == 200
+        assert r7.json()["report_type"] == "device_inventory"
+
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
