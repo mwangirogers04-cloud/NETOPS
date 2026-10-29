@@ -5995,19 +5995,6 @@ if (reportType === "isp_internet_usage") {
 
 return (
   <div className="page">
-      <div className="page-header">
-        <div>
-          <div className="page-title">
-            Reports
-          </div>
-
-          <div className="page-description">
-            Network operations reporting and
-            analytics.
-          </div>
-        </div>
-      </div>
-
       <div className="report-grid">
         <ReportCard
           title="ISP Internet Usage"
