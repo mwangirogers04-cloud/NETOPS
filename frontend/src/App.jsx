@@ -5797,6 +5797,8 @@ const AccessPage = () => {
   const [reportError, setReportError] = useState("");
   const [selectedIsp, setSelectedIsp] = useState("all");
   const [customIspName, setCustomIspName] = useState("");
+  const [auditSearchTerm, setAuditSearchTerm] = useState("");
+  const [auditCategoryFilter, setAuditCategoryFilter] = useState("all");
 
   const ReportsPage = () => {
   const ipPhoneDevices = devices.filter(
@@ -7537,97 +7539,250 @@ return (
 
                 {/* Section 3: Administrative & Security Audit Trail (Who Performed What) */}
                 <div style={{ marginTop: "28px" }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "14px", flexWrap: "wrap", gap: "10px" }}>
                     <div>
                       <div className="panel-title" style={{ fontSize: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
                         <span>🛡️</span> Administrative & Security Audit Trail
                       </div>
                       <div className="panel-subtitle">
-                        Who created users, deactivated accounts, reset passwords, or modified device statuses
+                        Comprehensive audit log of who triggered, deleted, added, or modified devices, switches, VLANs, user accounts, and patch updates
                       </div>
                     </div>
-                    <span style={{ fontSize: "12px", color: "#475569" }}>
-                      {reportData.audit_events?.length || 0} action{reportData.audit_events?.length === 1 ? "" : "s"}
-                    </span>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                      <input
+                        type="text"
+                        placeholder="🔍 Filter User ID, Actor, IP, Action, or Details..."
+                        value={auditSearchTerm}
+                        onChange={(e) => setAuditSearchTerm(e.target.value)}
+                        style={{
+                          padding: "6px 12px",
+                          fontSize: "12px",
+                          borderRadius: "6px",
+                          border: "1px solid #cbd5e1",
+                          width: "280px",
+                          outline: "none",
+                          background: "#ffffff",
+                        }}
+                      />
+                      <select
+                        value={auditCategoryFilter}
+                        onChange={(e) => setAuditCategoryFilter(e.target.value)}
+                        style={{
+                          padding: "6px 10px",
+                          fontSize: "12px",
+                          borderRadius: "6px",
+                          border: "1px solid #cbd5e1",
+                          background: "#ffffff",
+                          color: "#334155",
+                          cursor: "pointer",
+                          outline: "none",
+                        }}
+                      >
+                        <option value="all">All Categories</option>
+                        <option value="Switch & VLAN Automation">Switch & VLAN Automation</option>
+                        <option value="Device Access & Enforcement">Device Access & Enforcement</option>
+                        <option value="User Administration & Auth">User Administration & Auth</option>
+                        <option value="Patch & Vulnerability Management">Patch Remediation</option>
+                        <option value="Access Schedules & Policies">Access Schedules & Policies</option>
+                        <option value="Discovery & Asset Tracking">Discovery & Asset Tracking</option>
+                        <option value="System Administration">System Administration</option>
+                      </select>
+                      <span style={{ fontSize: "12px", color: "#475569", fontWeight: 600, background: "#f1f5f9", padding: "4px 8px", borderRadius: "6px" }}>
+                        {reportData.audit_events?.length || 0} action{reportData.audit_events?.length === 1 ? "" : "s"}
+                      </span>
+                    </div>
                   </div>
 
-                  {reportData.audit_events && reportData.audit_events.length > 0 ? (
-                    <div className="table-container">
-                      <table className="data-table">
-                        <thead>
-                          <tr>
-                            <th>ACTION</th>
-                            <th>PERFORMED BY</th>
-                            <th>DETAILS / MESSAGE</th>
-                            <th>TIMESTAMP</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {reportData.audit_events.map((ev) => (
-                            <tr key={ev.id}>
-                              <td>
-                                <span
-                                  style={{
+                  {(() => {
+                    const filteredEvents = (reportData.audit_events || []).filter((ev) => {
+                      if (auditCategoryFilter !== "all" && ev.category !== auditCategoryFilter) {
+                        return false;
+                      }
+                      if (!auditSearchTerm.trim()) return true;
+                      const q = auditSearchTerm.toLowerCase();
+                      return (
+                        (ev.actor && ev.actor.toLowerCase().includes(q)) ||
+                        (ev.role && ev.role.toLowerCase().includes(q)) ||
+                        (ev.client_ip && ev.client_ip.toLowerCase().includes(q)) ||
+                        (ev.user_id && String(ev.user_id).includes(q)) ||
+                        (ev.event_type && ev.event_type.toLowerCase().includes(q)) ||
+                        (ev.category && ev.category.toLowerCase().includes(q)) ||
+                        (ev.details && ev.details.toLowerCase().includes(q)) ||
+                        (ev.message && ev.message.toLowerCase().includes(q))
+                      );
+                    });
+
+                    return filteredEvents.length > 0 ? (
+                      <div className="table-container">
+                        <table className="data-table">
+                          <thead>
+                            <tr>
+                              <th style={{ width: "70px", textAlign: "center" }}>USER ID</th>
+                              <th>PERFORMED BY</th>
+                              <th>ROLE</th>
+                              <th>CLIENT IP</th>
+                              <th>ACTION & CATEGORY</th>
+                              <th>WHAT WAS DONE / DETAILS</th>
+                              <th style={{ whiteSpace: "nowrap" }}>TIMESTAMP</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {filteredEvents.map((ev) => (
+                              <tr key={ev.id}>
+                                <td style={{ textAlign: "center" }}>
+                                  {ev.user_id ? (
+                                    <span style={{
+                                      display: "inline-block",
+                                      padding: "2px 7px",
+                                      borderRadius: "4px",
+                                      fontSize: "11px",
+                                      fontWeight: 700,
+                                      background: "#f1f5f9",
+                                      color: "#1e293b",
+                                      border: "1px solid #cbd5e1",
+                                      fontFamily: "monospace",
+                                    }}>
+                                      #{ev.user_id}
+                                    </span>
+                                  ) : (
+                                    <span style={{ color: "#94a3b8", fontSize: "12px" }}>—</span>
+                                  )}
+                                </td>
+                                <td>
+                                  <div style={{ display: "flex", alignItems: "center", gap: "7px" }}>
+                                    <span style={{ fontSize: "14px" }}>
+                                      {(ev.role === "system" || (!ev.user_id && (ev.actor || "").toLowerCase().includes("system"))) ? "⚙️" : "👤"}
+                                    </span>
+                                    <strong style={{
+                                      color: (ev.role === "super_admin" || ev.role === "admin") ? "#2563eb" : "#0f172a",
+                                      fontSize: "13px",
+                                    }}>
+                                      {ev.actor || "system"}
+                                    </strong>
+                                  </div>
+                                </td>
+                                <td>
+                                  <span style={{
                                     display: "inline-block",
-                                    padding: "3px 8px",
+                                    padding: "2px 8px",
                                     borderRadius: "6px",
-                                    fontSize: "11px",
+                                    fontSize: "10px",
                                     fontWeight: 700,
+                                    letterSpacing: "0.5px",
                                     textTransform: "uppercase",
                                     background:
-                                      ev.event_type.includes("deactivated") || ev.event_type.includes("reject") || ev.event_type.includes("deleted")
-                                        ? "rgba(239, 68, 68, 0.15)"
-                                        : ev.event_type.includes("reset")
-                                        ? "rgba(245, 158, 11, 0.15)"
-                                        : "rgba(16, 185, 129, 0.15)",
+                                      ev.role === "super_admin"
+                                        ? "rgba(147, 51, 234, 0.12)"
+                                        : ev.role === "admin"
+                                        ? "rgba(37, 99, 235, 0.12)"
+                                        : ev.role === "user"
+                                        ? "rgba(16, 185, 129, 0.12)"
+                                        : "rgba(100, 116, 139, 0.12)",
                                     color:
-                                      ev.event_type.includes("deactivated") || ev.event_type.includes("reject") || ev.event_type.includes("deleted")
-                                        ? "#dc2626"
-                                        : ev.event_type.includes("reset")
-                                        ? "#d97706"
-                                        : "#059669",
+                                      ev.role === "super_admin"
+                                        ? "#7c3aed"
+                                        : ev.role === "admin"
+                                        ? "#1d4ed8"
+                                        : ev.role === "user"
+                                        ? "#059669"
+                                        : "#475569",
                                     border: `1px solid ${
-                                      ev.event_type.includes("deactivated") || ev.event_type.includes("reject") || ev.event_type.includes("deleted")
-                                        ? "rgba(239, 68, 68, 0.3)"
-                                        : ev.event_type.includes("reset")
-                                        ? "rgba(245, 158, 11, 0.3)"
-                                        : "rgba(16, 185, 129, 0.3)"
+                                      ev.role === "super_admin"
+                                        ? "rgba(147, 51, 234, 0.3)"
+                                        : ev.role === "admin"
+                                        ? "rgba(37, 99, 235, 0.3)"
+                                        : ev.role === "user"
+                                        ? "rgba(16, 185, 129, 0.3)"
+                                        : "rgba(100, 116, 139, 0.3)"
                                     }`,
-                                  }}
-                                >
-                                  {ev.event_type.replace(/_/g, " ")}
-                                </span>
-                              </td>
-                              <td>
-                                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                                  <span style={{ fontSize: "14px" }}>👤</span>
-                                  <strong style={{ color: "#2563eb" }}>{ev.actor || "Administrator"}</strong>
-                                </div>
-                              </td>
-                              <td style={{ fontSize: "13px", color: "#334155" }}>
-                                {ev.message}
-                              </td>
-                              <td>{ev.created_at ? ev.created_at.replace("T", " ").slice(0, 19) : "—"}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  ) : (
-                    <div
-                      style={{
-                        padding: "20px",
-                        textAlign: "center",
-                        background: "#ffffff",
-                        border: "1px dashed #cbd5e1",
-                        borderRadius: "10px",
-                        color: "#64748b",
-                        fontSize: "13px",
-                      }}
-                    >
-                      No administrative security actions were recorded during this selected period.
-                    </div>
-                  )}
+                                  }}>
+                                    {ev.role || "SYSTEM"}
+                                  </span>
+                                </td>
+                                <td>
+                                  <code style={{
+                                    fontSize: "11px",
+                                    color: "#0369a1",
+                                    background: "#f0f9ff",
+                                    padding: "3px 7px",
+                                    borderRadius: "5px",
+                                    border: "1px solid #bae6fd",
+                                    fontWeight: 600,
+                                    whiteSpace: "nowrap",
+                                  }}>
+                                    {ev.client_ip || "127.0.0.1"}
+                                  </code>
+                                </td>
+                                <td>
+                                  <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
+                                    <span
+                                      style={{
+                                        display: "inline-block",
+                                        padding: "3px 8px",
+                                        borderRadius: "6px",
+                                        fontSize: "11px",
+                                        fontWeight: 700,
+                                        textTransform: "uppercase",
+                                        width: "fit-content",
+                                        background:
+                                          ev.event_type.includes("deactivated") || ev.event_type.includes("reject") || ev.event_type.includes("delete") || ev.event_type.includes("lockout") || ev.event_type.includes("disallow")
+                                            ? "rgba(239, 68, 68, 0.15)"
+                                            : ev.event_type.includes("reset") || ev.event_type.includes("update") || ev.event_type.includes("quarantine") || ev.event_type.includes("unreachable")
+                                            ? "rgba(245, 158, 11, 0.15)"
+                                            : "rgba(16, 185, 129, 0.15)",
+                                        color:
+                                          ev.event_type.includes("deactivated") || ev.event_type.includes("reject") || ev.event_type.includes("delete") || ev.event_type.includes("lockout") || ev.event_type.includes("disallow")
+                                            ? "#dc2626"
+                                            : ev.event_type.includes("reset") || ev.event_type.includes("update") || ev.event_type.includes("quarantine") || ev.event_type.includes("unreachable")
+                                            ? "#d97706"
+                                            : "#059669",
+                                        border: `1px solid ${
+                                          ev.event_type.includes("deactivated") || ev.event_type.includes("reject") || ev.event_type.includes("delete") || ev.event_type.includes("lockout") || ev.event_type.includes("disallow")
+                                            ? "rgba(239, 68, 68, 0.3)"
+                                            : ev.event_type.includes("reset") || ev.event_type.includes("update") || ev.event_type.includes("quarantine") || ev.event_type.includes("unreachable")
+                                            ? "rgba(245, 158, 11, 0.3)"
+                                            : "rgba(16, 185, 129, 0.3)"
+                                        }`,
+                                      }}
+                                    >
+                                      {(ev.action_label || ev.event_type || "").replace(/_/g, " ")}
+                                    </span>
+                                    {ev.category && (
+                                      <span style={{ fontSize: "10px", color: "#64748b", fontWeight: 500 }}>
+                                        📁 {ev.category}
+                                      </span>
+                                    )}
+                                  </div>
+                                </td>
+                                <td style={{ fontSize: "12px", color: "#1e293b", maxWidth: "400px", lineHeight: "1.4" }}>
+                                  {ev.details || ev.message}
+                                </td>
+                                <td style={{ whiteSpace: "nowrap", fontSize: "12px", color: "#475569", fontFamily: "monospace" }}>
+                                  {ev.created_at ? ev.created_at.replace("T", " ").slice(0, 19) : "—"}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <div
+                        style={{
+                          padding: "20px",
+                          textAlign: "center",
+                          background: "#ffffff",
+                          border: "1px dashed #cbd5e1",
+                          borderRadius: "10px",
+                          color: "#64748b",
+                          fontSize: "13px",
+                        }}
+                      >
+                        {auditSearchTerm || auditCategoryFilter !== "all"
+                          ? "No administrative audit actions match the current filter criteria."
+                          : "No administrative security actions were recorded during this selected period."}
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
             ) : (
@@ -7683,63 +7838,152 @@ return (
                       <table className="data-table">
                         <thead>
                           <tr>
-                            <th>EVENT TYPE</th>
+                            <th style={{ width: "65px", textAlign: "center" }}>UID</th>
                             <th>PERFORMED BY</th>
+                            <th>ROLE</th>
+                            <th>CLIENT IP</th>
+                            <th>ACTION & CATEGORY</th>
                             <th>DETAILS / MESSAGE</th>
-                            <th>DEVICE ID</th>
-                            <th>TIMESTAMP</th>
+                            <th style={{ width: "80px", textAlign: "center" }}>DEVICE</th>
+                            <th style={{ whiteSpace: "nowrap" }}>TIMESTAMP</th>
                           </tr>
                         </thead>
                         <tbody>
                           {reportData.events.map((ev) => (
                             <tr key={ev.id}>
-                              <td>
-                                <span
-                                  style={{
+                              <td style={{ textAlign: "center" }}>
+                                {ev.user_id ? (
+                                  <span style={{
                                     display: "inline-block",
-                                    padding: "3px 8px",
-                                    borderRadius: "6px",
+                                    padding: "2px 7px",
+                                    borderRadius: "4px",
                                     fontSize: "11px",
                                     fontWeight: 700,
-                                    textTransform: "uppercase",
-                                    background:
-                                      ev.event_type.includes("reject") || ev.event_type.includes("quarantine") || ev.event_type.includes("delete")
-                                        ? "rgba(239, 68, 68, 0.15)"
-                                        : ev.event_type.includes("approve") || ev.event_type.includes("allow")
-                                        ? "rgba(16, 185, 129, 0.15)"
-                                        : "rgba(148, 163, 184, 0.15)",
-                                    color:
-                                      ev.event_type.includes("reject") || ev.event_type.includes("quarantine") || ev.event_type.includes("delete")
-                                        ? "#dc2626"
-                                        : ev.event_type.includes("approve") || ev.event_type.includes("allow")
-                                        ? "#059669"
-                                        : "#334155",
-                                    border: `1px solid ${
-                                      ev.event_type.includes("reject") || ev.event_type.includes("quarantine") || ev.event_type.includes("delete")
-                                        ? "rgba(239, 68, 68, 0.3)"
-                                        : ev.event_type.includes("approve") || ev.event_type.includes("allow")
-                                        ? "rgba(16, 185, 129, 0.3)"
-                                        : "rgba(148, 163, 184, 0.3)"
-                                    }`,
-                                  }}
-                                >
-                                  {ev.event_type.replace(/_/g, " ")}
-                                </span>
+                                    background: "#f1f5f9",
+                                    color: "#1e293b",
+                                    border: "1px solid #cbd5e1",
+                                    fontFamily: "monospace",
+                                  }}>
+                                    #{ev.user_id}
+                                  </span>
+                                ) : (
+                                  <span style={{ color: "#94a3b8", fontSize: "12px" }}>—</span>
+                                )}
                               </td>
                               <td>
                                 <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                                  <strong style={{ color: "#2563eb", fontSize: "12px" }}>
+                                  <span style={{ fontSize: "14px" }}>
+                                    {(ev.role === "system" || (!ev.user_id && (ev.actor || "").toLowerCase().includes("system"))) ? "⚙️" : "👤"}
+                                  </span>
+                                  <strong style={{
+                                    color: (ev.role === "super_admin" || ev.role === "admin") ? "#2563eb" : "#0f172a",
+                                    fontSize: "12px",
+                                  }}>
                                     {ev.actor || "System"}
                                   </strong>
                                 </div>
                               </td>
-                              <td style={{ fontSize: "13px", color: "#334155", maxWidth: "420px", wordBreak: "break-word" }}>
-                                {ev.message}
+                              <td>
+                                <span style={{
+                                  display: "inline-block",
+                                  padding: "2px 7px",
+                                  borderRadius: "5px",
+                                  fontSize: "10px",
+                                  fontWeight: 700,
+                                  textTransform: "uppercase",
+                                  background:
+                                    ev.role === "super_admin"
+                                      ? "rgba(147, 51, 234, 0.12)"
+                                      : ev.role === "admin"
+                                      ? "rgba(37, 99, 235, 0.12)"
+                                      : ev.role === "user"
+                                      ? "rgba(16, 185, 129, 0.12)"
+                                      : "rgba(100, 116, 139, 0.12)",
+                                  color:
+                                    ev.role === "super_admin"
+                                      ? "#7c3aed"
+                                      : ev.role === "admin"
+                                      ? "#1d4ed8"
+                                      : ev.role === "user"
+                                      ? "#059669"
+                                      : "#475569",
+                                  border: `1px solid ${
+                                    ev.role === "super_admin"
+                                      ? "rgba(147, 51, 234, 0.3)"
+                                      : ev.role === "admin"
+                                      ? "rgba(37, 99, 235, 0.3)"
+                                      : ev.role === "user"
+                                      ? "rgba(16, 185, 129, 0.3)"
+                                      : "rgba(100, 116, 139, 0.3)"
+                                  }`,
+                                }}>
+                                  {ev.role || "SYSTEM"}
+                                </span>
                               </td>
                               <td>
+                                <code style={{
+                                  fontSize: "11px",
+                                  color: "#0369a1",
+                                  background: "#f0f9ff",
+                                  padding: "2px 6px",
+                                  borderRadius: "4px",
+                                  border: "1px solid #bae6fd",
+                                  fontWeight: 600,
+                                  whiteSpace: "nowrap",
+                                }}>
+                                  {ev.client_ip || "127.0.0.1"}
+                                </code>
+                              </td>
+                              <td>
+                                <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                  <span
+                                    style={{
+                                      display: "inline-block",
+                                      padding: "3px 8px",
+                                      borderRadius: "6px",
+                                      fontSize: "11px",
+                                      fontWeight: 700,
+                                      textTransform: "uppercase",
+                                      width: "fit-content",
+                                      background:
+                                        ev.event_type.includes("reject") || ev.event_type.includes("quarantine") || ev.event_type.includes("delete")
+                                          ? "rgba(239, 68, 68, 0.15)"
+                                          : ev.event_type.includes("approve") || ev.event_type.includes("allow")
+                                          ? "rgba(16, 185, 129, 0.15)"
+                                          : "rgba(148, 163, 184, 0.15)",
+                                      color:
+                                        ev.event_type.includes("reject") || ev.event_type.includes("quarantine") || ev.event_type.includes("delete")
+                                          ? "#dc2626"
+                                          : ev.event_type.includes("approve") || ev.event_type.includes("allow")
+                                          ? "#059669"
+                                          : "#334155",
+                                      border: `1px solid ${
+                                        ev.event_type.includes("reject") || ev.event_type.includes("quarantine") || ev.event_type.includes("delete")
+                                          ? "rgba(239, 68, 68, 0.3)"
+                                          : ev.event_type.includes("approve") || ev.event_type.includes("allow")
+                                          ? "rgba(16, 185, 129, 0.3)"
+                                          : "rgba(148, 163, 184, 0.3)"
+                                      }`,
+                                    }}
+                                  >
+                                    {(ev.action_label || ev.event_type || "").replace(/_/g, " ")}
+                                  </span>
+                                  {ev.category && (
+                                    <span style={{ fontSize: "10px", color: "#64748b" }}>
+                                      📁 {ev.category}
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td style={{ fontSize: "12px", color: "#334155", maxWidth: "380px", wordBreak: "break-word" }}>
+                                {ev.details || ev.message}
+                              </td>
+                              <td style={{ textAlign: "center" }}>
                                 {ev.device_id ? <code>#{ev.device_id}</code> : <span style={{ color: "#94a3b8" }}>—</span>}
                               </td>
-                              <td>{ev.created_at ? ev.created_at.replace("T", " ").slice(0, 19) : "—"}</td>
+                              <td style={{ whiteSpace: "nowrap", fontSize: "12px", color: "#475569", fontFamily: "monospace" }}>
+                                {ev.created_at ? ev.created_at.replace("T", " ").slice(0, 19) : "—"}
+                              </td>
                             </tr>
                           ))}
                         </tbody>

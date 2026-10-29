@@ -453,6 +453,7 @@ def update_patch_job_status(
             + (f": {error_message}" if error_message else "")
         ),
         device_id=job.device_id,
+        actor=job.initiated_by or "system",
     )
 
     db.commit()
@@ -956,6 +957,7 @@ def create_patch_job(
             f"({ip_address or 'LAN'}) [{'LOCAL' if local else 'REMOTE AGENT QUEUE'}]."
         ),
         device_id=valid_device_id,
+        actor=initiated_by or "system",
     )
     db.commit()
     db.refresh(job)
@@ -1299,6 +1301,7 @@ def execute_patch_job_now(db: Session, job_id: int) -> PatchJob:
         event_type="patch_job_in_progress",
         message=f"Update deployment manually started for {job.hostname} (Job #{job.id}) [{'LOCAL' if local else 'REMOTE'}].",
         device_id=job.device_id,
+        actor=job.initiated_by or "administrator",
     )
     db.commit()
     db.refresh(job)

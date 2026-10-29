@@ -31,6 +31,23 @@ class Event(Base):
         default=None,
     )
 
+    user_id: Mapped[int | None] = mapped_column(
+        nullable=True,
+        default=None,
+    )
+
+    role: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+        default=None,
+    )
+
+    client_ip: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+        default=None,
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=datetime.utcnow,

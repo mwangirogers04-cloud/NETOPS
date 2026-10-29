@@ -544,6 +544,7 @@ def trigger_patch_job(
     and working-hours conflict protection when respect_working_hours=True.
     """
     try:
+        initiated_by_user = payload.initiated_by or (current_user.username if current_user else "administrator")
         job, is_local = create_patch_job(
             db=db,
             hostname=payload.hostname,
@@ -552,7 +553,7 @@ def trigger_patch_job(
             machine_id=payload.machine_id,
             device_id=payload.device_id,
             action=payload.action,
-            initiated_by=payload.initiated_by,
+            initiated_by=initiated_by_user,
             scheduled_at=payload.scheduled_at,
             schedule_mode=payload.schedule_mode,
             respect_working_hours=payload.respect_working_hours,

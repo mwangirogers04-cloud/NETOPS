@@ -9,6 +9,9 @@ def create_event(
     message: str,
     device_id: int | None = None,
     actor: str | None = None,
+    user_id: int | None = None,
+    role: str | None = None,
+    client_ip: str | None = None,
 ):
     """
     Create an audit event within the caller's transaction.
@@ -25,6 +28,9 @@ def create_event(
         message=message,
         device_id=device_id,
         actor=actor,
+        user_id=user_id,
+        role=role,
+        client_ip=client_ip,
     )
 
     db.add(event)

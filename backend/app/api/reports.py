@@ -90,6 +90,121 @@ def _extract_actor(event: Event) -> str:
     return "system"
 
 
+def _categorize_event(event_type: str) -> str:
+    """Categorize audit and operational event types."""
+    et = (event_type or "").lower()
+    if any(k in et for k in ("vlan", "switch")):
+        return "Switch & VLAN Automation"
+    if any(k in et for k in ("user", "password", "auth", "login")):
+        return "User Administration & Auth"
+    if any(k in et for k in ("patch", "update", "remediation", "cve", "vulnerability")):
+        return "Patch & Vulnerability Management"
+    if any(k in et for k in ("approve", "reject", "quarantine", "isolate", "reauthoriz", "delete", "allow", "disallow", "enforcement")):
+        return "Device Access & Enforcement"
+    if any(k in et for k in ("schedule", "policy")):
+        return "Access Schedules & Policies"
+    if any(k in et for k in ("detect", "discover", "classif", "conflict", "stale", "recover")):
+        return "Discovery & Asset Tracking"
+    return "System Administration"
+
+
+def _format_action_details(event: Event, actor: str, role: str) -> str:
+    """Format clear description of what was added, deleted, or changed."""
+    msg = (event.message or "").strip()
+    if msg:
+        return msg
+    et = (event.event_type or "").replace("_", " ").title()
+    return f"{et} performed by {role} '{actor}'."
+
+
+def _resolve_actor_metadata(
+    event: Event,
+    users_by_name: dict[str, User],
+    users_by_id: dict[int, User],
+    sessions_by_user: dict[str, list[UserSession]],
+    sessions_by_uid: dict[int, list[UserSession]],
+) -> dict:
+    """
+    Resolve complete attribution for an audit event:
+    User ID, Performed By (Actor), Role, Client IP, Category, and Details.
+    """
+    # 1. Resolve Actor
+    actor_name = getattr(event, "actor", None) or _extract_actor(event) or "system"
+    clean_actor_lower = actor_name.lower().strip()
+
+    # 2. Resolve User ID and Role
+    user_id = getattr(event, "user_id", None)
+    role_name = getattr(event, "role", None)
+
+    matched_user = None
+    if user_id and user_id in users_by_id:
+        matched_user = users_by_id[user_id]
+    elif clean_actor_lower in users_by_name:
+        matched_user = users_by_name[clean_actor_lower]
+        user_id = matched_user.id
+
+    if matched_user:
+        if not role_name:
+            role_name = matched_user.role
+        actor_name = matched_user.username
+    elif not role_name:
+        if clean_actor_lower in ("system", "system_auto_loop", "cve_scanner", "sniffer", "engine", "discovery"):
+            role_name = "System"
+        elif "super_admin" in clean_actor_lower:
+            role_name = "super_admin"
+        elif "admin" in clean_actor_lower:
+            role_name = "admin"
+        else:
+            role_name = "System"
+
+    # 3. Resolve Client IP Address
+    client_ip = getattr(event, "client_ip", None)
+    if not client_ip:
+        candidate_sessions = []
+        if user_id and user_id in sessions_by_uid:
+            candidate_sessions = sessions_by_uid[user_id]
+        elif clean_actor_lower in sessions_by_user:
+            candidate_sessions = sessions_by_user[clean_actor_lower]
+
+        ev_time = event.created_at
+        if candidate_sessions and ev_time:
+            # First try to find a session active around the event time
+            for s in candidate_sessions:
+                s_login = s.login_at
+                s_end = s.logout_at or s.last_activity_at
+                if s_login and s_login <= ev_time:
+                    if not s_end or s_end >= ev_time or (ev_time - s_login).total_seconds() <= 86400:
+                        client_ip = s.ip_address
+                        break
+            # Otherwise use their most recent login IP
+            if not client_ip and candidate_sessions:
+                client_ip = candidate_sessions[0].ip_address
+
+        if not client_ip:
+            if role_name == "System" or clean_actor_lower in ("system", "cve_scanner", "system_auto_loop"):
+                client_ip = "127.0.0.1 (Local Engine)"
+            else:
+                client_ip = "127.0.0.1 (Local Console)"
+
+    category = _categorize_event(event.event_type)
+    details = _format_action_details(event, actor_name, role_name)
+
+    return {
+        "id": event.id,
+        "event_type": event.event_type,
+        "category": category,
+        "action_label": event.event_type.replace("_", " ").title(),
+        "user_id": user_id,
+        "actor": actor_name,
+        "role": (role_name or "system").lower(),
+        "client_ip": client_ip,
+        "message": event.message,
+        "details": details,
+        "device_id": event.device_id,
+        "created_at": event.created_at.isoformat() if event.created_at else None,
+    }
+
+
 # -------------------------------------------------------------
 # SMART EXCEL STYLING CONSTANTS & HELPERS
 # -------------------------------------------------------------
@@ -487,16 +602,46 @@ def generate_report(
             int(round(total_duration_sec / len(sessions))) if sessions else 0
         )
 
-        # 3. Administrative & Security Audit Trail
+        # Build lookup maps for user and session attribution
+        users_by_name = {
+            u.username.lower(): u for u in all_users
+            if hasattr(u, "username") and u.username and not isinstance(u, Event)
+        }
+        users_by_id = {
+            u.id: u for u in all_users
+            if hasattr(u, "id") and hasattr(u, "username") and not isinstance(u, Event)
+        }
+        sessions_by_user = {}
+        sessions_by_uid = {}
+        for s in sessions:
+            if hasattr(s, "username") and s.username and not isinstance(s, Event):
+                sessions_by_user.setdefault(s.username.lower(), []).append(s)
+            if hasattr(s, "user_id") and s.user_id and not isinstance(s, Event):
+                sessions_by_uid.setdefault(s.user_id, []).append(s)
+
+        # 3. Comprehensive Administrative & Security Audit Trail
         audit_event_types = {
-            "user_created",
-            "user_deactivated",
-            "user_activated",
-            "password_reset",
-            "device_approved",
-            "device_rejected",
-            "device_permanently_deleted",
-            "devices_bulk_deleted",
+            # User Management & Auth
+            "user_created", "user_deactivated", "user_activated", "user_deleted",
+            "user_role_changed", "password_reset", "auth_lockout",
+            # Device Access, Approval & Quarantine
+            "device_approved", "device_rejected", "device_quarantined", "device_isolated",
+            "device_reauthorized", "device_permanently_deleted", "devices_bulk_deleted",
+            "device_type_vlan_mismatch", "internet_access_allowed", "internet_access_disallowed",
+            "access_enforcement", "device_detected", "new_device",
+            # Switch & VLAN Automation
+            "vlan_created", "vlan_updated", "vlan_deleted", "vlan_change", "vlan_automation",
+            "switch_port_configured", "switch_uplinks_configured", "switch_density_changed",
+            "switch_configured", "switch_activated", "switch_backup_created",
+            "switch_backup_restored", "unauthorized_cli_change", "switch_unreachable",
+            # Patch Remediation & Maintenance
+            "patch_job_created", "patch_job_scheduled", "patch_job_activated",
+            "patch_job_in_progress", "patch_job_completed", "patch_job_failed",
+            "patch_job_cancelled", "lan_patch_scan", "update_policy_saved",
+            # Access Schedules & Policies
+            "access_schedule_created", "access_schedule_updated", "access_schedule_deleted", "schedule_reset",
+            # Classification & Asset Operations
+            "device_classification", "classification_review", "ip_address_conflict", "unrecognized_endpoint",
         }
         try:
             audit_events = db.scalars(
@@ -511,8 +656,23 @@ def generate_report(
         except Exception:
             audit_events = []
 
+        enriched_audit_events = [
+            _resolve_actor_metadata(
+                ev,
+                users_by_name=users_by_name,
+                users_by_id=users_by_id,
+                sessions_by_user=sessions_by_user,
+                sessions_by_uid=sessions_by_uid,
+            )
+            for ev in audit_events
+        ]
+
         users_deactivated_count = sum(1 for e in audit_events if e.event_type == "user_deactivated")
         password_resets_count = sum(1 for e in audit_events if e.event_type == "password_reset")
+        category_counts = {}
+        for ev_dict in enriched_audit_events:
+            cat = ev_dict.get("category", "System Administration")
+            category_counts[cat] = category_counts.get(cat, 0) + 1
 
         return {
             "report_type": "user_activity",
@@ -525,7 +685,8 @@ def generate_report(
                 "users_created_in_period": len(users_created),
                 "users_deactivated_in_period": users_deactivated_count,
                 "password_resets_in_period": password_resets_count,
-                "audit_actions_in_period": len(audit_events),
+                "audit_actions_in_period": len(enriched_audit_events),
+                "audit_actions_by_category": category_counts,
                 "total_sessions": len(sessions),
                 "active_sessions": sum(1 for s in sessions if s.is_active),
                 "total_duration_seconds": total_duration_sec,
@@ -549,17 +710,7 @@ def generate_report(
                 }
                 for user in users_created
             ],
-            "audit_events": [
-                {
-                    "id": ev.id,
-                    "event_type": ev.event_type,
-                    "message": ev.message,
-                    "device_id": ev.device_id,
-                    "actor": ev.actor or _extract_actor(ev),
-                    "created_at": ev.created_at.isoformat() if ev.created_at else None,
-                }
-                for ev in audit_events
-            ],
+            "audit_events": enriched_audit_events,
             "sessions": [
                 {
                     "id": session.id,
@@ -824,6 +975,42 @@ def generate_report(
 
     event_summary = filtered_event_type_counts
 
+    try:
+        all_users = db.scalars(select(User)).all()
+    except Exception:
+        all_users = []
+    try:
+        all_sessions = db.scalars(select(UserSession).order_by(UserSession.login_at.desc())).all()
+    except Exception:
+        all_sessions = []
+
+    users_by_name = {
+        u.username.lower(): u for u in all_users
+        if hasattr(u, "username") and u.username and not isinstance(u, Event)
+    }
+    users_by_id = {
+        u.id: u for u in all_users
+        if hasattr(u, "id") and hasattr(u, "username") and not isinstance(u, Event)
+    }
+    sessions_by_user = {}
+    sessions_by_uid = {}
+    for s in all_sessions:
+        if hasattr(s, "username") and s.username and not isinstance(s, Event):
+            sessions_by_user.setdefault(s.username.lower(), []).append(s)
+        if hasattr(s, "user_id") and s.user_id and not isinstance(s, Event):
+            sessions_by_uid.setdefault(s.user_id, []).append(s)
+
+    enriched_events = [
+        _resolve_actor_metadata(
+            event,
+            users_by_name=users_by_name,
+            users_by_id=users_by_id,
+            sessions_by_user=sessions_by_user,
+            sessions_by_uid=sessions_by_uid,
+        )
+        for event in filtered_events
+    ]
+
     return {
         "report_type": report_type,
         "period": period,
@@ -834,19 +1021,7 @@ def generate_report(
             "total_events": len(filtered_events),
             "event_types": event_summary,
         },
-        "events": [
-            {
-                "id": event.id,
-                "event_type": event.event_type,
-                "message": event.message,
-                "device_id": event.device_id,
-                "actor": event.actor or _extract_actor(event),
-                "created_at": (
-                    event.created_at.isoformat()
-                ),
-            }
-            for event in filtered_events
-        ],
+        "events": enriched_events,
     }
 
 
@@ -1232,7 +1407,43 @@ def export_report_excel(
             center_columns={1, 5, 7, 8, 9},
         )
 
-        # Sheet 3: Report Summary & Metrics
+        # Sheet 3: Administrative & Security Audit Trail (Who Performed What)
+        if report.get("audit_events"):
+            ws_audit = workbook.create_sheet(title="Audit Trail (Who Did What)")
+            audit_headers = [
+                "Event ID",
+                "Timestamp (UTC)",
+                "Action Type",
+                "Category",
+                "User ID",
+                "Performed By (Actor)",
+                "User Role",
+                "Client IP Address",
+                "Details / What Was Added, Deleted, or Changed",
+            ]
+
+            audit_rows = []
+            for ev in report.get("audit_events", []):
+                audit_rows.append([
+                    ev.get("id"),
+                    ev.get("created_at") or "",
+                    (ev.get("action_label") or ev.get("event_type") or "").upper(),
+                    ev.get("category") or "",
+                    ev.get("user_id") if ev.get("user_id") is not None else "N/A",
+                    ev.get("actor") or "system",
+                    (ev.get("role") or "").upper(),
+                    ev.get("client_ip") or "",
+                    ev.get("details") or ev.get("message") or "",
+                ])
+
+            populate_smart_excel_sheet(
+                ws_audit,
+                headers=audit_headers,
+                rows=audit_rows,
+                center_columns={1, 3, 4, 5, 7, 8},
+            )
+
+        # Sheet 4: Report Summary & Metrics
         ws_summary = workbook.create_sheet(title="Report Summary")
         summary = report.get("summary", {})
         summary_headers = ["Parameter / Metric", "Value"]
@@ -1246,6 +1457,7 @@ def export_report_excel(
             ["Users Created in Period", summary.get("users_created_in_period", 0)],
             ["Users Deactivated in Period", summary.get("users_deactivated_in_period", 0)],
             ["Password Resets in Period", summary.get("password_resets_in_period", 0)],
+            ["Total Audit Actions in Period", summary.get("audit_actions_in_period", len(report.get("audit_events", [])))],
             ["Total Access Logins", summary.get("total_sessions", 0)],
             ["Active Sessions Now", summary.get("active_sessions", 0)],
             ["Total Access Duration", summary.get("total_duration_formatted", "0s")],
@@ -1350,6 +1562,10 @@ def export_report_excel(
             "Device ID",
             "Timestamp",
             "Performed By",
+            "User ID",
+            "User Role",
+            "Client IP",
+            "Action Category",
         ]
 
         event_rows = []
@@ -1357,16 +1573,25 @@ def export_report_excel(
             event_rows.append([
                 e.get("id"),
                 e.get("event_type"),
-                e.get("message") or "",
-                e.get("device_id") or "N/A",
+                e.get("details") or e.get("message") or "",
+                e.get("device_id") if e.get("device_id") is not None else "N/A",
                 e.get("created_at"),
                 e.get("actor") or "system",
+                e.get("user_id") if e.get("user_id") is not None else "N/A",
+                (e.get("role") or "").upper(),
+                e.get("client_ip") or "",
+                e.get("category") or "",
             ])
 
         if not event_rows:
             event_rows.append([
                 "-",
+                "-",
                 "No events recorded during this period",
+                "-",
+                "-",
+                "-",
+                "-",
                 "-",
                 "-",
                 "-",
@@ -1376,7 +1601,7 @@ def export_report_excel(
             ws_events,
             headers=event_headers,
             rows=event_rows,
-            center_columns={1, 2, 4, 6},
+            center_columns={1, 2, 4, 6, 7, 8, 9},
         )
 
         # Sheet 2: Summary & Breakdown
@@ -2028,33 +2253,40 @@ def export_report_pdf(
             )
             audit_table_data = [
                 [
-                    "Action",
+                    "Time",
+                    "UID",
                     "Performed By",
-                    "Details / Event Message",
-                    "Timestamp",
+                    "Role",
+                    "Client IP",
+                    "Action",
+                    "Details / What Was Done",
                 ]
             ]
             for ev in report["audit_events"]:
-                msg = str(ev.get("message") or "")
+                msg = str(ev.get("details") or ev.get("message") or "")
+                uid_str = str(ev.get("user_id")) if ev.get("user_id") is not None else "-"
                 audit_table_data.append(
                     [
-                        str(ev.get("event_type") or ""),
-                        str(ev.get("actor") or "system"),
-                        Paragraph(xml_escape(msg), styles["BodyText"]),
                         str(ev.get("created_at") or "")[:19].replace("T", " "),
+                        uid_str,
+                        str(ev.get("actor") or "system"),
+                        str(ev.get("role") or "").upper(),
+                        str(ev.get("client_ip") or "-"),
+                        str(ev.get("action_label") or ev.get("event_type") or "").replace("_", " "),
+                        Paragraph(xml_escape(msg), styles["BodyText"]),
                     ]
                 )
             audit_table = Table(
                 audit_table_data,
                 repeatRows=1,
-                colWidths=[100, 80, 240, 95],
+                colWidths=[65, 25, 60, 50, 75, 75, 185],
             )
             audit_table.setStyle(
                 TableStyle(
                     [
                         ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
                         ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-                        ("FONTSIZE", (0, 0), (-1, -1), 7),
+                        ("FONTSIZE", (0, 0), (-1, -1), 6.5),
                         ("VALIGN", (0, 0), (-1, -1), "TOP"),
                     ]
                 )
@@ -2144,40 +2376,35 @@ def export_report_pdf(
         event_data = [
             [
                 "ID",
-                "Type",
-                "Performed By",
-                "Message",
+                "Timestamp",
+                "Actor (Role)",
+                "Client IP",
+                "Action / Type",
+                "Details / Message",
                 "Device",
-                "Created At",
             ]
         ]
 
         for event in report["events"]:
-
-            message = str(
-                event["message"] or ""
-            )
-
+            message = str(event.get("details") or event.get("message") or "")
+            actor_str = str(event.get("actor") or "system")
+            role_str = str(event.get("role") or "").upper()
+            actor_role = f"{actor_str} ({role_str})" if role_str else actor_str
             event_data.append(
                 [
                     str(event["id"]),
-                    str(
-                        event["event_type"]
-                        or ""
-                    ),
-                    str(event.get("actor") or "system"),
+                    str(event["created_at"] or "")[:19].replace("T", " "),
+                    actor_role,
+                    str(event.get("client_ip") or "-"),
+                    str(event.get("action_label") or event.get("event_type") or "").replace("_", " "),
                     Paragraph(
                         xml_escape(message),
                         styles["BodyText"],
                     ),
                     str(
                         event["device_id"]
-                        or ""
+                        or "N/A"
                     ),
-                    str(
-                        event["created_at"]
-                        or ""
-                    )[:19].replace("T", " "),
                 ]
             )
 
@@ -2186,11 +2413,12 @@ def export_report_pdf(
             repeatRows=1,
             colWidths=[
                 25,
+                65,
                 75,
                 65,
-                195,
+                85,
+                180,
                 40,
-                90,
             ],
         )
 
