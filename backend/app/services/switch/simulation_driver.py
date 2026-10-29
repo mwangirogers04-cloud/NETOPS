@@ -309,6 +309,63 @@ class SimulationSwitchDriver(BaseSwitchDriver):
             "commands_applied": cmds,
         }
 
+    def reset_port(
+        self,
+        port_name: str,
+        target_vlan_id: int = 1,
+    ) -> dict[str, Any]:
+        clean_port = port_name.strip()
+        matched = False
+        for p in self._ports_cache:
+            if (
+                p["port"].lower() == clean_port.lower()
+                or p["short_name"].lower() == clean_port.lower()
+                or clean_port.lower().endswith(p["short_name"].lower())
+            ):
+                p["vlan"] = target_vlan_id
+                p["mode"] = "access"
+                p["is_uplink"] = False
+                p["allowed_vlans"] = f"VLAN {target_vlan_id}"
+                matched = True
+                clean_port = p["port"]
+                break
+
+        if not matched:
+            self._ports_cache.append({
+                "port": clean_port,
+                "short_name": clean_port.split("/")[-1] if "/" in clean_port else clean_port,
+                "status": "notconnect",
+                "vlan": target_vlan_id,
+                "duplex": "auto",
+                "speed": "auto",
+                "type": "10/100/1000BaseTX",
+                "mode": "access",
+                "is_uplink": False,
+                "allowed_vlans": f"VLAN {target_vlan_id}",
+                "connected_mac": None,
+            })
+
+        cmds = [
+            f"default interface {clean_port}",
+            f"interface {clean_port}",
+            " switchport mode access",
+            f" switchport access vlan {target_vlan_id}",
+            " no shutdown",
+            "end",
+            "write memory",
+        ]
+        msg = f"Port {clean_port} successfully reset to default (Access mode, VLAN {target_vlan_id}). Interface cleared and ready for new VLAN assignment."
+
+        return {
+            "success": True,
+            "port": clean_port,
+            "vlan_id": target_vlan_id,
+            "mode": "access",
+            "is_uplink": False,
+            "message": msg,
+            "commands_applied": cmds,
+        }
+
     def get_running_config(self) -> str:
         """
         Generate a realistic Cisco IOS running-config representing the current state

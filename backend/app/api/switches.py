@@ -89,6 +89,12 @@ class AssignPortVlanRequest(BaseModel):
     is_trunk: bool = Field(False, description="Tick to configure as 802.1Q trunk uplink port")
 
 
+class ResetPortRequest(BaseModel):
+    port_name: str | None = Field(None, description="Switch physical port, e.g. 'GigabitEthernet0/1'")
+    target_vlan_id: int = Field(1, ge=1, le=4094, description="Default VLAN to assign upon reset (defaults to VLAN 1)")
+    reset_all: bool = Field(False, description="Whether to reset all switch ports back to default")
+
+
 class ConfigureUplinksRequest(BaseModel):
     ports: list[str] | None = None
     native_vlan: int = Field(1, ge=1, le=4094)
@@ -636,6 +642,65 @@ def assign_port_vlan(
         message=(
             f"Switch port '{req.port_name}' configured with VLAN {req.vlan_id} ({effective_mode.upper()} mode) "
             f"by {current_user.role} '{current_user.username}'."
+        ),
+        device_id=None,
+        actor=current_user.username,
+    )
+    db.commit()
+
+    return res
+
+
+@router.post("/ports/reset")
+def reset_switch_ports(
+    req: ResetPortRequest,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Reset a specific switch port or all switch ports back to default VLAN 1 (Access mode).
+    Clears trunk mode and isolation, allowing an administrator to repurpose the port for another VLAN.
+    """
+    driver = get_active_switch_driver(db)
+
+    if req.reset_all:
+        interfaces = driver.get_interfaces()
+        reset_ports = []
+        for p in interfaces:
+            p_name = p["port"]
+            driver.reset_port(port_name=p_name, target_vlan_id=req.target_vlan_id)
+            reset_ports.append(p_name)
+
+        create_event(
+            db=db,
+            event_type="switch_ports_bulk_reset",
+            message=(
+                f"All {len(reset_ports)} switch ports reset to default VLAN {req.target_vlan_id} (Access mode) "
+                f"by {current_user.role} '{current_user.username}'."
+            ),
+            device_id=None,
+            actor=current_user.username,
+        )
+        db.commit()
+        return {
+            "success": True,
+            "reset_all": True,
+            "target_vlan_id": req.target_vlan_id,
+            "ports": reset_ports,
+            "message": f"All {len(reset_ports)} switch ports successfully reset to default VLAN {req.target_vlan_id}.",
+        }
+
+    if not req.port_name:
+        raise HTTPException(status_code=400, detail="Port name is required when not resetting all ports.")
+
+    res = driver.reset_port(port_name=req.port_name, target_vlan_id=req.target_vlan_id)
+
+    create_event(
+        db=db,
+        event_type="switch_port_reset",
+        message=(
+            f"Switch port '{req.port_name}' reset to default (VLAN {req.target_vlan_id}, Access mode) "
+            f"by {current_user.role} '{current_user.username}'. Ready for new VLAN assignment."
         ),
         device_id=None,
         actor=current_user.username,

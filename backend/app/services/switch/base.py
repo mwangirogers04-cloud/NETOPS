@@ -106,6 +106,14 @@ class BaseSwitchDriver(ABC):
         """Assign a physical switch interface to a specific VLAN."""
         pass
 
+    def reset_port(
+        self,
+        port_name: str,
+        target_vlan_id: int = 1,
+    ) -> dict[str, Any]:
+        """Reset a physical switch interface to default Access mode and default VLAN (e.g. VLAN 1)."""
+        return self.set_port_vlan(port_name=port_name, vlan_id=target_vlan_id, mode="access")
+
     @abstractmethod
     def get_running_config(self) -> str:
         """Retrieve the live running configuration text from the switch."""

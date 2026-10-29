@@ -226,6 +226,50 @@ class CiscoSwitchDriver(BaseSwitchDriver):
             res["message"] += f" (Live switch {params['host']} unreachable, staged in platform configuration)"
             return res
 
+    def reset_port(
+        self,
+        port_name: str,
+        target_vlan_id: int = 1,
+    ) -> dict[str, Any]:
+        params = self._get_connection_params()
+        clean_port = port_name.strip()
+
+        if not check_switch_reachability(params["host"], params["port"]):
+            res = self.fallback.reset_port(clean_port, target_vlan_id)
+            res["message"] += f" (Live switch {params['host']} unreachable, staged in platform configuration)"
+            return res
+
+        commands = [
+            f"default interface {clean_port}",
+            f"interface {clean_port}",
+            " switchport mode access",
+            f" switchport access vlan {target_vlan_id}",
+            " no shutdown",
+            "end",
+            "write memory",
+        ]
+        try:
+            with ConnectHandler(**params) as conn:
+                conn.enable()
+                output = conn.send_config_set(commands[:-2])
+                conn.send_command("write memory", read_timeout=15)
+                self.fallback.reset_port(clean_port, target_vlan_id)
+                return {
+                    "success": True,
+                    "port": clean_port,
+                    "vlan_id": target_vlan_id,
+                    "mode": "access",
+                    "is_uplink": False,
+                    "message": f"Port {clean_port} reset to default (VLAN {target_vlan_id}) on Cisco switch {params['host']}.",
+                    "commands_applied": commands,
+                    "cli_output": output,
+                }
+        except Exception as exc:
+            logger.warning("Cisco live port reset error (%s). Staging in simulator.", exc)
+            res = self.fallback.reset_port(clean_port, target_vlan_id)
+            res["message"] += f" (Live switch {params['host']} unreachable, staged in platform configuration)"
+            return res
+
     def _parse_vlan_brief(self, output: str) -> list[dict[str, Any]]:
         vlans = []
         for line in output.splitlines():

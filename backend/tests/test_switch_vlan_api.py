@@ -641,6 +641,89 @@ def test_switch_density_48_ports_and_sfp_uplinks(client, db_session):
     assert not any("TenGigabitEthernet" in p["port"] for p in ports_24)
 
 
+def test_reset_switch_port_to_default_vlan(client, db_session):
+    admin = User(
+        username="port_reset_admin",
+        email="port_reset_admin@netops.local",
+        hashed_password=hash_password("Admin@1234"),
+        role="admin",
+        is_active=True,
+        is_verified=True,
+    )
+    db_session.add(admin)
+    db_session.commit()
+    admin_token = create_access_token({"sub": admin.username, "role": admin.role, "user_id": admin.id})
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    # 1. Assign Port 5 to VLAN 30 and Trunk mode
+    assign_res = client.post(
+        "/switches/ports/assign",
+        headers=headers,
+        json={"port_name": "GigabitEthernet0/5", "vlan_id": 30, "mode": "trunk", "is_trunk": True},
+    )
+    assert assign_res.status_code == 200
+
+    # 2. Verify Port 5 is currently VLAN 30 and trunk
+    ports = client.get("/switches/ports").json()
+    p5 = next(p for p in ports if p["port"] == "GigabitEthernet0/5")
+    assert p5["vlan"] == 30
+    assert p5["mode"] == "trunk"
+
+    # 3. Reset Port 5 to default VLAN 1
+    reset_res = client.post(
+        "/switches/ports/reset",
+        headers=headers,
+        json={"port_name": "GigabitEthernet0/5", "target_vlan_id": 1},
+    )
+    assert reset_res.status_code == 200
+    reset_data = reset_res.json()
+    assert reset_data["success"] is True
+    assert reset_data["vlan_id"] == 1
+    assert reset_data["mode"] == "access"
+    assert reset_data["is_uplink"] is False
+
+    # 4. Verify in ports list that Port 5 is restored to VLAN 1 access
+    ports_after = client.get("/switches/ports").json()
+    p5_after = next(p for p in ports_after if p["port"] == "GigabitEthernet0/5")
+    assert p5_after["vlan"] == 1
+    assert p5_after["mode"] == "access"
+    assert p5_after["is_uplink"] is False
+
+
+def test_reset_all_switch_ports_bulk(client, db_session):
+    admin = User(
+        username="port_bulk_reset_admin",
+        email="bulk_admin@netops.local",
+        hashed_password=hash_password("Admin@1234"),
+        role="admin",
+        is_active=True,
+        is_verified=True,
+    )
+    db_session.add(admin)
+    db_session.commit()
+    admin_token = create_access_token({"sub": admin.username, "role": admin.role, "user_id": admin.id})
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    # Call bulk reset
+    bulk_res = client.post(
+        "/switches/ports/reset",
+        headers=headers,
+        json={"reset_all": True, "target_vlan_id": 1},
+    )
+    assert bulk_res.status_code == 200
+    data = bulk_res.json()
+    assert data["success"] is True
+    assert data["reset_all"] is True
+    assert len(data["ports"]) > 0
+
+    # Verify all ports in database / simulator have vlan 1
+    ports = client.get("/switches/ports").json()
+    for p in ports:
+        assert p["vlan"] == 1
+        assert p["mode"] == "access"
+
+
+
 
 
 

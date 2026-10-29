@@ -35,6 +35,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
   const [targetVlanId, setTargetVlanId] = useState("");
   const [isTrunk, setIsTrunk] = useState(false);
   const [assigningPort, setAssigningPort] = useState(false);
+  const [resettingPort, setResettingPort] = useState(false);
   const [configuringUplinks, setConfiguringUplinks] = useState(false);
   const [portTableFilter, setPortTableFilter] = useState("all");
 
@@ -344,6 +345,53 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
       await loadAllData();
     } catch (err) {
       showStatus(err.message, "error");
+    }
+  };
+
+  // Reset Individual Switch Port back to factory default VLAN 1 (Access mode)
+  const handleResetPort = async (portObj, skipConfirm = false) => {
+    if (!isAdmin) return;
+    const portName = typeof portObj === "string" ? portObj : portObj?.port;
+    if (!portName) return;
+
+    if (!skipConfirm) {
+      const ok = window.confirm(
+        `🔄 RESET SWITCH PORT '${portName}'?\n\n` +
+        `This action will reset ONLY this port (${portName}) to factory defaults:\n` +
+        `• Port Mode: Access (untagged)\n` +
+        `• Assigned VLAN: Default VLAN 1\n` +
+        `• Trunk / Uplink: Disabled\n` +
+        `• Quarantine Isolation: Cleared\n\n` +
+        `All other switch ports, VLAN configurations, and trunk uplinks remain unchanged.\n` +
+        `The port will be immediately available and ready for reassignment to another VLAN.\n\n` +
+        `Confirm reset of ${portName}?`
+      );
+      if (!ok) return;
+    }
+
+    setResettingPort(true);
+    try {
+      const res = await fetch(`${API_URL}/switches/ports/reset`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        body: JSON.stringify({
+          port_name: portName,
+          target_vlan_id: 1,
+          reset_all: false,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to reset switch port.");
+      showStatus(
+        `Port ${portName} successfully reset to default VLAN 1! Ready for new VLAN assignment.`,
+        "success"
+      );
+      setSelectedPort(null);
+      await loadAllData();
+    } catch (err) {
+      showStatus(err.message, "error");
+    } finally {
+      setResettingPort(false);
     }
   };
 
@@ -1610,6 +1658,16 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                               >
                                 ✏️ Configure Port
                               </button>
+                              <button
+                                type="button"
+                                className="secondary-button small"
+                                style={{ color: "#b45309", borderColor: "#fcd34d", background: "#fffbeb" }}
+                                onClick={() => handleResetPort(p)}
+                                disabled={resettingPort}
+                                title={`Reset ${p.port} back to factory default VLAN 1 (Access mode) so it can be assigned to another VLAN`}
+                              >
+                                🔄 Reset
+                              </button>
                               {p.vlan !== 90 && !isTrunkPort && (
                                 <button
                                   type="button"
@@ -2700,23 +2758,44 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                 )}
               </div>
 
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", marginTop: "18px" }}>
                 <button
                   type="button"
                   className="secondary-button small"
-                  onClick={() => setSelectedPort(null)}
-                  disabled={assigningPort}
+                  style={{
+                    color: "#b45309",
+                    borderColor: "#fcd34d",
+                    background: "#fffbeb",
+                    fontWeight: "700",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                  }}
+                  onClick={() => handleResetPort(selectedPort)}
+                  disabled={assigningPort || resettingPort}
+                  title="Reset ONLY this port back to default Access mode and default VLAN 1 for new assignment"
                 >
-                  Cancel
+                  <span>🔄</span> {resettingPort ? "Resetting..." : "Reset Port to Default (VLAN 1)"}
                 </button>
-                <button
-                  type="submit"
-                  className="primary-button small"
-                  disabled={assigningPort}
-                  style={isTrunk ? { background: "#7c3aed", borderColor: "#6d28d9" } : {}}
-                >
-                  {assigningPort ? "Applying..." : (isTrunk ? "🔀 Apply Trunk Uplink" : "Apply Access VLAN")}
-                </button>
+
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <button
+                    type="button"
+                    className="secondary-button small"
+                    onClick={() => setSelectedPort(null)}
+                    disabled={assigningPort || resettingPort}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="primary-button small"
+                    disabled={assigningPort || resettingPort}
+                    style={isTrunk ? { background: "#7c3aed", borderColor: "#6d28d9" } : {}}
+                  >
+                    {assigningPort ? "Applying..." : (isTrunk ? "🔀 Apply Trunk Uplink" : "Apply Access VLAN")}
+                  </button>
+                </div>
               </div>
             </form>
           </div>
