@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { isTypeAndVlanMatching, getExpectedVlanForType } from "../utils/networkInterfaceStatus";
 
 export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, devices = [] }) {
   const isAdmin = currentUser?.role === "admin" || currentUser?.role === "super_admin";
@@ -851,7 +852,14 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                   </div>
 
                   <div style={{ marginTop: "10px", paddingTop: "8px", borderTop: `1px solid ${theme.border}44`, display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "11px", color: "#475569" }}>
-                    <span>Devices: <strong>{matchingDevices.length}</strong></span>
+                    <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+                      <span>Devices: <strong>{matchingDevices.length}</strong></span>
+                      {matchingDevices.filter((d) => !isTypeAndVlanMatching(d)).length > 0 && (
+                        <span style={{ fontSize: "10px", color: "#b45309", background: "rgba(245, 158, 11, 0.15)", padding: "1px 6px", borderRadius: "4px", fontWeight: "700" }}>
+                          ⚠️ {matchingDevices.filter((d) => !isTypeAndVlanMatching(d)).length} Mismatched
+                        </span>
+                      )}
+                    </div>
                     {isAdmin && (
                       <button
                         type="button"

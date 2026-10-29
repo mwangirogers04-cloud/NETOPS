@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { getDeviceInternetStatus, DeviceInterfaceBadge } from "../utils/networkInterfaceStatus";
+import { getDeviceInternetStatus, DeviceInterfaceBadge, isTypeAndVlanMatching } from "../utils/networkInterfaceStatus";
 
 export default function NetworkTopologyMap({
   API_URL,
@@ -551,9 +551,19 @@ export default function NetworkTopologyMap({
                                       height: "8px",
                                       borderRadius: "50%",
                                       display: "inline-block",
-                                      background: d.status === "online" ? "#10b981" : "#94a3b8",
+                                      background: !isTypeAndVlanMatching(d)
+                                        ? "#f59e0b"
+                                        : d.status === "online"
+                                        ? "#10b981"
+                                        : "#94a3b8",
                                     }}
-                                    title={d.status === "online" ? "Online" : "Offline"}
+                                    title={
+                                      !isTypeAndVlanMatching(d)
+                                        ? "Disconnected: Type & VLAN Section Mismatch"
+                                        : d.status === "online"
+                                        ? "Online & Connected"
+                                        : "Offline"
+                                    }
                                   />
                                 </div>
                               </div>

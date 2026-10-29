@@ -42,6 +42,7 @@ def get_access_decision(
     device_type: str | None,
     approval_status: str,
     enforcement_status: str | None = None,
+    vlan_id: int | None = None,
 ) -> str:
     """
     Determine the access decision.
@@ -51,7 +52,7 @@ def get_access_decision(
     1. Pending devices are quarantined.
     2. Rejected devices are quarantined.
     3. Unknown/unclassified devices are quarantined.
-    4. Approved recognized devices are allowed.
+    4. Approved recognized devices are allowed IF TYPE and VLAN section match.
     5. enforcement_status is NOT used to calculate the
        approval-based access decision.
 
@@ -69,12 +70,18 @@ def get_access_decision(
     if normalized_type is None:
         return "quarantine"
 
+    if vlan_id is not None:
+        from .vlan_policy import is_type_and_vlan_matching
+        if not is_type_and_vlan_matching(device_type, vlan_id):
+            return "quarantine"
+
     return "allowed"
 
 
 def get_access_reason(
     device_type: str | None,
     approval_status: str,
+    vlan_id: int | None = None,
 ) -> str:
     """
     Explain why the device currently has its
@@ -93,6 +100,12 @@ def get_access_reason(
 
     if normalized_type is None:
         return "Unknown or unrecognized device type"
+
+    if vlan_id is not None:
+        from .vlan_policy import is_type_and_vlan_matching, get_vlan_for_device_type
+        if not is_type_and_vlan_matching(device_type, vlan_id):
+            expected = get_vlan_for_device_type(device_type)
+            return f"Type & VLAN mismatch: '{device_type or 'unknown'}' requires VLAN {expected}, but assigned VLAN {vlan_id}. For a device to be connected it must be same in TYPE and VLAN section."
 
     if approval_status == "approved":
         return "Approved recognized device with network access allowed"

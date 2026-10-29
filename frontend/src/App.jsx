@@ -4,7 +4,14 @@ import UsersPage from "./components/UsersPage";
 import SwitchVlanPage from "./components/SwitchVlanPage";
 import NetworkTopologyMap from "./components/NetworkTopologyMap";
 import { NETOPS_FAQS, FAQ_CATEGORIES } from "./data/faqs";
-import { getDeviceInternetStatus, DeviceInterfaceBadge } from "./utils/networkInterfaceStatus";
+import {
+  getDeviceInternetStatus,
+  DeviceInterfaceBadge,
+  TYPE_TO_VLAN,
+  VLAN_TO_TYPE,
+  isTypeAndVlanMatching,
+  getExpectedVlanForType,
+} from "./utils/networkInterfaceStatus";
 
 const API_URL =
   window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
@@ -597,7 +604,13 @@ function App() {
       const response = await fetch(`${API_URL}/endpoint-updates/jobs?limit=100`);
       if (response.ok) {
         const data = await response.json();
-        setPatchJobs(Array.isArray(data) ? data : []);
+        const jobs = Array.isArray(data) ? data : [];
+        setPatchJobs(jobs);
+        setSelectedJobDetails((prev) => {
+          if (!prev) return null;
+          const fresh = jobs.find((j) => j.id === prev.id);
+          return fresh || prev;
+        });
       }
     } catch (err) {
       console.error("Failed to load patch jobs:", err);
@@ -3227,7 +3240,44 @@ const DevicesPage = () => {
                     </td>
 
                     <td>
-                      {device.status === "online" ? (
+                      {!isTypeAndVlanMatching(device) ? (
+                        <div style={{ display: "inline-flex", flexDirection: "column", gap: "4px", alignItems: "flex-start" }}>
+                          <span
+                            className="status-badge blocked"
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "5px",
+                              fontSize: "11px",
+                              fontWeight: "700",
+                              padding: "2px 8px",
+                              background: "rgba(245, 158, 11, 0.15)",
+                              color: "#b45309",
+                              border: "1px solid #f59e0b",
+                            }}
+                            title={`Device type '${device.device_type}' requires VLAN ${getExpectedVlanForType(device.device_type)}, but assigned VLAN is ${device.vlan_id || 90}. For a device to be connected it must be same in TYPE and VLAN section.`}
+                          >
+                            ⚠️ DISCONNECTED (Type &amp; VLAN Mismatch)
+                          </span>
+                          {isAdmin && (
+                            <button
+                              type="button"
+                              className="primary-button small"
+                              style={{
+                                fontSize: "10px",
+                                padding: "2px 6px",
+                                background: "#f59e0b",
+                                borderColor: "#d97706",
+                                cursor: "pointer",
+                              }}
+                              onClick={() => deviceAction(device.id, "vlan", getExpectedVlanForType(device.device_type))}
+                              title={`Synchronize device to VLAN ${getExpectedVlanForType(device.device_type)} to match type '${device.device_type}' and restore connectivity`}
+                            >
+                              🔄 Sync to VLAN {getExpectedVlanForType(device.device_type)}
+                            </button>
+                          )}
+                        </div>
+                      ) : device.status === "online" ? (
                         <span
                           className="status-badge allowed"
                           style={{
@@ -4356,7 +4406,44 @@ const LanScannerPage = () => {
 
                       {/* CONNECTION */}
                       <td>
-                        {device.status === "online" ? (
+                        {!isTypeAndVlanMatching(device) ? (
+                          <div style={{ display: "inline-flex", flexDirection: "column", gap: "4px", alignItems: "flex-start" }}>
+                            <span
+                              className="status-badge blocked"
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "5px",
+                                fontSize: "11px",
+                                fontWeight: "700",
+                                padding: "2px 8px",
+                                background: "rgba(245, 158, 11, 0.15)",
+                                color: "#b45309",
+                                border: "1px solid #f59e0b",
+                              }}
+                              title={`Device type '${device.device_type}' requires VLAN ${getExpectedVlanForType(device.device_type)}, but assigned VLAN is ${device.vlan_id || 90}. For a device to be connected it must be same in TYPE and VLAN section.`}
+                            >
+                              ⚠️ DISCONNECTED (Type &amp; VLAN Mismatch)
+                            </span>
+                            {isAdmin && (
+                              <button
+                                type="button"
+                                className="primary-button small"
+                                style={{
+                                  fontSize: "10px",
+                                  padding: "2px 6px",
+                                  background: "#f59e0b",
+                                  borderColor: "#d97706",
+                                  cursor: "pointer",
+                                }}
+                                onClick={() => deviceAction(device.id, "vlan", getExpectedVlanForType(device.device_type))}
+                                title={`Synchronize device to VLAN ${getExpectedVlanForType(device.device_type)} to match type '${device.device_type}' and restore connectivity`}
+                              >
+                                🔄 Sync to VLAN {getExpectedVlanForType(device.device_type)}
+                              </button>
+                            )}
+                          </div>
+                        ) : device.status === "online" ? (
                           <span
                             className="status-badge allowed"
                             style={{
@@ -5338,6 +5425,13 @@ const AccessPage = () => {
                               device.device_type
                             }
                           />
+                          {!isTypeAndVlanMatching(device) && (
+                            <div style={{ marginTop: "4px" }}>
+                              <span style={{ fontSize: "10px", color: "#b45309", background: "rgba(245, 158, 11, 0.15)", border: "1px solid #f59e0b", padding: "1px 6px", borderRadius: "4px", fontWeight: "700", display: "inline-block" }}>
+                                ⚠️ Requires VLAN {getExpectedVlanForType(device.device_type)} to connect
+                              </span>
+                            </div>
+                          )}
                         </td>
 
                         <td>
@@ -12000,26 +12094,49 @@ const EndpointUpdatesPage = () => {
                       </div>
                     )}
 
-                    <div style={{ background: "#f1f5f9", height: "6px", borderRadius: "3px", overflow: "hidden", marginBottom: "12px" }}>
+                    {selectedJobDetails.status === "IN_PROGRESS" && (
+                      <div style={{ fontSize: "12px", color: "#d97706", fontWeight: "600", marginBottom: "8px", display: "flex", alignItems: "center", gap: "8px", background: "rgba(245, 158, 11, 0.08)", padding: "6px 10px", borderRadius: "6px", border: "1px solid rgba(245, 158, 11, 0.25)" }}>
+                        <span style={{ display: "inline-block", width: "8px", height: "8px", borderRadius: "50%", background: "#f59e0b", animation: "pulse 1.5s infinite" }} />
+                        <span>
+                          {selectedJobDetails.progress_percent >= 97
+                            ? "⚙️ Running post-installation triggers & finalizing system configuration..."
+                            : selectedJobDetails.progress_percent >= 88
+                            ? "📦 Configuring and setting up packages on system..."
+                            : selectedJobDetails.progress_percent >= 78
+                            ? "📂 Unpacking packages & preparing dependencies..."
+                            : selectedJobDetails.progress_percent >= 70
+                            ? "⬇️ Downloading update archives from repositories..."
+                            : selectedJobDetails.progress_percent >= 50
+                            ? "🔍 Evaluating pending updates and dependency tree..."
+                            : "⚡ Initializing package deployment..."}
+                        </span>
+                      </div>
+                    )}
+
+                    <div style={{ background: "#f1f5f9", height: "8px", borderRadius: "4px", overflow: "hidden", marginBottom: "12px" }}>
                       <div
                         style={{
                           height: "100%",
                           width: `${selectedJobDetails.progress_percent}%`,
-                          background: selectedJobDetails.status === "FAILED" ? "#ef4444" : "#10b981",
-                          transition: "width 0.3s ease",
+                          background: selectedJobDetails.status === "FAILED"
+                            ? "#ef4444"
+                            : selectedJobDetails.status === "IN_PROGRESS"
+                            ? "linear-gradient(90deg, #f59e0b 0%, #10b981 100%)"
+                            : "#10b981",
+                          transition: "width 0.4s ease",
                         }}
                       />
                     </div>
 
                     <pre
                       style={{
-                        background: "#f8fafc",
-                        color: "#15803d",
+                        background: "#0f172a",
+                        color: "#4ade80",
                         padding: "12px",
                         borderRadius: "6px",
                         fontSize: "12px",
                         fontFamily: "monospace",
-                        maxHeight: "180px",
+                        maxHeight: "220px",
                         overflowY: "auto",
                         whiteSpace: "pre-wrap",
                         margin: 0,

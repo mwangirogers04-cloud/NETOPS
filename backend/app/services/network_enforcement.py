@@ -16,7 +16,7 @@ from .sophos_enforcement import (
     sophos_block_device,
     sophos_allow_device,
 )
-from .vlan_policy import get_vlan_for_device_type
+from .vlan_policy import get_vlan_for_device_type, is_type_and_vlan_matching
 
 
 def enforce_device_access(
@@ -150,6 +150,11 @@ def enforce_device_access(
                 device.device_type,
                 device.approval_status,
             )
+
+        # Invariant: For a device to be connected it must be same in TYPE and VLAN section
+        if decision == "allowed" and getattr(device, "vlan_id", None) is not None and not is_type_and_vlan_matching(device.device_type, device.vlan_id):
+            decision = "quarantine"
+            device.internet_access_authorized = False
 
     # ---------------------------------------------------------
     # Determine enforcement action and apply live firewall rules.

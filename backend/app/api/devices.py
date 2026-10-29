@@ -22,7 +22,11 @@ from ..schemas.device import (
     DeviceTroubleshootResponse,
     DiagnosticFixRequest,
 )
-from ..services.vlan_policy import get_vlan_for_device_type
+from ..services.vlan_policy import (
+    get_vlan_for_device_type,
+    get_device_type_for_vlan,
+    is_type_and_vlan_matching,
+)
 from ..services.access_policy import (
     get_access_decision,
     get_access_reason,
@@ -67,6 +71,9 @@ def add_access_information(device: Device):
         device.access_decision = "isolated"
 
     elif device.approval_status in {"pending", "rejected"}:
+        device.access_decision = "quarantine"
+
+    elif getattr(device, "vlan_id", None) is not None and not is_type_and_vlan_matching(device.device_type, device.vlan_id):
         device.access_decision = "quarantine"
 
     elif device.enforcement_status == "allowed":
@@ -450,14 +457,14 @@ def allow_device(
 
     # --------------------------------------------------------
     # RESTORE OPERATIONAL VLAN IF CURRENTLY IN QUARANTINE
+    # For a device to be connected it must be same in TYPE and VLAN section
     # --------------------------------------------------------
-    if device.vlan_id == 90 or not device.vlan_id:
-        target_vlan = get_vlan_for_device_type(device.device_type)
-        if not target_vlan or target_vlan == 90:
-            target_vlan = 20
-            if not device.device_type or device.device_type == "unknown":
-                device.device_type = "computer"
-        device.vlan_id = target_vlan
+    target_vlan = get_vlan_for_device_type(device.device_type)
+    if not target_vlan or target_vlan == 90:
+        target_vlan = 20
+        if not device.device_type or device.device_type == "unknown":
+            device.device_type = "computer"
+    device.vlan_id = target_vlan
 
     # --------------------------------------------------------
     # EXPLICIT INTERNET ACCESS GRANT
@@ -670,6 +677,11 @@ def set_device_type(
 
     device.vlan_id = new_vlan
 
+    # Keep TYPE and VLAN section identical: auto-align device_type to the matching VLAN
+    canonical_type = get_device_type_for_vlan(new_vlan)
+    if canonical_type != "unknown":
+        device.device_type = canonical_type
+
     device.classification_status = "reviewed"
 
     create_event(
@@ -866,6 +878,11 @@ def set_device_vlan(
         )
 
     device.vlan_id = new_vlan
+
+    # Keep TYPE and VLAN section identical: auto-align device_type to the matching VLAN
+    canonical_type = get_device_type_for_vlan(new_vlan)
+    if canonical_type != "unknown":
+        device.device_type = canonical_type
 
     # If moving to Quarantine VLAN 90, automatically disconnect internet access immediately
     if new_vlan == 90:

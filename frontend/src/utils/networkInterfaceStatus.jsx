@@ -1,5 +1,42 @@
 import React from "react";
 
+export const TYPE_TO_VLAN = {
+  ip_phone: 10,
+  phone: 10,
+  voip: 10,
+  computer: 20,
+  cctv: 30,
+  printer: 40,
+  server: 50,
+  access_point: 60,
+  ap: 60,
+  wifi_ap: 60,
+  unknown: 90,
+};
+
+export const VLAN_TO_TYPE = {
+  10: "ip_phone",
+  20: "computer",
+  30: "cctv",
+  40: "printer",
+  50: "server",
+  60: "access_point",
+  90: "unknown",
+};
+
+export const getExpectedVlanForType = (deviceType) => {
+  if (!deviceType) return 90;
+  const t = String(deviceType).toLowerCase().trim();
+  return TYPE_TO_VLAN[t] !== undefined ? TYPE_TO_VLAN[t] : 90;
+};
+
+export const isTypeAndVlanMatching = (device) => {
+  if (!device) return true;
+  const expected = getExpectedVlanForType(device.device_type);
+  const current = Number(device.vlan_id || 90);
+  return current === expected;
+};
+
 /**
  * Computes network interface type and real-time internet connectivity status
  * for any LAN or WLAN (Wi-Fi) device.
@@ -11,6 +48,7 @@ import React from "react";
  * 3. It is Disconnected / Offline (status == "offline" or status == "disconnected")
  * 4. It is Pending / Unapproved (approval_status == "pending" or rejected or not approved)
  * 5. It is Unauthorized (internet_access_authorized == false)
+ * 6. TYPE and VLAN section mismatch (For a device to be connected it must be same in TYPE and VLAN section)
  */
 export const getDeviceInternetStatus = (device) => {
   if (!device) {
@@ -24,6 +62,8 @@ export const getDeviceInternetStatus = (device) => {
       badgeBg: "rgba(100, 116, 139, 0.15)",
       badgeBorder: "#94a3b8",
       ifaceLabel: "LAN (eth0)",
+      isTypeVlanMismatch: false,
+      expectedVlan: 90,
     };
   }
 
@@ -50,7 +90,10 @@ export const getDeviceInternetStatus = (device) => {
     (device.approval_status && device.approval_status !== "approved");
   const isUnauthorized = device.internet_access_authorized === false;
 
-  const hasNoInternet = isDisconnected || isQuarantined || isIsolated || isPending || isUnauthorized;
+  const expectedVlan = getExpectedVlanForType(device.device_type);
+  const isTypeVlanMismatch = device.vlan_id !== undefined && device.vlan_id !== null && Number(device.vlan_id) !== expectedVlan;
+
+  const hasNoInternet = isDisconnected || isQuarantined || isIsolated || isPending || isUnauthorized || isTypeVlanMismatch;
 
   let reason = "Internet Access Active";
   let shortReason = "Active";
@@ -64,8 +107,15 @@ export const getDeviceInternetStatus = (device) => {
     shortReason = "Offline";
     statusIcon = isWireless ? "📶⚪" : "🔌⚪";
     badgeColor = "#64748b";
-    badgeBg = "rgba(100, 116, 139, 0.15)";
+    badgeBg = "rgba(100, 116, 139, 0.15)",
     badgeBorder = "#94a3b8";
+  } else if (isTypeVlanMismatch) {
+    reason = `Type & VLAN Mismatch: Device type '${device.device_type || "unknown"}' requires VLAN ${expectedVlan}, but assigned VLAN ${device.vlan_id || 90}. Device must match in TYPE and VLAN section to be connected.`;
+    shortReason = "Type/VLAN Mismatch";
+    statusIcon = isWireless ? "📶⚠️" : "🔌⚠️";
+    badgeColor = "#b45309";
+    badgeBg = "rgba(245, 158, 11, 0.15)";
+    badgeBorder = "#f59e0b";
   } else if (isQuarantined) {
     reason = "Quarantined in VLAN 90 (Zero-Trust NAC: No Internet Access)";
     shortReason = "Quarantined (VLAN 90)";
@@ -106,6 +156,8 @@ export const getDeviceInternetStatus = (device) => {
     isIsolated,
     isPending,
     isUnauthorized,
+    isTypeVlanMismatch,
+    expectedVlan,
     reason,
     shortReason,
     statusIcon,

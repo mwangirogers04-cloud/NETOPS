@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from ..models.device import Device
 from ..models.event import Event
 from .event_service import create_event
-from .vlan_policy import get_vlan_for_device_type
+from .vlan_policy import get_vlan_for_device_type, is_type_and_vlan_matching
 from .firewall.manager import get_active_firewall_driver
 from .sophos_enforcement import (
     is_sophos_configured,
@@ -187,6 +187,66 @@ def get_local_mac(interface: str | None = None) -> str | None:
     return None
 
 
+def _is_test_env() -> bool:
+    return bool(os.environ.get("PYTEST_CURRENT_TEST"))
+
+
+def awaken_silent_devices(network: str | None = None, interface: str | None = None) -> None:
+    """
+    Broadcast multi-protocol awakening probes (NetBIOS UDP 137, mDNS UDP 5353)
+    and ICMP pre-sweep. Forces firewalled Windows laptops, smartphones in 802.11 PSM,
+    and smart devices to wake up and reply, populating the local ARP cache.
+    """
+    if _is_test_env() or not network:
+        return
+
+    # 1. Paced fping pre-sweep if fping is available
+    try:
+        cmd = ["fping", "-a", "-g", network, "-r", "1", "-t", "80"]
+        if interface and interface != "all":
+            cmd.extend(["-I", interface])
+        subprocess.run(cmd, capture_output=True, check=False, timeout=5)
+    except Exception:
+        pass
+
+    # 2. NetBIOS Name Query Broadcast (UDP 137)
+    try:
+        nb_query = (
+            b'\x80\x01\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00'
+            b'\x20CKAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\x00'
+            b'\x00\x21\x00\x01'
+        )
+        bcast_ip = "192.168.0.255"
+        if "/" in network:
+            try:
+                bcast_ip = str(ipaddress.ip_network(network, strict=False).broadcast_address)
+            except Exception:
+                pass
+
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        sock.settimeout(0.3)
+        try:
+            sock.sendto(nb_query, (bcast_ip, 137))
+        finally:
+            sock.close()
+    except Exception:
+        pass
+
+    # 3. mDNS Multicast Probe (UDP 5353 to 224.0.0.251)
+    try:
+        mdns_query = b'\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\t_services\x07_dns-sd\x04_udp\x05local\x00\x00\x0c\x00\x01'
+        sock_m = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+        sock_m.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
+        sock_m.settimeout(0.3)
+        try:
+            sock_m.sendto(mdns_query, ("224.0.0.251", 5353))
+        finally:
+            sock_m.close()
+    except Exception:
+        pass
+
+
 def _run_arp_scan_on_interface(network: str | None, target_iface: str | None) -> list[dict]:
     cmd = ["arp-scan"]
     if target_iface:
@@ -198,19 +258,14 @@ def _run_arp_scan_on_interface(network: str | None, target_iface: str | None) ->
         cmd.append("--localnet")
 
     is_wireless = is_wireless_interface(target_iface) if target_iface else False
-    if is_wireless and network:
-        # Pre-sweep with fping to awaken sleeping Wi-Fi mobile devices (802.11 PSM / DTIM)
-        try:
-            cmd_fping = ["fping", "-a", "-g", network, "-r", "1", "-t", "80"]
-            if target_iface:
-                cmd_fping.extend(["-I", target_iface])
-            subprocess.run(cmd_fping, capture_output=True, check=False, timeout=5)
-        except Exception:
-            pass
 
-    if is_wireless:
-        # Smartphones (Android/iOS) on Wi-Fi use power-saving sleep (802.11 PSM / DTIM)
-        # Using 4 retries and 1200ms timeout ensures sleeping phones wake up and respond
+    # Awaken sleeping or firewalled devices
+    if network:
+        awaken_silent_devices(network, target_iface)
+
+    # Smartphones (Android/iOS) on Wi-Fi use power-saving sleep (802.11 PSM / DTIM)
+    # Using 4 retries and 1200ms timeout ensures sleeping phones wake up and respond
+    if is_wireless or target_iface == "eth0":
         cmd.extend(["--retry=4", "--timeout=1200"])
     else:
         cmd.extend(["--retry=2", "--timeout=800"])
@@ -266,21 +321,33 @@ def get_arp_scan_devices(network: str | None = None, interface: str | None = Non
     arp-scan directly issues Layer 2 ARP requests on the local wire or wireless interface,
     discovering all connected machines in 1-2 seconds even when firewalls block ICMP ping.
     When interface is None or 'all', scans across all active physical interfaces (e.g. eth0 + wlan0).
+    When scanning eth0 on a network shared with wlan0, cooperatively co-scans on wlan0
+    to ensure wireless stations behind AP client isolation or 802.11 power saving are not missed.
     """
-    if interface and interface != "all":
-        return _run_arp_scan_on_interface(network, interface)
-
     target_ifaces: list[str] = []
-    try:
-        subnets_info = detect_local_subnets()
-        for item in subnets_info.get("interfaces", []):
-            if not item.get("is_virtual"):
-                iface_name = item.get("interface")
-                if iface_name and iface_name not in target_ifaces:
+    if interface and interface != "all":
+        target_ifaces.append(interface)
+        # If scanning on eth0, also co-scan on wlan0 if present on the same network
+        try:
+            subnets_info = detect_local_subnets()
+            for item in subnets_info.get("interfaces", []):
+                other_iface = item.get("interface")
+                if other_iface and other_iface not in target_ifaces and is_wireless_interface(other_iface):
                     if not network or item.get("network") == network:
-                        target_ifaces.append(iface_name)
-    except Exception:
-        pass
+                        target_ifaces.append(other_iface)
+        except Exception:
+            pass
+    else:
+        try:
+            subnets_info = detect_local_subnets()
+            for item in subnets_info.get("interfaces", []):
+                if not item.get("is_virtual"):
+                    iface_name = item.get("interface")
+                    if iface_name and iface_name not in target_ifaces:
+                        if not network or item.get("network") == network:
+                            target_ifaces.append(iface_name)
+        except Exception:
+            pass
 
     if not target_ifaces:
         default_iface = get_default_interface()
@@ -1040,10 +1107,16 @@ def save_discovered_devices(
                         "normal"
                     )
 
-            # Quarantined or isolated devices must read offline until authorized for internet
+            # Quarantined, isolated, or Type/VLAN mismatched devices must read offline until authorized
+            type_vlan_matched = is_type_and_vlan_matching(
+                existing_device.device_type,
+                existing_device.vlan_id,
+            )
             is_quarantined_or_isolated = (
                 existing_device.enforcement_status in ("quarantined", "isolated")
                 or not getattr(existing_device, "internet_access_authorized", True)
+                or not type_vlan_matched
+                or getattr(existing_device, "vlan_id", None) == 90
             )
             if is_quarantined_or_isolated:
                 existing_device.status = "offline"

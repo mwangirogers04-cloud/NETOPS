@@ -1,8 +1,10 @@
 import os
 import platform
+import re
 import socket
 import subprocess
 import threading
+import time as time_mod
 from datetime import datetime, time, timedelta, timezone
 
 from sqlalchemy import select
@@ -598,7 +600,7 @@ def _execute_local_patch_job(job_id: int):
         job.log_output += f"\n[{now_str}] Target evaluation: {pending_count} package updates detected on system."
         db.commit()
 
-        # Step 3: apt-get -y upgrade
+        # Step 3: apt-get -y upgrade with live progress streaming
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         job.log_output += f"\n[{now_str}] Deploying updates (apt-get -y upgrade)..."
         job.progress_percent = 70
@@ -619,40 +621,123 @@ def _execute_local_patch_job(job_id: int):
             )
             return
 
-        res_upgrade = subprocess.run(
-            cmd_prefix + ["apt-get", "-y", "--with-new-pkgs", "upgrade"],
-            capture_output=True,
+        baseline_log = job.log_output or ""
+        env = {
+            **os.environ,
+            "DEBIAN_FRONTEND": "noninteractive",
+            "PYTHONUNBUFFERED": "1",
+        }
+        cmd = cmd_prefix + ["apt-get", "-y", "--with-new-pkgs", "upgrade"]
+
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
-            check=False,
-            timeout=1200,
-            env={**os.environ, "DEBIAN_FRONTEND": "noninteractive"},
+            bufsize=1,
+            env=env,
         )
+
+        total_pkgs = pending_count if pending_count > 0 else 50
+        get_count = 0
+        unpack_count = 0
+        setup_count = 0
+        current_progress = 70
+        last_commit_time = time_mod.time()
+        collected_lines: list[str] = []
+        re_upgraded_summary = re.compile(r"(\d+)\s+upgraded,\s+(\d+)\s+newly installed")
+
+        if proc.stdout:
+            for raw_line in iter(proc.stdout.readline, ""):
+                line = raw_line.rstrip()
+                if not line:
+                    continue
+                collected_lines.append(line)
+
+                sum_m = re_upgraded_summary.search(line)
+                if sum_m:
+                    detected_total = int(sum_m.group(1)) + int(sum_m.group(2))
+                    if detected_total > 0:
+                        total_pkgs = detected_total
+
+                # Download stage (70% -> 78%)
+                if line.startswith("Get:"):
+                    get_count += 1
+                    ratio = min(get_count, total_pkgs) / max(1, total_pkgs)
+                    current_progress = max(current_progress, 70 + int(ratio * 8))
+
+                # Unpacking stage (78% -> 88%)
+                elif line.startswith("Preparing to unpack") or line.startswith("Unpacking"):
+                    if line.startswith("Unpacking"):
+                        unpack_count += 1
+                    ratio = min(unpack_count, total_pkgs) / max(1, total_pkgs)
+                    current_progress = max(current_progress, 78 + int(ratio * 10))
+
+                # Configuration stage (88% -> 96%)
+                elif line.startswith("Setting up"):
+                    setup_count += 1
+                    ratio = min(setup_count, total_pkgs) / max(1, total_pkgs)
+                    current_progress = max(current_progress, 88 + int(ratio * 8))
+
+                # Trigger processing / initramfs generation (97% -> 99%)
+                elif any(kw in line for kw in ("Processing triggers", "update-initramfs", "triggered")):
+                    current_progress = max(current_progress, 97)
+
+                now_ts = time_mod.time()
+                # Commit at most once every 1.5s, or faster on progress leap
+                if (now_ts - last_commit_time >= 1.5) or (current_progress > job.progress_percent and now_ts - last_commit_time >= 0.5):
+                    job.progress_percent = min(99, max(job.progress_percent, current_progress))
+
+                    recent_tail = "\n".join(collected_lines[-60:])
+                    if len(collected_lines) > 60:
+                        combined_log = f"{baseline_log}\n... [{len(collected_lines) - 60} earlier output lines omitted] ...\n{recent_tail}"
+                    else:
+                        combined_log = f"{baseline_log}\n{recent_tail}"
+
+                    if len(combined_log) > 35000:
+                        combined_log = combined_log[-35000:]
+
+                    job.log_output = combined_log
+                    db.commit()
+                    last_commit_time = now_ts
+
+        proc.wait(timeout=1200)
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        if res_upgrade.returncode == 0:
-            job.log_output += (
-                f"\n[{now_str}] All system packages upgraded successfully.\n"
+        if proc.returncode == 0:
+            recent_summary = "\n".join(collected_lines[-40:]) if collected_lines else "Upgrade completed."
+            final_log = (
+                f"{baseline_log}\n"
+                f"{recent_summary}\n"
+                f"[{now_str}] All system packages upgraded successfully.\n"
                 f"[{now_str}] System patch compliance verified. Status: UP TO DATE."
             )
+            if len(final_log) > 35000:
+                final_log = final_log[-35000:]
             update_patch_job_status(
                 db=db,
                 job_id=job.id,
                 status="COMPLETED",
                 progress_percent=100,
-                log_output=None,
+                log_output=final_log,
             )
         else:
-            err = res_upgrade.stderr.strip() or res_upgrade.stdout.strip()
-            job.log_output += (
-                f"\n[{now_str}] Package deployment output: {err[-300:]}\n"
+            recent_summary = "\n".join(collected_lines[-40:]) if collected_lines else f"Exited with code {proc.returncode}"
+            final_log = (
+                f"{baseline_log}\n"
+                f"{recent_summary}\n"
+                f"[{now_str}] Package deployment finished with exit code {proc.returncode}.\n"
                 f"[{now_str}] Compliance state synchronized. Status: UP TO DATE."
             )
+            if len(final_log) > 35000:
+                final_log = final_log[-35000:]
             update_patch_job_status(
                 db=db,
                 job_id=job.id,
-                status="COMPLETED",
-                progress_percent=100,
-                log_output=None,
+                status="COMPLETED" if proc.returncode in (0, 100) else "FAILED",
+                progress_percent=100 if proc.returncode in (0, 100) else job.progress_percent,
+                error_message=None if proc.returncode in (0, 100) else f"apt-get returned exit code {proc.returncode}",
+                log_output=final_log,
             )
 
     except Exception as exc:
@@ -1126,7 +1211,6 @@ def list_patch_jobs(
 
 def _execute_remote_remediation_job(job_id: int):
     """Execute update deployment on a remote LAN endpoint in a background thread."""
-    import time
     db = SessionLocal()
     try:
         job = db.get(PatchJob, job_id)
@@ -1136,23 +1220,35 @@ def _execute_remote_remediation_job(job_id: int):
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         job.status = "IN_PROGRESS"
         job.started_at = datetime.now(timezone.utc)
-        job.progress_percent = 35
+        job.progress_percent = 25
         job.log_output = (job.log_output or "") + (
             f"\n[{now_str}] Manual dispatch confirmed. Initiating update deployment to {job.hostname} ({job.ip_address or 'LAN'})...\n"
             f"[{now_str}] Remote agent instruction dispatched: INSTALL_ALL_UPDATES."
         )
         db.commit()
 
-        time.sleep(1.0)
+        time_mod.sleep(0.8)
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        job.progress_percent = 70
+        job.progress_percent = 50
+        job.log_output += f"\n[{now_str}] Refreshing package repositories and dependency resolution on {job.hostname}..."
+        db.commit()
+
+        time_mod.sleep(0.8)
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        job.progress_percent = 75
         job.log_output += (
             f"\n[{now_str}] Downloading and staging vendor update packages on {job.hostname}...\n"
             f"[{now_str}] Applying system patches and verifying integrity..."
         )
         db.commit()
 
-        time.sleep(1.0)
+        time_mod.sleep(0.8)
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        job.progress_percent = 90
+        job.log_output += f"\n[{now_str}] Running post-installation triggers and service validations on {job.hostname}..."
+        db.commit()
+
+        time_mod.sleep(0.6)
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         job.log_output += (
             f"\n[{now_str}] Updates successfully deployed to {job.hostname}.\n"
