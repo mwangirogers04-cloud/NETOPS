@@ -5800,14 +5800,14 @@ const AccessPage = () => {
   const [auditSearchTerm, setAuditSearchTerm] = useState("");
   const [auditCategoryFilter, setAuditCategoryFilter] = useState("all");
 
-  const ReportsPage = () => {
-    useEffect(() => {
-      if (!isSuperAdmin && (reportType === "user_activity" || reportType === "approvals")) {
-        setReportType("network_activity");
-        setReportData(null);
-      }
-    }, [isSuperAdmin, reportType]);
+  useEffect(() => {
+    if (!isSuperAdmin && (reportType === "user_activity" || reportType === "approvals")) {
+      setReportType("network_activity");
+      setReportData(null);
+    }
+  }, [isSuperAdmin, reportType]);
 
+  const ReportsPage = () => {
   const ipPhoneDevices = devices.filter(
     (device) => device.device_type === "ip_phone"
   ).length;
@@ -7749,21 +7749,21 @@ return (
                                         textTransform: "uppercase",
                                         width: "fit-content",
                                         background:
-                                          ev.event_type.includes("deactivated") || ev.event_type.includes("reject") || ev.event_type.includes("delete") || ev.event_type.includes("lockout") || ev.event_type.includes("disallow")
+                                          (ev.event_type || "").includes("deactivated") || (ev.event_type || "").includes("reject") || (ev.event_type || "").includes("delete") || (ev.event_type || "").includes("lockout") || (ev.event_type || "").includes("disallow")
                                             ? "rgba(239, 68, 68, 0.15)"
-                                            : ev.event_type.includes("reset") || ev.event_type.includes("update") || ev.event_type.includes("quarantine") || ev.event_type.includes("unreachable")
+                                            : (ev.event_type || "").includes("reset") || (ev.event_type || "").includes("update") || (ev.event_type || "").includes("quarantine") || (ev.event_type || "").includes("unreachable")
                                             ? "rgba(245, 158, 11, 0.15)"
                                             : "rgba(16, 185, 129, 0.15)",
                                         color:
-                                          ev.event_type.includes("deactivated") || ev.event_type.includes("reject") || ev.event_type.includes("delete") || ev.event_type.includes("lockout") || ev.event_type.includes("disallow")
+                                          (ev.event_type || "").includes("deactivated") || (ev.event_type || "").includes("reject") || (ev.event_type || "").includes("delete") || (ev.event_type || "").includes("lockout") || (ev.event_type || "").includes("disallow")
                                             ? "#dc2626"
-                                            : ev.event_type.includes("reset") || ev.event_type.includes("update") || ev.event_type.includes("quarantine") || ev.event_type.includes("unreachable")
+                                            : (ev.event_type || "").includes("reset") || (ev.event_type || "").includes("update") || (ev.event_type || "").includes("quarantine") || (ev.event_type || "").includes("unreachable")
                                             ? "#d97706"
                                             : "#059669",
                                         border: `1px solid ${
-                                          ev.event_type.includes("deactivated") || ev.event_type.includes("reject") || ev.event_type.includes("delete") || ev.event_type.includes("lockout") || ev.event_type.includes("disallow")
+                                          (ev.event_type || "").includes("deactivated") || (ev.event_type || "").includes("reject") || (ev.event_type || "").includes("delete") || (ev.event_type || "").includes("lockout") || (ev.event_type || "").includes("disallow")
                                             ? "rgba(239, 68, 68, 0.3)"
-                                            : ev.event_type.includes("reset") || ev.event_type.includes("update") || ev.event_type.includes("quarantine") || ev.event_type.includes("unreachable")
+                                            : (ev.event_type || "").includes("reset") || (ev.event_type || "").includes("update") || (ev.event_type || "").includes("quarantine") || (ev.event_type || "").includes("unreachable")
                                             ? "rgba(245, 158, 11, 0.3)"
                                             : "rgba(16, 185, 129, 0.3)"
                                         }`,
@@ -7970,21 +7970,21 @@ return (
                                       textTransform: "uppercase",
                                       width: "fit-content",
                                       background:
-                                        ev.event_type.includes("reject") || ev.event_type.includes("quarantine") || ev.event_type.includes("delete")
+                                        (ev.event_type || "").includes("reject") || (ev.event_type || "").includes("quarantine") || (ev.event_type || "").includes("delete")
                                           ? "rgba(239, 68, 68, 0.15)"
-                                          : ev.event_type.includes("approve") || ev.event_type.includes("allow")
+                                          : (ev.event_type || "").includes("approve") || (ev.event_type || "").includes("allow")
                                           ? "rgba(16, 185, 129, 0.15)"
                                           : "rgba(148, 163, 184, 0.15)",
                                       color:
-                                        ev.event_type.includes("reject") || ev.event_type.includes("quarantine") || ev.event_type.includes("delete")
+                                        (ev.event_type || "").includes("reject") || (ev.event_type || "").includes("quarantine") || (ev.event_type || "").includes("delete")
                                           ? "#dc2626"
-                                          : ev.event_type.includes("approve") || ev.event_type.includes("allow")
+                                          : (ev.event_type || "").includes("approve") || (ev.event_type || "").includes("allow")
                                           ? "#059669"
                                           : "#334155",
                                       border: `1px solid ${
-                                        ev.event_type.includes("reject") || ev.event_type.includes("quarantine") || ev.event_type.includes("delete")
+                                        (ev.event_type || "").includes("reject") || (ev.event_type || "").includes("quarantine") || (ev.event_type || "").includes("delete")
                                           ? "rgba(239, 68, 68, 0.3)"
-                                          : ev.event_type.includes("approve") || ev.event_type.includes("allow")
+                                          : (ev.event_type || "").includes("approve") || (ev.event_type || "").includes("allow")
                                           ? "rgba(16, 185, 129, 0.3)"
                                           : "rgba(148, 163, 184, 0.3)"
                                       }`,
