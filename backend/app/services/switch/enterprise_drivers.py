@@ -5,7 +5,7 @@ from typing import Any
 
 from netmiko import ConnectHandler
 
-from .base import BaseSwitchDriver
+from .base import BaseSwitchDriver, check_switch_reachability
 from .simulation_driver import SimulationSwitchDriver
 
 logger = logging.getLogger(__name__)
@@ -54,6 +54,14 @@ class GenericNetmikoSwitchDriver(BaseSwitchDriver):
 
     def test_connection(self) -> dict[str, Any]:
         params = self._get_connection_params()
+        if not check_switch_reachability(params["host"], params["port"], timeout=0.8):
+            return {
+                "success": False,
+                "status": "unreachable",
+                "message": f"Could not reach {self.get_vendor_title()} at {params['host']}:{params['port']} (Connection timed out). Using safe simulation fallback.",
+                "management_ip": params["host"],
+                "switch_model": f"{self.default_model} (Simulation Fallback)",
+            }
         try:
             with ConnectHandler(**params) as conn:
                 output = conn.send_command(self.version_cmd, read_timeout=10)
@@ -76,6 +84,8 @@ class GenericNetmikoSwitchDriver(BaseSwitchDriver):
 
     def get_vlans(self) -> list[dict[str, Any]]:
         params = self._get_connection_params()
+        if not check_switch_reachability(params["host"], params["port"]):
+            return self.fallback.get_vlans()
         try:
             with ConnectHandler(**params) as conn:
                 output = conn.send_command(self.vlan_list_cmd, read_timeout=15)
@@ -109,6 +119,8 @@ class GenericNetmikoSwitchDriver(BaseSwitchDriver):
     def get_running_config(self) -> str:
         """Pull live running configuration from the switch CLI or fallback to simulation."""
         params = self._get_connection_params()
+        if not check_switch_reachability(params["host"], params["port"]):
+            return self.fallback.get_running_config()
         try:
             with ConnectHandler(**params) as conn:
                 if params.get("secret"):

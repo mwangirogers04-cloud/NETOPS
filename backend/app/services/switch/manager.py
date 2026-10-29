@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ...models.switch_config import SwitchConfig
-from .base import BaseSwitchDriver
+from .base import BaseSwitchDriver, check_switch_reachability, invalidate_switch_reachability
 from .cisco_driver import CiscoSwitchDriver
 from .cisco_sge_driver import CiscoSgeSwitchDriver
 from .enterprise_drivers import (
@@ -291,6 +291,7 @@ def probe_switch_connection(
     enable_secret: str | None = None,
 ) -> dict[str, Any]:
     """Test reachability and authentication to a switch."""
+    invalidate_switch_reachability(management_ip, port)
     mock_cfg = {
         "vendor": vendor,
         "name": f"Test-{management_ip}",

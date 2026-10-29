@@ -108,6 +108,10 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
       if (activeRes) setActiveSwitch(activeRes);
       if (Array.isArray(vendorRes)) setSwitchVendors(vendorRes);
       if (Array.isArray(configRes)) setSavedConfigs(configRes);
+
+      const targetSwId = activeRes?.config?.id || (Array.isArray(configRes) && configRes.find((c) => c.is_active)?.id) || 0;
+      loadBackups(targetSwId);
+      loadBackupSchedule();
     } catch (err) {
       console.error("Failed to load switch data:", err);
     } finally {
@@ -419,10 +423,10 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
     return activeSwitch?.config?.id || savedConfigs.find((c) => c.is_active)?.id || savedConfigs[0]?.id || 0;
   };
 
-  const loadBackups = async () => {
+  const loadBackups = async (overrideSwitchId = null) => {
     setLoadingBackups(true);
     try {
-      const swId = getActiveSwitchId();
+      const swId = overrideSwitchId !== null ? overrideSwitchId : getActiveSwitchId();
       const res = await fetch(`${API_URL}/switches/${swId}/backups`, {
         headers: getAuthHeaders ? getAuthHeaders() : {},
       });
@@ -902,6 +906,13 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                   </tr>
                 </thead>
                 <tbody>
+                  {vlans.length === 0 && (
+                    <tr>
+                      <td colSpan={isAdmin ? 7 : 6} style={{ textAlign: "center", padding: "32px", color: "#64748b" }}>
+                        {loading ? "⏳ Loading VLAN configuration from switch..." : "No VLANs found. Click '+ Create New VLAN' to add one."}
+                      </td>
+                    </tr>
+                  )}
                   {vlans.map((v) => {
                     const theme = getVlanColor(v.vlan_id);
                     return (

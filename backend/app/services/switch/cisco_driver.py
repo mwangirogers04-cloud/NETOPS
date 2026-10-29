@@ -5,7 +5,7 @@ from typing import Any
 
 from netmiko import ConnectHandler
 
-from .base import BaseSwitchDriver
+from .base import BaseSwitchDriver, check_switch_reachability
 from .simulation_driver import SimulationSwitchDriver
 
 logger = logging.getLogger(__name__)
@@ -48,6 +48,14 @@ class CiscoSwitchDriver(BaseSwitchDriver):
 
     def test_connection(self) -> dict[str, Any]:
         params = self._get_connection_params()
+        if not check_switch_reachability(params["host"], params["port"], timeout=0.8):
+            return {
+                "success": False,
+                "status": "unreachable",
+                "message": f"Could not reach switch at {params['host']}:{params['port']} (Connection timed out). Using safe simulation fallback.",
+                "management_ip": params["host"],
+                "switch_model": "Cisco Switch (Simulation Mode)",
+            }
         try:
             with ConnectHandler(**params) as conn:
                 output = conn.send_command("show version", read_timeout=10)
@@ -75,6 +83,8 @@ class CiscoSwitchDriver(BaseSwitchDriver):
 
     def get_vlans(self) -> list[dict[str, Any]]:
         params = self._get_connection_params()
+        if not check_switch_reachability(params["host"], params["port"]):
+            return self.fallback.get_vlans()
         try:
             with ConnectHandler(**params) as conn:
                 output = conn.send_command("show vlan brief", read_timeout=15)
@@ -92,6 +102,10 @@ class CiscoSwitchDriver(BaseSwitchDriver):
             "end",
             "write memory",
         ]
+        if not check_switch_reachability(params["host"], params["port"]):
+            res = self.fallback.create_vlan(vlan_id, name)
+            res["message"] += f" (Live switch {params['host']} unreachable, staged in platform configuration)"
+            return res
         try:
             with ConnectHandler(**params) as conn:
                 conn.enable()
@@ -118,6 +132,8 @@ class CiscoSwitchDriver(BaseSwitchDriver):
             raise ValueError(f"Cannot delete reserved default VLAN {vlan_id}.")
 
         params = self._get_connection_params()
+        if not check_switch_reachability(params["host"], params["port"]):
+            return self.fallback.delete_vlan(vlan_id)
         commands = [
             f"no vlan {vlan_id}",
             "end",
@@ -141,6 +157,8 @@ class CiscoSwitchDriver(BaseSwitchDriver):
 
     def get_interfaces(self) -> list[dict[str, Any]]:
         params = self._get_connection_params()
+        if not check_switch_reachability(params["host"], params["port"]):
+            return self.fallback.get_interfaces()
         try:
             with ConnectHandler(**params) as conn:
                 output = conn.send_command("show interfaces status", read_timeout=15)
@@ -158,6 +176,11 @@ class CiscoSwitchDriver(BaseSwitchDriver):
         params = self._get_connection_params()
         clean_port = port_name.strip()
         is_trunk = (mode.lower() == "trunk")
+
+        if not check_switch_reachability(params["host"], params["port"]):
+            res = self.fallback.set_port_vlan(clean_port, vlan_id, mode)
+            res["message"] += f" (Live switch {params['host']} unreachable, staged in platform configuration)"
+            return res
 
         if is_trunk:
             commands = [
@@ -253,6 +276,8 @@ class CiscoSwitchDriver(BaseSwitchDriver):
         Falls back to realistic simulated config if device is offline/unreachable.
         """
         params = self._get_connection_params()
+        if not check_switch_reachability(params["host"], params["port"]):
+            return self.fallback.get_running_config()
         try:
             with ConnectHandler(**params) as conn:
                 if params.get("secret"):

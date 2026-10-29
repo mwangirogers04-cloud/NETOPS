@@ -18,6 +18,7 @@ from ..services.event_service import create_event
 from ..services.switch.manager import (
     create_switch_driver,
     get_active_switch_driver,
+    invalidate_switch_reachability,
     list_supported_switch_vendors,
     probe_switch_connection,
 )
@@ -201,6 +202,7 @@ def create_or_update_switch_config(
 
     db.commit()
     db.refresh(cfg)
+    invalidate_switch_reachability(cfg.management_ip, cfg.port)
 
     create_event(
         db=db,
@@ -236,6 +238,7 @@ def activate_switch_config(
     cfg.is_active = True
     cfg.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
     db.commit()
+    invalidate_switch_reachability(cfg.management_ip, cfg.port)
 
     create_event(
         db=db,
