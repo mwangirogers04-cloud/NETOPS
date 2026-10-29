@@ -723,6 +723,55 @@ def test_reset_all_switch_ports_bulk(client, db_session):
         assert p["mode"] == "access"
 
 
+def test_bulk_assign_multiple_ports_to_vlan_10(client, db_session):
+    """Test selecting and configuring 5 switch ports simultaneously to VLAN 10."""
+    admin = User(
+        username="bulk_vlan_admin",
+        email="bulkvlan@netops.local",
+        hashed_password=hash_password("Admin@1234"),
+        role="admin",
+        is_active=True,
+        is_verified=True,
+    )
+    db_session.add(admin)
+    db_session.commit()
+    admin_token = create_access_token({"sub": admin.username, "role": admin.role, "user_id": admin.id})
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    five_ports = [
+        "GigabitEthernet0/1",
+        "GigabitEthernet0/2",
+        "GigabitEthernet0/3",
+        "GigabitEthernet0/4",
+        "GigabitEthernet0/5",
+    ]
+
+    # Assign all 5 ports to VLAN 10 simultaneously
+    res = client.post(
+        "/switches/ports/assign",
+        headers=headers,
+        json={
+            "ports": five_ports,
+            "vlan_id": 10,
+            "mode": "access",
+            "is_trunk": False,
+        },
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["success"] is True
+    assert data["vlan_id"] == 10
+    assert len(data["ports"]) == 5
+
+    # Verify each of the 5 ports has VLAN 10
+    ports = client.get("/switches/ports").json()
+    for port_name in five_ports:
+        port_obj = next(p for p in ports if p["port"] == port_name)
+        assert port_obj["vlan"] == 10
+        assert port_obj["mode"] == "access"
+
+
+
 
 
 

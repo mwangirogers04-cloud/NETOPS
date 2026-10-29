@@ -30,7 +30,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
   const [editVlanSubnet, setEditVlanSubnet] = useState("");
   const [savingEditVlan, setSavingEditVlan] = useState(false);
 
-  // Assign Port Modal
+  // Assign Port Modal & Bulk Port Selection
   const [selectedPort, setSelectedPort] = useState(null);
   const [targetVlanId, setTargetVlanId] = useState("");
   const [isTrunk, setIsTrunk] = useState(false);
@@ -38,6 +38,29 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
   const [resettingPort, setResettingPort] = useState(false);
   const [configuringUplinks, setConfiguringUplinks] = useState(false);
   const [portTableFilter, setPortTableFilter] = useState("all");
+  const [selectedPortNames, setSelectedPortNames] = useState([]);
+  const [multiSelectMode, setMultiSelectMode] = useState(false);
+
+  const togglePortSelection = (portName) => {
+    setSelectedPortNames((prev) =>
+      prev.includes(portName) ? prev.filter((p) => p !== portName) : [...prev, portName]
+    );
+  };
+
+  const clearPortSelection = () => {
+    setSelectedPortNames([]);
+  };
+
+  const handleOpenBulkAssignModal = () => {
+    if (selectedPortNames.length === 0) return;
+    setSelectedPort({
+      isBulk: true,
+      ports: [...selectedPortNames],
+      port: `${selectedPortNames.length} Ports Selected`,
+    });
+    setTargetVlanId("10");
+    setIsTrunk(false);
+  };
 
   // Config Backups & CLI Diff States
   const [backups, setBackups] = useState([]);
@@ -245,33 +268,48 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
     }
   };
 
-  // Handle Assign Port VLAN (Access or 802.1Q Trunk)
+  // Handle Assign Port VLAN (Access or 802.1Q Trunk) for Single Port or Multiple Ports
   const handleAssignPort = async (e) => {
     if (e) e.preventDefault();
     if (!selectedPort) return;
 
+    const isBulk = !!selectedPort.isBulk && Array.isArray(selectedPort.ports);
+    const targetPorts = isBulk ? selectedPort.ports : [selectedPort.port];
+
     setAssigningPort(true);
     try {
+      const payload = isBulk
+        ? {
+            ports: targetPorts,
+            vlan_id: parseInt(targetVlanId || "1", 10),
+            mode: isTrunk ? "trunk" : "access",
+            is_trunk: isTrunk,
+          }
+        : {
+            port_name: selectedPort.port,
+            vlan_id: parseInt(targetVlanId || "1", 10),
+            mode: isTrunk ? "trunk" : "access",
+            is_trunk: isTrunk,
+          };
+
       const res = await fetch(`${API_URL}/switches/ports/assign`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...getAuthHeaders() },
-        body: JSON.stringify({
-          port_name: selectedPort.port,
-          vlan_id: parseInt(targetVlanId || "1", 10),
-          mode: isTrunk ? "trunk" : "access",
-          is_trunk: isTrunk,
-        }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "Failed to assign port.");
+      if (!res.ok) throw new Error(data.detail || "Failed to assign port(s).");
 
       showStatus(
-        isTrunk
-          ? `Port ${selectedPort.port} successfully configured as 802.1Q Trunk Uplink!`
-          : `Port ${selectedPort.port} reconfigured to VLAN ${targetVlanId} successfully!`,
+        isBulk
+          ? `${targetPorts.length} switch ports successfully configured for VLAN ${targetVlanId} (${isTrunk ? "TRUNK" : "ACCESS"} mode)!`
+          : (isTrunk
+              ? `Port ${selectedPort.port} successfully configured as 802.1Q Trunk Uplink!`
+              : `Port ${selectedPort.port} reconfigured to VLAN ${targetVlanId} successfully!`),
         "success"
       );
       setSelectedPort(null);
+      setSelectedPortNames([]);
       await loadAllData();
     } catch (err) {
       showStatus(err.message, "error");
@@ -348,45 +386,62 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
     }
   };
 
-  // Reset Individual Switch Port back to factory default VLAN 1 (Access mode)
+  // Reset Individual or Multiple Switch Ports back to factory default VLAN 1 (Access mode)
   const handleResetPort = async (portObj, skipConfirm = false) => {
     if (!isAdmin) return;
-    const portName = typeof portObj === "string" ? portObj : portObj?.port;
-    if (!portName) return;
+    const isBulk = !!portObj?.isBulk && Array.isArray(portObj?.ports);
+    const targetPorts = isBulk
+      ? portObj.ports
+      : (Array.isArray(portObj) ? portObj : [typeof portObj === "string" ? portObj : portObj?.port]);
+
+    if (!targetPorts || targetPorts.length === 0) return;
 
     if (!skipConfirm) {
-      const ok = window.confirm(
-        `🔄 RESET SWITCH PORT '${portName}'?\n\n` +
-        `This action will reset ONLY this port (${portName}) to factory defaults:\n` +
-        `• Port Mode: Access (untagged)\n` +
-        `• Assigned VLAN: Default VLAN 1\n` +
-        `• Trunk / Uplink: Disabled\n` +
-        `• Quarantine Isolation: Cleared\n\n` +
-        `All other switch ports, VLAN configurations, and trunk uplinks remain unchanged.\n` +
-        `The port will be immediately available and ready for reassignment to another VLAN.\n\n` +
-        `Confirm reset of ${portName}?`
-      );
+      const promptText = (isBulk || targetPorts.length > 1)
+        ? `🔄 RESET ${targetPorts.length} SWITCH PORTS?\n\n` +
+          `Ports to reset:\n${targetPorts.join(", ")}\n\n` +
+          `This will restore these ${targetPorts.length} ports to factory defaults:\n` +
+          `• Mode: Access (untagged)\n` +
+          `• Assigned VLAN: Default VLAN 1\n` +
+          `• Trunk Uplink: Disabled\n` +
+          `• Quarantine: Cleared\n\n` +
+          `All other ports and switch settings remain untouched.\n` +
+          `Are you sure you want to proceed?`
+        : `🔄 RESET SWITCH PORT '${targetPorts[0]}'?\n\n` +
+          `This action will reset ONLY this port (${targetPorts[0]}) to factory defaults:\n` +
+          `• Port Mode: Access (untagged)\n` +
+          `• Assigned VLAN: Default VLAN 1\n` +
+          `• Trunk / Uplink: Disabled\n` +
+          `• Quarantine Isolation: Cleared\n\n` +
+          `All other switch ports, VLAN configurations, and trunk uplinks remain unchanged.\n` +
+          `The port will be immediately available and ready for reassignment to another VLAN.\n\n` +
+          `Confirm reset of ${targetPorts[0]}?`;
+
+      const ok = window.confirm(promptText);
       if (!ok) return;
     }
 
     setResettingPort(true);
     try {
+      const payload = (isBulk || targetPorts.length > 1)
+        ? { ports: targetPorts, target_vlan_id: 1, reset_all: false }
+        : { port_name: targetPorts[0], target_vlan_id: 1, reset_all: false };
+
       const res = await fetch(`${API_URL}/switches/ports/reset`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...getAuthHeaders() },
-        body: JSON.stringify({
-          port_name: portName,
-          target_vlan_id: 1,
-          reset_all: false,
-        }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "Failed to reset switch port.");
+      if (!res.ok) throw new Error(data.detail || "Failed to reset switch port(s).");
       showStatus(
-        `Port ${portName} successfully reset to default VLAN 1! Ready for new VLAN assignment.`,
+        (isBulk || targetPorts.length > 1)
+          ? `${targetPorts.length} switch ports successfully reset to default VLAN 1! Ready for new VLAN assignment.`
+          : `Port ${targetPorts[0]} successfully reset to default VLAN 1! Ready for new VLAN assignment.`,
         "success"
       );
       setSelectedPort(null);
+      setSelectedPortNames([]);
       await loadAllData();
     } catch (err) {
       showStatus(err.message, "error");
@@ -1073,38 +1128,80 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
           const isQuarantine = p.vlan === 90;
           const isTrunkPort = p.mode === "trunk" || !!p.is_uplink;
           const theme = getVlanColor(p.vlan);
+          const isSelected = selectedPortNames.includes(p.port);
 
           return (
             <div
               key={p.port}
-              onClick={() => {
-                if (isAdmin) {
+              onClick={(e) => {
+                if (!isAdmin) return;
+                if (multiSelectMode || e.shiftKey || e.ctrlKey || e.metaKey || selectedPortNames.length > 0) {
+                  togglePortSelection(p.port);
+                } else {
                   setSelectedPort(p);
                   setTargetVlanId(String(p.vlan || 1));
                   setIsTrunk(p.mode === "trunk" || !!p.is_uplink);
                 }
               }}
               style={{
-                background: isTrunkPort ? "#2e1065" : "#1e293b",
-                border: `2px solid ${isQuarantine ? "#ef4444" : isTrunkPort ? "#8b5cf6" : isUp ? theme.border : "#334155"}`,
+                position: "relative",
+                background: isSelected ? "#312e81" : isTrunkPort ? "#2e1065" : "#1e293b",
+                border: isSelected
+                  ? "2.5px solid #fbbf24"
+                  : `2px solid ${isQuarantine ? "#ef4444" : isTrunkPort ? "#8b5cf6" : isUp ? theme.border : "#334155"}`,
                 borderRadius: "8px",
                 padding: "8px 4px",
                 textAlign: "center",
                 cursor: isAdmin ? "pointer" : "default",
                 transition: "all 0.15s ease",
-                boxShadow: isTrunkPort ? "0 0 8px rgba(139, 92, 246, 0.4)" : "none",
+                boxShadow: isSelected
+                  ? "0 0 12px rgba(251, 191, 36, 0.7)"
+                  : isTrunkPort ? "0 0 8px rgba(139, 92, 246, 0.4)" : "none",
                 minWidth: is48Port ? "38px" : "48px",
               }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.transform = "translateY(-2px)";
-                e.currentTarget.style.boxShadow = "0 4px 6px rgba(0,0,0,0.3)";
+                e.currentTarget.style.boxShadow = isSelected
+                  ? "0 0 16px rgba(251, 191, 36, 0.9)"
+                  : "0 4px 6px rgba(0,0,0,0.3)";
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.transform = "none";
-                e.currentTarget.style.boxShadow = isTrunkPort ? "0 0 8px rgba(139, 92, 246, 0.4)" : "none";
+                e.currentTarget.style.boxShadow = isSelected
+                  ? "0 0 12px rgba(251, 191, 36, 0.7)"
+                  : isTrunkPort ? "0 0 8px rgba(139, 92, 246, 0.4)" : "none";
               }}
-              title={`Click to configure ${p.port} (${isTrunkPort ? "TRUNK UPLINK" : `VLAN ${p.vlan}`})`}
+              title={
+                isSelected
+                  ? `Selected (${selectedPortNames.length} total). Click to deselect.`
+                  : multiSelectMode
+                  ? `Click to select ${p.port} for multi-port assignment`
+                  : `Click to configure ${p.port} (${isTrunkPort ? "TRUNK UPLINK" : `VLAN ${p.vlan}`})`
+              }
             >
+              {isSelected && (
+                <div
+                  style={{
+                    position: "absolute",
+                    top: "-5px",
+                    right: "-5px",
+                    background: "#fbbf24",
+                    color: "#0f172a",
+                    borderRadius: "50%",
+                    width: "14px",
+                    height: "14px",
+                    fontSize: "10px",
+                    fontWeight: "900",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    boxShadow: "0 1px 3px rgba(0,0,0,0.4)",
+                  }}
+                >
+                  ✓
+                </div>
+              )}
+
               {/* LINK LED */}
               <div style={{ display: "flex", justifyContent: "center", marginBottom: "4px" }}>
                 <span
@@ -1148,38 +1245,79 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
           const isUp = p.status === "connected";
           const isQuarantine = p.vlan === 90;
           const isTrunkPort = p.mode === "trunk" || !!p.is_uplink;
+          const isSelected = selectedPortNames.includes(p.port);
 
           return (
             <div
               key={p.port}
-              onClick={() => {
-                if (isAdmin) {
+              onClick={(e) => {
+                if (!isAdmin) return;
+                if (multiSelectMode || e.shiftKey || e.ctrlKey || e.metaKey || selectedPortNames.length > 0) {
+                  togglePortSelection(p.port);
+                } else {
                   setSelectedPort(p);
                   setTargetVlanId(String(p.vlan || 1));
                   setIsTrunk(p.mode === "trunk" || !!p.is_uplink);
                 }
               }}
               style={{
-                background: "#1e1b4b",
-                border: `2px solid ${isQuarantine ? "#ef4444" : isUp ? "#c084fc" : "#4f46e5"}`,
+                position: "relative",
+                background: isSelected ? "#312e81" : "#1e1b4b",
+                border: isSelected
+                  ? "2.5px solid #fbbf24"
+                  : `2px solid ${isQuarantine ? "#ef4444" : isUp ? "#c084fc" : "#4f46e5"}`,
                 borderRadius: "8px",
                 padding: "8px 6px",
                 textAlign: "center",
                 cursor: isAdmin ? "pointer" : "default",
                 transition: "all 0.15s ease",
-                boxShadow: isUp ? "0 0 10px rgba(192, 132, 252, 0.5)" : "none",
+                boxShadow: isSelected
+                  ? "0 0 12px rgba(251, 191, 36, 0.7)"
+                  : isUp ? "0 0 10px rgba(192, 132, 252, 0.5)" : "none",
                 minWidth: "52px",
               }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.transform = "translateY(-2px)";
-                e.currentTarget.style.boxShadow = "0 4px 6px rgba(0,0,0,0.3)";
+                e.currentTarget.style.boxShadow = isSelected
+                  ? "0 0 16px rgba(251, 191, 36, 0.9)"
+                  : "0 4px 6px rgba(0,0,0,0.3)";
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.transform = "none";
-                e.currentTarget.style.boxShadow = isUp ? "0 0 10px rgba(192, 132, 252, 0.5)" : "none";
+                e.currentTarget.style.boxShadow = isSelected
+                  ? "0 0 12px rgba(251, 191, 36, 0.7)"
+                  : isUp ? "0 0 10px rgba(192, 132, 252, 0.5)" : "none";
               }}
-              title={`Click to configure 10G SFP+ Uplink ${p.port} (${p.status})`}
+              title={
+                isSelected
+                  ? `Selected (${selectedPortNames.length} total). Click to deselect.`
+                  : multiSelectMode
+                  ? `Click to select ${p.port} for multi-port assignment`
+                  : `Click to configure 10G SFP+ Uplink ${p.port} (${p.status})`
+              }
             >
+              {isSelected && (
+                <div
+                  style={{
+                    position: "absolute",
+                    top: "-5px",
+                    right: "-5px",
+                    background: "#fbbf24",
+                    color: "#0f172a",
+                    borderRadius: "50%",
+                    width: "14px",
+                    height: "14px",
+                    fontSize: "10px",
+                    fontWeight: "900",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    boxShadow: "0 1px 3px rgba(0,0,0,0.4)",
+                  }}
+                >
+                  ✓
+                </div>
+              )}
               {/* SFP 10G LED */}
               <div style={{ display: "flex", justifyContent: "center", marginBottom: "4px" }}>
                 <span
@@ -1296,6 +1434,32 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                     <button
                       type="button"
                       className="secondary-button small"
+                      onClick={() => {
+                        const nextMode = !multiSelectMode;
+                        setMultiSelectMode(nextMode);
+                        if (!nextMode && selectedPortNames.length > 0) {
+                          // Keep selection if ports are selected, user can still use bulk action bar
+                        }
+                      }}
+                      style={{
+                        background: multiSelectMode ? "#eff6ff" : "#f8fafc",
+                        color: multiSelectMode ? "#1d4ed8" : "#475569",
+                        borderColor: multiSelectMode ? "#3b82f6" : "#cbd5e1",
+                        fontWeight: "700",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "6px",
+                      }}
+                      title="Toggle Multi-Select Mode to select multiple ports for batch VLAN configuration"
+                    >
+                      <span>{multiSelectMode ? "☑️" : "☐"}</span> {multiSelectMode ? "Multi-Select Mode (Active)" : "Multi-Select Mode"}
+                    </button>
+                  )}
+
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      className="secondary-button small"
                       onClick={handleConfigureUplinks}
                       disabled={configuringUplinks}
                       style={{
@@ -1314,6 +1478,107 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                   )}
                 </div>
               </div>
+
+              {/* MULTI-PORT SELECTION FLOATING ACTION BAR */}
+              {selectedPortNames.length > 0 && (
+                <div
+                  style={{
+                    background: "linear-gradient(90deg, #1e1b4b 0%, #312e81 100%)",
+                    border: "1.5px solid #6366f1",
+                    borderRadius: "10px",
+                    padding: "12px 18px",
+                    marginBottom: "16px",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    flexWrap: "wrap",
+                    gap: "12px",
+                    boxShadow: "0 4px 14px rgba(99, 102, 241, 0.35)",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                    <span style={{ fontSize: "14px", fontWeight: "900", color: "#fbbf24", display: "flex", alignItems: "center", gap: "6px" }}>
+                      <span>⚡</span> {selectedPortNames.length} Ports Selected:
+                    </span>
+                    <div style={{ display: "flex", gap: "4px", flexWrap: "wrap", maxWidth: "550px" }}>
+                      {selectedPortNames.map((pName) => (
+                        <span
+                          key={pName}
+                          onClick={() => togglePortSelection(pName)}
+                          style={{
+                            background: "rgba(255, 255, 255, 0.18)",
+                            color: "#ffffff",
+                            padding: "2px 7px",
+                            borderRadius: "4px",
+                            fontSize: "11px",
+                            fontWeight: "700",
+                            border: "1px solid rgba(255, 255, 255, 0.25)",
+                            cursor: "pointer",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "4px",
+                          }}
+                          title="Click to remove from selection"
+                        >
+                          {pName} <span style={{ opacity: 0.7, fontSize: "10px" }}>×</span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                    <button
+                      type="button"
+                      className="primary-button small"
+                      onClick={handleOpenBulkAssignModal}
+                      style={{
+                        background: "#10b981",
+                        borderColor: "#059669",
+                        fontWeight: "800",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "6px",
+                        boxShadow: "0 2px 4px rgba(16, 185, 129, 0.4)",
+                      }}
+                      title={`Configure all ${selectedPortNames.length} selected ports simultaneously`}
+                    >
+                      <span>⚡</span> Assign VLAN to {selectedPortNames.length} Ports
+                    </button>
+
+                    <button
+                      type="button"
+                      className="secondary-button small"
+                      onClick={() => handleResetPort({ isBulk: true, ports: selectedPortNames })}
+                      disabled={resettingPort}
+                      style={{
+                        background: "#fffbeb",
+                        color: "#b45309",
+                        borderColor: "#fcd34d",
+                        fontWeight: "700",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "6px",
+                      }}
+                      title="Reset all selected ports back to default Access VLAN 1"
+                    >
+                      <span>🔄</span> Reset Selected ({selectedPortNames.length})
+                    </button>
+
+                    <button
+                      type="button"
+                      className="secondary-button small"
+                      onClick={clearPortSelection}
+                      style={{
+                        background: "rgba(255, 255, 255, 0.12)",
+                        color: "#e2e8f0",
+                        borderColor: "rgba(255, 255, 255, 0.25)",
+                      }}
+                    >
+                      Clear Selection
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* LEGEND BADGES */}
               <div style={{ display: "flex", gap: "14px", alignItems: "center", fontSize: "12px", flexWrap: "wrap", marginBottom: "14px" }}>
@@ -1563,10 +1828,69 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                 </div>
               </div>
 
+              {/* TABLE BULK SELECTION ACTION STRIP */}
+              {selectedPortNames.length > 0 && (
+                <div style={{ padding: "10px 20px", background: "#f0f9ff", borderBottom: "1.5px solid #bae6fd", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px" }}>
+                  <div style={{ fontSize: "13px", fontWeight: "800", color: "#0369a1", display: "flex", alignItems: "center", gap: "8px" }}>
+                    <span>☑️</span>
+                    <span>{selectedPortNames.length} Ports Selected:</span>
+                    <span style={{ fontSize: "12px", color: "#0284c7", fontWeight: "600" }}>
+                      ({selectedPortNames.slice(0, 5).join(", ")}{selectedPortNames.length > 5 ? `, +${selectedPortNames.length - 5} more` : ""})
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                    <button
+                      type="button"
+                      className="primary-button small"
+                      onClick={handleOpenBulkAssignModal}
+                      style={{ background: "#10b981", borderColor: "#059669", fontWeight: "800", display: "flex", alignItems: "center", gap: "6px" }}
+                    >
+                      <span>⚡</span> Assign VLAN to {selectedPortNames.length} Ports
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary-button small"
+                      onClick={() => handleResetPort({ isBulk: true, ports: selectedPortNames })}
+                      disabled={resettingPort}
+                      style={{ color: "#b45309", borderColor: "#fcd34d", background: "#fffbeb", fontWeight: "700" }}
+                    >
+                      <span>🔄</span> Reset Selected ({selectedPortNames.length})
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary-button small"
+                      onClick={clearPortSelection}
+                      style={{ color: "#64748b" }}
+                    >
+                      Clear Selection
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div className="table-responsive">
                 <table className="data-table">
                   <thead>
                     <tr>
+                      {isAdmin && (
+                        <th style={{ width: "36px", textAlign: "center" }}>
+                          <input
+                            type="checkbox"
+                            checked={filteredPorts.length > 0 && filteredPorts.every((p) => selectedPortNames.includes(p.port))}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                const newNames = Array.from(new Set([...selectedPortNames, ...filteredPorts.map((p) => p.port)]));
+                                setSelectedPortNames(newNames);
+                              } else {
+                                const filteredNames = new Set(filteredPorts.map((p) => p.port));
+                                setSelectedPortNames(selectedPortNames.filter((name) => !filteredNames.has(name)));
+                              }
+                            }}
+                            style={{ cursor: "pointer", width: "16px", height: "16px", accentColor: "#2563eb" }}
+                            title="Select / Deselect all visible ports"
+                          />
+                        </th>
+                      )}
                       <th>Interface</th>
                       <th>Link Status</th>
                       <th>Assigned VLAN</th>
@@ -1581,9 +1905,21 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                       const theme = getVlanColor(p.vlan);
                       const isTrunkPort = p.mode === "trunk" || !!p.is_uplink;
                       const isSfp = p.is_sfp || String(p.port || "").toLowerCase().startsWith("te");
+                      const isRowSelected = selectedPortNames.includes(p.port);
 
                       return (
-                        <tr key={p.port}>
+                        <tr key={p.port} style={{ background: isRowSelected ? "#f0f9ff" : undefined }}>
+                          {isAdmin && (
+                            <td style={{ textAlign: "center" }}>
+                              <input
+                                type="checkbox"
+                                checked={isRowSelected}
+                                onChange={() => togglePortSelection(p.port)}
+                                style={{ cursor: "pointer", width: "16px", height: "16px", accentColor: "#2563eb" }}
+                                title={`Select ${p.port} for bulk configuration`}
+                              />
+                            </td>
+                          )}
                           <td>
                             <strong>{p.port}</strong>
                             {isSfp && (
@@ -2686,7 +3022,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
               <div style={{ fontSize: "16px", fontWeight: "800", color: "#0f172a", display: "flex", alignItems: "center", gap: "8px" }}>
                 <span>🔌</span>
-                <span>Assign Port {selectedPort.port}</span>
+                <span>{selectedPort.isBulk ? `Assign ${selectedPort.ports.length} Switch Ports` : `Assign Port ${selectedPort.port}`}</span>
               </div>
               <button
                 type="button"
@@ -2698,7 +3034,31 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
             </div>
 
             <div style={{ fontSize: "12px", color: "#64748b", marginBottom: "16px" }}>
-              Configure VLAN and port mode for interface <strong>{selectedPort.port}</strong>.
+              {selectedPort.isBulk ? (
+                <div>
+                  Configure VLAN and port mode simultaneously for <strong>{selectedPort.ports.length} selected ports</strong>:
+                  <div style={{ display: "flex", gap: "4px", flexWrap: "wrap", marginTop: "6px", maxHeight: "64px", overflowY: "auto", padding: "4px 0" }}>
+                    {selectedPort.ports.map((p) => (
+                      <span
+                        key={p}
+                        style={{
+                          background: "#eff6ff",
+                          color: "#1d4ed8",
+                          border: "1px solid #bfdbfe",
+                          padding: "1px 6px",
+                          borderRadius: "4px",
+                          fontSize: "11px",
+                          fontWeight: "700",
+                        }}
+                      >
+                        {p}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div>Configure VLAN and port mode for interface <strong>{selectedPort.port}</strong>.</div>
+              )}
             </div>
 
             <form onSubmit={handleAssignPort}>
@@ -2773,9 +3133,9 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                   }}
                   onClick={() => handleResetPort(selectedPort)}
                   disabled={assigningPort || resettingPort}
-                  title="Reset ONLY this port back to default Access mode and default VLAN 1 for new assignment"
+                  title={selectedPort?.isBulk ? `Reset ${selectedPort.ports.length} ports back to factory default VLAN 1` : "Reset ONLY this port back to default Access mode and default VLAN 1"}
                 >
-                  <span>🔄</span> {resettingPort ? "Resetting..." : "Reset Port to Default (VLAN 1)"}
+                  <span>🔄</span> {resettingPort ? "Resetting..." : (selectedPort?.isBulk ? `Reset ${selectedPort.ports.length} Ports` : "Reset Port to Default (VLAN 1)")}
                 </button>
 
                 <div style={{ display: "flex", gap: "8px" }}>
@@ -2793,7 +3153,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                     disabled={assigningPort || resettingPort}
                     style={isTrunk ? { background: "#7c3aed", borderColor: "#6d28d9" } : {}}
                   >
-                    {assigningPort ? "Applying..." : (isTrunk ? "🔀 Apply Trunk Uplink" : "Apply Access VLAN")}
+                    {assigningPort ? "Applying..." : (isTrunk ? (selectedPort?.isBulk ? `🔀 Apply Trunk to ${selectedPort.ports.length} Ports` : "🔀 Apply Trunk Uplink") : (selectedPort?.isBulk ? `Apply Access VLAN to ${selectedPort.ports.length} Ports` : "Apply Access VLAN"))}
                   </button>
                 </div>
               </div>

@@ -83,7 +83,8 @@ class UpdateVlanRequest(BaseModel):
 
 
 class AssignPortVlanRequest(BaseModel):
-    port_name: str = Field(..., description="Switch physical port, e.g. 'GigabitEthernet0/1'")
+    port_name: str | None = Field(None, description="Switch physical port, e.g. 'GigabitEthernet0/1'")
+    ports: list[str] | None = Field(None, description="List of physical switch ports for bulk assignment, e.g. ['Gi0/1', 'Gi0/2']")
     vlan_id: int = Field(1, ge=1, le=4094, description="Target VLAN ID (or Native VLAN for Trunk)")
     mode: str = Field("access", description="'access' or 'trunk'")
     is_trunk: bool = Field(False, description="Tick to configure as 802.1Q trunk uplink port")
@@ -91,6 +92,7 @@ class AssignPortVlanRequest(BaseModel):
 
 class ResetPortRequest(BaseModel):
     port_name: str | None = Field(None, description="Switch physical port, e.g. 'GigabitEthernet0/1'")
+    ports: list[str] | None = Field(None, description="List of physical switch ports for bulk reset, e.g. ['Gi0/1', 'Gi0/2']")
     target_vlan_id: int = Field(1, ge=1, le=4094, description="Default VLAN to assign upon reset (defaults to VLAN 1)")
     reset_all: bool = Field(False, description="Whether to reset all switch ports back to default")
 
@@ -625,22 +627,39 @@ def assign_port_vlan(
     db: Session = Depends(get_db),
 ):
     """
-    Assign a physical switch interface to a specific VLAN or configure as Trunk Uplink.
+    Assign one or multiple physical switch interfaces to a specific VLAN or configure as Trunk Uplink.
     Directly applies 'switchport access vlan <id>' or 'switchport mode trunk' without console cabling.
     """
     effective_mode = "trunk" if (req.is_trunk or req.mode.lower() == "trunk") else "access"
     driver = get_active_switch_driver(db)
-    res = driver.set_port_vlan(
-        port_name=req.port_name,
-        vlan_id=req.vlan_id,
-        mode=effective_mode,
-    )
+
+    target_ports: list[str] = []
+    if req.ports:
+        target_ports.extend([p.strip() for p in req.ports if p and p.strip()])
+    elif req.port_name:
+        target_ports.append(req.port_name.strip())
+
+    if not target_ports:
+        raise HTTPException(status_code=400, detail="Must provide either 'port_name' or 'ports' list to configure.")
+
+    results = []
+    for p_name in target_ports:
+        r = driver.set_port_vlan(
+            port_name=p_name,
+            vlan_id=req.vlan_id,
+            mode=effective_mode,
+        )
+        results.append(r)
+
+    ports_str = ", ".join(target_ports)
+    event_type = "switch_ports_bulk_configured" if len(target_ports) > 1 else "switch_port_configured"
+    desc = f"{len(target_ports)} switch ports ({ports_str})" if len(target_ports) > 1 else f"Switch port '{target_ports[0]}'"
 
     create_event(
         db=db,
-        event_type="switch_port_configured",
+        event_type=event_type,
         message=(
-            f"Switch port '{req.port_name}' configured with VLAN {req.vlan_id} ({effective_mode.upper()} mode) "
+            f"{desc} configured with VLAN {req.vlan_id} ({effective_mode.upper()} mode) "
             f"by {current_user.role} '{current_user.username}'."
         ),
         device_id=None,
@@ -648,7 +667,18 @@ def assign_port_vlan(
     )
     db.commit()
 
-    return res
+    if len(target_ports) == 1:
+        return results[0]
+
+    return {
+        "success": True,
+        "ports": target_ports,
+        "vlan_id": req.vlan_id,
+        "mode": effective_mode,
+        "is_trunk": (effective_mode == "trunk"),
+        "message": f"{len(target_ports)} switch ports ({ports_str}) successfully configured with VLAN {req.vlan_id} ({effective_mode.upper()} mode).",
+        "results": results,
+    }
 
 
 @router.post("/ports/reset")
@@ -658,7 +688,7 @@ def reset_switch_ports(
     db: Session = Depends(get_db),
 ):
     """
-    Reset a specific switch port or all switch ports back to default VLAN 1 (Access mode).
+    Reset a specific switch port, multiple ports, or all switch ports back to default VLAN 1 (Access mode).
     Clears trunk mode and isolation, allowing an administrator to repurpose the port for another VLAN.
     """
     driver = get_active_switch_driver(db)
@@ -690,16 +720,28 @@ def reset_switch_ports(
             "message": f"All {len(reset_ports)} switch ports successfully reset to default VLAN {req.target_vlan_id}.",
         }
 
-    if not req.port_name:
-        raise HTTPException(status_code=400, detail="Port name is required when not resetting all ports.")
+    target_ports: list[str] = []
+    if req.ports:
+        target_ports.extend([p.strip() for p in req.ports if p and p.strip()])
+    elif req.port_name:
+        target_ports.append(req.port_name.strip())
 
-    res = driver.reset_port(port_name=req.port_name, target_vlan_id=req.target_vlan_id)
+    if not target_ports:
+        raise HTTPException(status_code=400, detail="Must provide 'port_name', 'ports', or set 'reset_all=True'.")
+
+    results = []
+    for p_name in target_ports:
+        r = driver.reset_port(port_name=p_name, target_vlan_id=req.target_vlan_id)
+        results.append(r)
+
+    ports_str = ", ".join(target_ports)
+    desc = f"{len(target_ports)} switch ports ({ports_str})" if len(target_ports) > 1 else f"Switch port '{target_ports[0]}'"
 
     create_event(
         db=db,
-        event_type="switch_port_reset",
+        event_type="switch_ports_bulk_reset" if len(target_ports) > 1 else "switch_port_reset",
         message=(
-            f"Switch port '{req.port_name}' reset to default (VLAN {req.target_vlan_id}, Access mode) "
+            f"{desc} reset to default (VLAN {req.target_vlan_id}, Access mode) "
             f"by {current_user.role} '{current_user.username}'. Ready for new VLAN assignment."
         ),
         device_id=None,
@@ -707,7 +749,18 @@ def reset_switch_ports(
     )
     db.commit()
 
-    return res
+    if len(target_ports) == 1:
+        return results[0]
+
+    return {
+        "success": True,
+        "ports": target_ports,
+        "vlan_id": req.target_vlan_id,
+        "mode": "access",
+        "is_uplink": False,
+        "message": f"{len(target_ports)} switch ports ({ports_str}) successfully reset to default VLAN {req.target_vlan_id}.",
+        "results": results,
+    }
 
 
 @router.post("/ports/configure-uplinks")
