@@ -1,0 +1,10 @@
+backend
+agent
+automation
+database
+reports
+scripts
+.venv
+*.py
+*.sh
+*.db
