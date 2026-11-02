@@ -84,6 +84,7 @@ app.add_middleware(
         for origin in settings.cors_origins.split(",")
         if origin.strip()
     ],
+    allow_origin_regex=r"https://.*\.vercel\.app|https://.*\.net-ops\.ac\.ke",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
