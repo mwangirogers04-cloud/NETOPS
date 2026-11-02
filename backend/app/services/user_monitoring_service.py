@@ -1,10 +1,16 @@
 from datetime import datetime, timezone, timedelta
+import ipaddress
+import json
 import re
+import urllib.request
 from fastapi import Request
 from sqlalchemy import func, select, desc, distinct
 from sqlalchemy.orm import Session
 
 from ..models.user import User, UserSession
+
+# In-memory LRU-style cache for IP geolocation lookups
+_GEO_CACHE: dict[str, dict] = {}
 
 
 def get_real_client_ip(request: Request) -> str:
@@ -34,6 +40,104 @@ def get_real_client_ip(request: Request) -> str:
         return request.client.host
 
     return "127.0.0.1"
+
+
+def country_code_to_flag(code: str) -> str:
+    """Convert a two-letter ISO country code into a Unicode emoji flag."""
+    if not code or len(code) != 2:
+        return "🌐"
+    try:
+        return chr(127397 + ord(code[0].upper())) + chr(127397 + ord(code[1].upper()))
+    except Exception:
+        return "🌐"
+
+
+def is_private_or_loopback(ip_str: str | None) -> bool:
+    """Check whether an IP address belongs to RFC 1918 private, loopback, or local ranges."""
+    if not ip_str or ip_str in ("Unknown IP", "127.0.0.1", "localhost", "::1", "None", ""):
+        return True
+    try:
+        ip = ipaddress.ip_address(ip_str.strip())
+        return ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
+    except Exception:
+        return True
+
+
+def get_ip_location(ip: str | None, request: Request | None = None) -> dict:
+    """
+    Determine geographic location (City, Country, Flag, ISP) for an IP address.
+    Checks Cloudflare headers first, then cached lookups, and lastly free ip-api with a short timeout.
+    """
+    if not ip or ip == "Unknown IP" or is_private_or_loopback(ip):
+        return {
+            "city": "Localhost",
+            "country": "Internal LAN",
+            "country_code": "LAN",
+            "flag": "🏠",
+            "isp": "Local Development / LAN",
+            "display": "Local / Internal LAN 🏠",
+        }
+
+    clean_ip = ip.strip()
+
+    # 1. In-memory cache check
+    if clean_ip in _GEO_CACHE:
+        return _GEO_CACHE[clean_ip]
+
+    # 2. Check Cloudflare / CDN headers if request provided and has city
+    if request:
+        cf_country = request.headers.get("cf-ipcountry")
+        cf_city = request.headers.get("cf-ipcity")
+        if cf_country and cf_city and cf_country != "XX":
+            flag = country_code_to_flag(cf_country)
+            display = f"{cf_city}, {cf_country} {flag}"
+            res = {
+                "city": cf_city,
+                "country": cf_country,
+                "country_code": cf_country,
+                "flag": flag,
+                "isp": "Cloudflare Network",
+                "display": display,
+            }
+            _GEO_CACHE[clean_ip] = res
+            return res
+
+    # 3. Query free IP geolocation endpoint with a strict 1.5-second timeout
+    try:
+        url = f"http://ip-api.com/json/{clean_ip}?fields=status,country,countryCode,city,isp"
+        req = urllib.request.Request(url, headers={"User-Agent": "NETOPS-Platform/2.0"})
+        with urllib.request.urlopen(req, timeout=1.5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            if data.get("status") == "success":
+                city = data.get("city") or "Unknown City"
+                country = data.get("country") or "Unknown Country"
+                code = data.get("countryCode") or ""
+                flag = country_code_to_flag(code)
+                isp = data.get("isp") or ""
+                display = f"{city}, {country} {flag}".strip()
+                res = {
+                    "city": city,
+                    "country": country,
+                    "country_code": code,
+                    "flag": flag,
+                    "isp": isp,
+                    "display": display,
+                }
+                _GEO_CACHE[clean_ip] = res
+                return res
+    except Exception:
+        pass
+
+    fallback = {
+        "city": "Unknown",
+        "country": "Internet Client",
+        "country_code": "",
+        "flag": "🌐",
+        "isp": "",
+        "display": f"{clean_ip} 🌐",
+    }
+    _GEO_CACHE[clean_ip] = fallback
+    return fallback
 
 
 def parse_user_agent(ua_str: str | None) -> dict:
@@ -186,6 +290,12 @@ def get_live_active_sessions(db: Session) -> list[dict]:
     results = []
     for s, email in sessions:
         device_meta = parse_user_agent(s.user_agent)
+        location_meta = get_ip_location(s.ip_address)
+        location_display = (
+            location_meta["display"]
+            if location_meta.get("city") and location_meta["city"] != "Unknown City"
+            else (s.location or location_meta["display"])
+        )
         idle_seconds = max(0, int((now - s.last_activity_at).total_seconds())) if s.last_activity_at else 0
         total_duration = max(0, int((now - s.login_at).total_seconds())) if s.login_at else s.duration_seconds
         is_strictly_online = idle_seconds <= 180  # 3 minutes
@@ -197,6 +307,8 @@ def get_live_active_sessions(db: Session) -> list[dict]:
             "email": email or "",
             "role": s.role,
             "ip_address": s.ip_address or "Unknown IP",
+            "location": location_meta,
+            "location_display": location_display,
             "current_page": s.current_page or "dashboard",
             "user_agent": s.user_agent,
             "device": device_meta,
@@ -218,7 +330,7 @@ def get_users_lifecycle_overview(db: Session) -> list[dict]:
     - is_online (true if active session in last 3 min)
     - total_sessions
     - total_duration_seconds
-    - last known IP and device
+    - last known IP, location, and device
     """
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     active_threshold = now - timedelta(minutes=3)
@@ -248,6 +360,7 @@ def get_users_lifecycle_overview(db: Session) -> list[dict]:
         last_seen_dt = u.created_at
         last_ip = None
         last_ua = None
+        last_loc_saved = None
         current_page = None
         is_online = False
 
@@ -256,6 +369,7 @@ def get_users_lifecycle_overview(db: Session) -> list[dict]:
             last_seen_dt = latest_session.last_activity_at or latest_session.login_at
             last_ip = latest_session.ip_address
             last_ua = latest_session.user_agent
+            last_loc_saved = latest_session.location
             
             # Check if any session is actively online right now
             for s in u_sessions:
@@ -264,9 +378,16 @@ def get_users_lifecycle_overview(db: Session) -> list[dict]:
                     current_page = s.current_page or "dashboard"
                     last_ip = s.ip_address
                     last_ua = s.user_agent
+                    last_loc_saved = s.location
                     break
 
         device_meta = parse_user_agent(last_ua)
+        location_meta = get_ip_location(last_ip)
+        location_display = (
+            location_meta["display"]
+            if location_meta.get("city") and location_meta["city"] != "Unknown City"
+            else (last_loc_saved or location_meta["display"])
+        )
 
         results.append({
             "user_id": u.id,
@@ -281,6 +402,8 @@ def get_users_lifecycle_overview(db: Session) -> list[dict]:
             "is_online": is_online,
             "current_page": current_page,
             "last_ip": last_ip or "Never logged in",
+            "last_location": location_meta,
+            "last_location_display": location_display,
             "last_device": device_meta,
             "total_sessions": total_sessions,
             "total_duration_seconds": total_duration,
@@ -299,7 +422,7 @@ def get_sessions_history(
     status_filter: str = "all",
 ) -> dict:
     """
-    Paginated, searchable session history log with login_at, logout_at, duration, IP, device, and last page.
+    Paginated, searchable session history log with login_at, logout_at, duration, IP, location, device, and last page.
     """
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     active_threshold = now - timedelta(minutes=3)
@@ -314,6 +437,7 @@ def get_sessions_history(
         query = query.where(
             (UserSession.username.ilike(term))
             | (UserSession.ip_address.ilike(term))
+            | (UserSession.location.ilike(term))
             | (User.email.ilike(term))
         )
 
@@ -338,6 +462,13 @@ def get_sessions_history(
     items = []
     for s, email in rows:
         device_meta = parse_user_agent(s.user_agent)
+        location_meta = get_ip_location(s.ip_address)
+        location_display = (
+            location_meta["display"]
+            if location_meta.get("city") and location_meta["city"] != "Unknown City"
+            else (s.location or location_meta["display"])
+        )
+
         is_strictly_online = (
             s.is_active
             and s.last_activity_at is not None
@@ -356,6 +487,8 @@ def get_sessions_history(
             "email": email or "",
             "role": s.role,
             "ip_address": s.ip_address or "Unknown IP",
+            "location": location_meta,
+            "location_display": location_display,
             "current_page": s.current_page or "dashboard",
             "user_agent": s.user_agent,
             "device": device_meta,

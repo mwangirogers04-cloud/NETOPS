@@ -125,6 +125,8 @@ def test_user_monitoring_endpoints(client, db_session):
     assert live[0]["is_online"] is True
     assert live[0]["device"]["browser"] == "Chrome 131"
     assert live[0]["device"]["os"] == "Windows 10/11"
+    assert "location" in live[0]
+    assert live[0]["location_display"] is not None
 
     # 6. Test Users Lifecycle Overview
     res = client.get("/user-monitoring/users-overview", headers=headers)
@@ -138,6 +140,8 @@ def test_user_monitoring_endpoints(client, db_session):
     assert john_info["first_seen"] is not None
     assert john_info["last_seen"] is not None
     assert john_info["last_ip"] == "197.232.40.10"
+    assert "last_location" in john_info
+    assert john_info["last_location_display"] is not None
     assert john_info["total_sessions"] == 1
 
     # 7. Test Sessions History

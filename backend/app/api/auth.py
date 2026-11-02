@@ -9,7 +9,7 @@ from ..database import get_db
 from ..models.user import User, UserSession
 from ..services.event_service import create_event
 from ..services.webhook_service import dispatch_security_alert, test_webhook_endpoint
-from ..services.user_monitoring_service import get_real_client_ip
+from ..services.user_monitoring_service import get_real_client_ip, get_ip_location
 from ..services.auth_service import (
     check_user_conflicts,
     create_access_token,
@@ -464,11 +464,13 @@ def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
         UserSession.is_active == True,
     ).update({"is_active": False})
 
+    loc_meta = get_ip_location(client_ip, request)
     session = UserSession(
         user_id=user.id,
         username=user.username,
         role=user.role,
         ip_address=client_ip,
+        location=loc_meta["display"],
         user_agent=user_agent,
         current_page="dashboard",
         login_at=now,
@@ -582,10 +584,12 @@ def session_heartbeat(
         if payload and payload.current_page:
             active_session.current_page = payload.current_page[:100]
         
-        # Keep client IP updated if client connects via proxy or changes network
+        # Keep client IP and location updated if client connects via proxy or changes network
         client_ip = get_real_client_ip(request)
         if client_ip and client_ip != "127.0.0.1":
             active_session.ip_address = client_ip
+            if not active_session.location or "Local" in active_session.location:
+                active_session.location = get_ip_location(client_ip, request)["display"]
 
         db.commit()
         return {
@@ -1172,11 +1176,13 @@ def change_expired_password(
         UserSession.is_active == True,
     ).update({"is_active": False})
 
+    loc_meta = get_ip_location(client_ip, request)
     session = UserSession(
         user_id=user.id,
         username=user.username,
         role=user.role,
         ip_address=client_ip,
+        location=loc_meta["display"],
         user_agent=user_agent,
         current_page="dashboard",
         login_at=now,

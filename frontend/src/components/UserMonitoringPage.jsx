@@ -651,6 +651,7 @@ export default function UserMonitoringPage({ API_URL, currentUser, getAuthHeader
                     <th style={{ padding: "12px 16px", color: "#64748b", fontWeight: "700" }}>User</th>
                     <th style={{ padding: "12px 16px", color: "#64748b", fontWeight: "700" }}>Role</th>
                     <th style={{ padding: "12px 16px", color: "#64748b", fontWeight: "700" }}>Current Screen</th>
+                    <th style={{ padding: "12px 16px", color: "#64748b", fontWeight: "700" }}>Logged In From</th>
                     <th style={{ padding: "12px 16px", color: "#64748b", fontWeight: "700" }}>Client IP</th>
                     <th style={{ padding: "12px 16px", color: "#64748b", fontWeight: "700" }}>Device &amp; Browser</th>
                     <th style={{ padding: "12px 16px", color: "#64748b", fontWeight: "700" }}>Logged In</th>
@@ -716,6 +717,19 @@ export default function UserMonitoringPage({ API_URL, currentUser, getAuthHeader
                       {/* Current Page */}
                       <td style={{ padding: "14px 16px" }}>
                         {getPageBadge(s.current_page)}
+                      </td>
+
+                      {/* Logged in from (Location) */}
+                      <td style={{ padding: "14px 16px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "6px", fontWeight: "700", color: "#0f172a" }}>
+                          <span style={{ fontSize: "16px" }}>{s.location?.flag || "🌐"}</span>
+                          <span>{s.location_display || s.location?.display || "Unknown Location"}</span>
+                        </div>
+                        {s.location?.isp && (
+                          <div style={{ fontSize: "11px", color: "#64748b", marginTop: "2px" }}>
+                            🏢 {s.location.isp}
+                          </div>
+                        )}
                       </td>
 
                       {/* IP */}
@@ -846,6 +860,7 @@ export default function UserMonitoringPage({ API_URL, currentUser, getAuthHeader
                   <th style={{ padding: "12px 16px", color: "#64748b", fontWeight: "700" }}>User</th>
                   <th style={{ padding: "12px 16px", color: "#64748b", fontWeight: "700" }}>Role</th>
                   <th style={{ padding: "12px 16px", color: "#64748b", fontWeight: "700" }}>Status</th>
+                  <th style={{ padding: "12px 16px", color: "#64748b", fontWeight: "700" }}>Logged In From</th>
                   <th style={{ padding: "12px 16px", color: "#64748b", fontWeight: "700" }}>First Seen</th>
                   <th style={{ padding: "12px 16px", color: "#64748b", fontWeight: "700" }}>Last Seen</th>
                   <th style={{ padding: "12px 16px", color: "#64748b", fontWeight: "700" }}>Last Known IP</th>
@@ -944,6 +959,19 @@ export default function UserMonitoringPage({ API_URL, currentUser, getAuthHeader
                           <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#cbd5e1" }} />
                           Offline
                         </span>
+                      )}
+                    </td>
+
+                    {/* Logged In From (Location) */}
+                    <td style={{ padding: "14px 16px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "6px", fontWeight: "700", color: "#0f172a" }}>
+                        <span style={{ fontSize: "16px" }}>{u.last_location?.flag || "🌐"}</span>
+                        <span>{u.last_location_display || "Unknown Location"}</span>
+                      </div>
+                      {u.last_location?.isp && (
+                        <div style={{ fontSize: "11px", color: "#64748b", marginTop: "2px" }}>
+                          🏢 {u.last_location.isp}
+                        </div>
                       )}
                     </td>
 
@@ -1082,6 +1110,7 @@ export default function UserMonitoringPage({ API_URL, currentUser, getAuthHeader
                     <th style={{ padding: "12px 16px", color: "#64748b", fontWeight: "700" }}>User</th>
                     <th style={{ padding: "12px 16px", color: "#64748b", fontWeight: "700" }}>Role</th>
                     <th style={{ padding: "12px 16px", color: "#64748b", fontWeight: "700" }}>Status</th>
+                    <th style={{ padding: "12px 16px", color: "#64748b", fontWeight: "700" }}>Logged In From</th>
                     <th style={{ padding: "12px 16px", color: "#64748b", fontWeight: "700" }}>Logged In</th>
                     <th style={{ padding: "12px 16px", color: "#64748b", fontWeight: "700" }}>Logged Out</th>
                     <th style={{ padding: "12px 16px", color: "#64748b", fontWeight: "700" }}>Duration</th>
@@ -1136,6 +1165,19 @@ export default function UserMonitoringPage({ API_URL, currentUser, getAuthHeader
                           <span style={{ color: "#d97706", fontWeight: "600", fontSize: "12px" }}>🟡 Active (Idle)</span>
                         ) : (
                           <span style={{ color: "#64748b", fontSize: "12px" }}>⚪ Ended</span>
+                        )}
+                      </td>
+
+                      {/* Logged in from (Location) */}
+                      <td style={{ padding: "12px 16px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "6px", fontWeight: "600", color: "#0f172a" }}>
+                          <span style={{ fontSize: "15px" }}>{s.location?.flag || "🌐"}</span>
+                          <span>{s.location_display || s.location?.display || "Unknown Location"}</span>
+                        </div>
+                        {s.location?.isp && (
+                          <div style={{ fontSize: "11px", color: "#64748b" }}>
+                            🏢 {s.location.isp}
+                          </div>
                         )}
                       </td>
 

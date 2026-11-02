@@ -152,6 +152,10 @@ class UserSession(Base):
         String(100),
         nullable=True,
     )
+    location: Mapped[str | None] = mapped_column(
+        String(150),
+        nullable=True,
+    )
     login_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=lambda: datetime.now(timezone.utc).replace(tzinfo=None),

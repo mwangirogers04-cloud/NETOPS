@@ -60,6 +60,7 @@ try:
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS created_by VARCHAR(100);"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;"))
         conn.execute(text("ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS current_page VARCHAR(100);"))
+        conn.execute(text("ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS location VARCHAR(150);"))
 except Exception:
     pass
 
