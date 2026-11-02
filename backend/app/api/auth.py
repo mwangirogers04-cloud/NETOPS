@@ -9,6 +9,7 @@ from ..database import get_db
 from ..models.user import User, UserSession
 from ..services.event_service import create_event
 from ..services.webhook_service import dispatch_security_alert, test_webhook_endpoint
+from ..services.user_monitoring_service import get_real_client_ip
 from ..services.auth_service import (
     check_user_conflicts,
     create_access_token,
@@ -454,10 +455,7 @@ def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
 
     # Record User Access Session
     now = datetime.now(timezone.utc).replace(tzinfo=None)
-    client_ip = (
-        request.headers.get("x-forwarded-for", "").split(",")[0].strip()
-        or (request.client.host if request.client else "127.0.0.1")
-    )
+    client_ip = get_real_client_ip(request)
     user_agent = request.headers.get("user-agent", "Unknown")[:250]
 
     # Deactivate prior active sessions for this user to keep session lookups fast
@@ -472,6 +470,7 @@ def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
         role=user.role,
         ip_address=client_ip,
         user_agent=user_agent,
+        current_page="dashboard",
         login_at=now,
         last_activity_at=now,
         duration_seconds=0,
@@ -549,12 +548,18 @@ def get_my_profile(
     }
 
 
+class HeartbeatPayload(BaseModel):
+    current_page: str | None = None
+
+
 @router.post("/heartbeat")
 def session_heartbeat(
+    request: Request,
+    payload: HeartbeatPayload | None = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Heartbeat invoked while user is active on the dashboard to track session duration."""
+    """Heartbeat invoked while user is active on the dashboard to track session duration and page navigation."""
     active_session = db.scalar(
         select(UserSession)
         .where(UserSession.user_id == current_user.id, UserSession.is_active == True)
@@ -574,11 +579,20 @@ def session_heartbeat(
             )
         active_session.last_activity_at = now
         active_session.duration_seconds = max(1, int((now - active_session.login_at).total_seconds()))
+        if payload and payload.current_page:
+            active_session.current_page = payload.current_page[:100]
+        
+        # Keep client IP updated if client connects via proxy or changes network
+        client_ip = get_real_client_ip(request)
+        if client_ip and client_ip != "127.0.0.1":
+            active_session.ip_address = client_ip
+
         db.commit()
         return {
             "status": "ok",
             "session_id": active_session.id,
             "duration_seconds": active_session.duration_seconds,
+            "current_page": active_session.current_page,
         }
     return {"status": "no_active_session"}
 
@@ -1149,10 +1163,7 @@ def change_expired_password(
     clear_failed_login_attempts(user.email)
 
     # Establish an active session and access token
-    client_ip = (
-        request.headers.get("x-forwarded-for", "").split(",")[0].strip()
-        or (request.client.host if request.client else "127.0.0.1")
-    )
+    client_ip = get_real_client_ip(request)
     user_agent = request.headers.get("user-agent", "Unknown")[:250]
 
     # Deactivate prior active sessions for this user to keep session lookups fast
@@ -1167,6 +1178,7 @@ def change_expired_password(
         role=user.role,
         ip_address=client_ip,
         user_agent=user_agent,
+        current_page="dashboard",
         login_at=now,
         last_activity_at=now,
         duration_seconds=0,

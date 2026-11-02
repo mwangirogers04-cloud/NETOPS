@@ -32,6 +32,7 @@ from .services.passive_sniffer import start_passive_sniffer, stop_passive_sniffe
 from .api.switches import router as switches_router
 from .api.notifications import router as notifications_router
 from .api.radius import router as radius_router
+from .api.user_monitoring import router as user_monitoring_router
 
 from .services.auth_service import seed_default_users
 from .services.webhook_service import dispatch_security_alert, map_event_type_to_trigger
@@ -58,6 +59,7 @@ try:
         conn.execute(text("ALTER TABLE events ADD COLUMN IF NOT EXISTS actor VARCHAR(100);"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS created_by VARCHAR(100);"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;"))
+        conn.execute(text("ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS current_page VARCHAR(100);"))
 except Exception:
     pass
 
@@ -110,6 +112,7 @@ app.include_router(users_router)
 app.include_router(switches_router)
 app.include_router(notifications_router)
 app.include_router(radius_router)
+app.include_router(user_monitoring_router)
 
 
 # ---------------------------------------------------------

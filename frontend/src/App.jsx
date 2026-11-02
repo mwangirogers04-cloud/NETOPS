@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import LoginPage from "./components/LoginPage";
 import UsersPage from "./components/UsersPage";
+import UserMonitoringPage from "./components/UserMonitoringPage";
 import SwitchVlanPage from "./components/SwitchVlanPage";
 import NetworkTopologyMap from "./components/NetworkTopologyMap";
 import { NETOPS_FAQS, FAQ_CATEGORIES } from "./data/faqs";
@@ -258,7 +259,11 @@ function App() {
 
       fetch(`${API_URL}/auth/heartbeat`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ current_page: activePage }),
       })
         .then((res) => {
           if (res.status === 401) {
@@ -268,7 +273,7 @@ function App() {
         .catch(() => {});
     }, 30000);
     return () => clearInterval(interval);
-  }, [currentUser]);
+  }, [currentUser, activePage]);
 
   useEffect(() => {
     const token = localStorage.getItem("netops_token");
@@ -11197,6 +11202,9 @@ const EndpointUpdatesPage = () => {
       case "users":
         return <UsersPage API_URL={API_URL} currentUser={currentUser} getAuthHeaders={getAuthHeaders} />;
 
+      case "monitoring":
+        return <UserMonitoringPage API_URL={API_URL} currentUser={currentUser} getAuthHeaders={getAuthHeaders} setActivePage={setActivePage} />;
+
       case "settings":
         return SettingsPage();
 
@@ -14513,6 +14521,17 @@ const EndpointUpdatesPage = () => {
                   }
                 />
 
+                <NavItem
+                  icon="📡"
+                  label="User Activity"
+                  active={
+                    activePage === "monitoring"
+                  }
+                  onClick={() =>
+                    setActivePage("monitoring")
+                  }
+                />
+
                 <div className="nav-section-title">
                   SYSTEM
                 </div>
@@ -15500,6 +15519,7 @@ function getPageTitle(page) {
     topology: "Interactive Network Topology Map",
     reports: "Network Reports",
     users: "User Management & RBAC Access",
+    monitoring: "Developer User Monitor & Live Activity",
     settings: "System Settings",
   };
 
