@@ -14,14 +14,16 @@ import {
 } from "./utils/networkInterfaceStatus";
 
 const API_URL =
-  window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
-    ? (import.meta.env.VITE_API_URL || "http://127.0.0.1:8000")
-    : `${window.location.protocol}//${window.location.hostname}:8000`;
+  import.meta.env.VITE_API_URL ||
+  (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+    ? "http://127.0.0.1:8000"
+    : `${window.location.protocol}//${window.location.hostname}:8000`);
 
 const WS_URL =
-  window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
-    ? (import.meta.env.VITE_WS_URL || "ws://127.0.0.1:8000/ws/events")
-    : `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.hostname}:8000/ws/events`;
+  import.meta.env.VITE_WS_URL ||
+  (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+    ? "ws://127.0.0.1:8000/ws/events"
+    : `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.hostname}:8000/ws/events`);
 
 function App() {
   const [currentUser, setCurrentUser] = useState(() => {
