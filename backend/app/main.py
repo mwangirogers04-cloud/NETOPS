@@ -101,7 +101,7 @@ for explicit_origin in [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins_list,
-    allow_origin_regex=r"https://([a-zA-Z0-9\-]+\.)*(vercel\.app|netops\.co\.ke|net-ops\.ac\.ke)",
+    allow_origin_regex=r"https?://.*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
