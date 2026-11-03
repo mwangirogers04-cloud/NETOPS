@@ -115,3 +115,32 @@ def test_user_device_isolation():
 
     finally:
         db.close()
+
+
+def test_admin_device_visibility():
+    """Verify that users with role='admin' can view network infrastructure devices."""
+    from backend.app.database import SessionLocal
+
+    db: Session = SessionLocal()
+    try:
+        admin_user = db.query(User).filter(User.role == "admin").first()
+        if not admin_user:
+            admin_user = User(
+                username="test_admin_role",
+                email="admin_role@example.com",
+                hashed_password=hash_password("Password123!"),
+                role="admin",
+                is_active=True,
+            )
+            db.add(admin_user)
+            db.commit()
+            db.refresh(admin_user)
+
+        token = create_access_token({"sub": admin_user.username, "role": admin_user.role, "id": admin_user.id})
+        res = client.get("/devices/", headers={"Authorization": f"Bearer {token}"})
+        assert res.status_code == 200
+        devices = res.json()
+        assert len(devices) > 0
+    finally:
+        db.close()
+

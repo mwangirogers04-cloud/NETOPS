@@ -204,22 +204,21 @@ def get_devices(
 
     query = select(Device).order_by(Device.id)
 
-    is_super = (
-        current_user.role == "super_admin"
-        or current_user.username.lower() == "developer"
+    is_admin = (
+        current_user.role in ("admin", "super_admin")
+        or current_user.username.lower() in ("developer", "admin")
     )
-    if not is_super:
+    if not is_admin:
         # Strict multi-tenant isolation:
-        # Regular users / non-super-admins ONLY see devices belonging to their own account
+        # Regular users ONLY see devices belonging to their own account
         query = query.where(Device.owner_id == current_user.id)
     else:
-        # Super admin / Developer:
+        # Super admin / Admin / Developer:
         # - scope == "all": view all devices across the platform
         # - scope == "user_<id>": view specific user's network
-        # - default: view developer's network (owner_id == current_user.id or owner_id IS NULL)
-        if scope == "all":
-            pass
-        elif scope and scope.startswith("user_"):
+        # - scope == "my": view devices owned directly by current admin
+        # - default: view all infrastructure devices
+        if scope and scope.startswith("user_"):
             try:
                 uid = int(scope.replace("user_", ""))
                 query = query.where(Device.owner_id == uid)
@@ -227,11 +226,12 @@ def get_devices(
                 pass
         elif scope == "unassigned":
             query = query.where(Device.owner_id.is_(None))
+        elif scope == "my":
+            query = query.where(Device.owner_id == current_user.id)
         else:
-            # Default for developer: view developer's devices or unassigned
-            query = query.where(
-                or_(Device.owner_id == current_user.id, Device.owner_id.is_(None))
-            )
+            # Default for administrator:
+            # View all infrastructure devices
+            pass
 
     devices = db.scalars(query).all()
 
