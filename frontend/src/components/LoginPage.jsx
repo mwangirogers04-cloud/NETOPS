@@ -321,6 +321,11 @@ export default function LoginPage({
           return;
         }
 
+        // Unregistered or invalid account: clean generic error without attempt countdown/lockout
+        if (detailMsg.toLowerCase().startsWith("invalid username or password")) {
+          throw new Error("Invalid username or password.");
+        }
+
         const nextAttempts = failedAttempts + 1;
         setFailedAttempts(nextAttempts);
         try {

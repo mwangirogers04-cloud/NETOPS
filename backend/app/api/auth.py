@@ -377,14 +377,19 @@ def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
         )
     )
 
-    if not user or not verify_password(req.password, user.hashed_password):
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid username or password.",
+        )
+
+    if not verify_password(req.password, user.hashed_password):
         current_fails = FAILED_LOGIN_ATTEMPTS.get(ident, 0) + 1
         FAILED_LOGIN_ATTEMPTS[ident] = current_fails
-        if user:
-            if user.username:
-                FAILED_LOGIN_ATTEMPTS[user.username.lower()] = current_fails
-            if user.email:
-                FAILED_LOGIN_ATTEMPTS[user.email.lower()] = current_fails
+        if user.username:
+            FAILED_LOGIN_ATTEMPTS[user.username.lower()] = current_fails
+        if user.email:
+            FAILED_LOGIN_ATTEMPTS[user.email.lower()] = current_fails
 
         if current_fails >= 3:
             client_ip = (
