@@ -13,6 +13,7 @@ import {
   isTypeAndVlanMatching,
   getExpectedVlanForType,
 } from "./utils/networkInterfaceStatus";
+import { playBellSound } from "./utils/bellAudio";
 
 const API_URL =
   import.meta.env.VITE_API_URL ||
@@ -1172,60 +1173,7 @@ const loadEvents = async () => {
   const playLanNotificationChime = (force = false) => {
     if (!force && !alertSoundEnabledRef.current) return;
     try {
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      if (!AudioCtx) return;
-      const ctx = new AudioCtx();
-      if (ctx.state === "suspended") {
-        ctx.resume();
-      }
-
-      const now = ctx.currentTime;
-
-      // Realistic physical bell strike with harmonic overtones and acoustic decay
-      const ringBellStrike = (startTime, baseFreq, volume = 0.35) => {
-        // Bell partials (fundamental, minor 3rd, 5th, octave, superquint, metallic strike ping)
-        const partials = [
-          { mult: 0.5,  gain: 0.15, decay: 1.4 },  // Subharmonic hum tone
-          { mult: 1.0,  gain: 0.40, decay: 1.2 },  // Prime / Fundamental
-          { mult: 1.19, gain: 0.25, decay: 0.9 },  // Tierce / Minor 3rd
-          { mult: 1.50, gain: 0.20, decay: 0.75 }, // Quint / Fifth
-          { mult: 2.00, gain: 0.16, decay: 0.6 },  // Nominal / Octave
-          { mult: 2.76, gain: 0.10, decay: 0.4 },  // High metallic shimmer
-          { mult: 4.07, gain: 0.06, decay: 0.2 },  // Clapper strike transient
-        ];
-
-        partials.forEach(({ mult, gain: pGain, decay }) => {
-          const osc = ctx.createOscillator();
-          const gainNode = ctx.createGain();
-
-          osc.type = "sine";
-          osc.frequency.setValueAtTime(baseFreq * mult, startTime);
-
-          // Fast strike attack (3ms) followed by natural acoustic exponential ringing decay
-          gainNode.gain.setValueAtTime(0.0001, startTime);
-          gainNode.gain.linearRampToValueAtTime(pGain * volume, startTime + 0.003);
-          gainNode.gain.exponentialRampToValueAtTime(0.0001, startTime + decay);
-
-          osc.connect(gainNode);
-          gainNode.connect(ctx.destination);
-
-          osc.start(startTime);
-          osc.stop(startTime + decay);
-        });
-      };
-
-      // Two-strike melodious bell chime ("Ding-Dong!" / "Ding-Ding! 🔔")
-      // Strike 1: A5 (880 Hz)
-      ringBellStrike(now, 880, 0.35);
-      // Strike 2: D6 (1174.66 Hz) ringing out with rich resonance
-      ringBellStrike(now + 0.15, 1174.66, 0.42);
-
-      // Clean up audio context after ringing concludes
-      setTimeout(() => {
-        try {
-          ctx.close();
-        } catch (_) {}
-      }, 2000);
+      playBellSound();
     } catch (_) {}
   };
 
@@ -14990,33 +14938,57 @@ const EndpointUpdatesPage = () => {
                 <span>❓</span> FAQs
               </button>
 
-              <button
-                type="button"
-                onClick={toggleAlertSound}
-                className="sound-toggle-btn"
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "6px",
-                  padding: "5px 12px",
-                  borderRadius: "20px",
-                  border: alertSoundEnabled ? "1px solid #10b981" : "1px solid #cbd5e1",
-                  background: alertSoundEnabled ? "#ecfdf5" : "#f1f5f9",
-                  color: alertSoundEnabled ? "#047857" : "#64748b",
-                  fontSize: "12px",
-                  fontWeight: "700",
-                  cursor: "pointer",
-                  transition: "all 0.15s ease",
-                  userSelect: "none",
-                }}
-                title={
-                  alertSoundEnabled
-                    ? "Alert bell is ON. Click to mute bell sound (visual popups still appear normally)."
-                    : "Alert bell is MUTED. Click to turn bell sound ON (visual popups still appear silently)."
-                }
-              >
-                {alertSoundEnabled ? "🔔 Bell Sound ON" : "🔕 Bell Muted"}
-              </button>
+              <div style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                <button
+                  type="button"
+                  onClick={toggleAlertSound}
+                  className="sound-toggle-btn"
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    padding: "5px 12px",
+                    borderRadius: "20px",
+                    border: alertSoundEnabled ? "1px solid #10b981" : "1px solid #cbd5e1",
+                    background: alertSoundEnabled ? "#ecfdf5" : "#f1f5f9",
+                    color: alertSoundEnabled ? "#047857" : "#64748b",
+                    fontSize: "12px",
+                    fontWeight: "700",
+                    cursor: "pointer",
+                    transition: "all 0.15s ease",
+                    userSelect: "none",
+                  }}
+                  title={
+                    alertSoundEnabled
+                      ? "Alert bell is ON. Click to mute bell sound (visual popups still appear normally)."
+                      : "Alert bell is MUTED. Click to turn bell sound ON (visual popups still appear silently)."
+                  }
+                >
+                  {alertSoundEnabled ? "🔔 Bell Sound ON" : "🔕 Bell Muted"}
+                </button>
+                {alertSoundEnabled && (
+                  <button
+                    type="button"
+                    onClick={() => playLanNotificationChime(true)}
+                    style={{
+                      background: "#e0f2fe",
+                      border: "1px solid #7dd3fc",
+                      color: "#0369a1",
+                      borderRadius: "16px",
+                      padding: "4px 9px",
+                      fontSize: "11px",
+                      fontWeight: "700",
+                      cursor: "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "3px",
+                    }}
+                    title="Test bell ring sound"
+                  >
+                    ▶ Ring
+                  </button>
+                )}
+              </div>
 
               {currentUser && (
                 <div style={{ display: "flex", alignItems: "center", gap: "10px", background: "#f8fafc", border: "1px solid #cbd5e1", padding: "4px 12px 4px 6px", borderRadius: "24px" }}>
