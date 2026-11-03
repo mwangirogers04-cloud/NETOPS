@@ -1175,17 +1175,57 @@ const loadEvents = async () => {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       if (!AudioCtx) return;
       const ctx = new AudioCtx();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = "sine";
-      osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
-      osc.frequency.setValueAtTime(880, ctx.currentTime + 0.12); // A5
-      gain.gain.setValueAtTime(0.15, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.45);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start();
-      osc.stop(ctx.currentTime + 0.45);
+      if (ctx.state === "suspended") {
+        ctx.resume();
+      }
+
+      const now = ctx.currentTime;
+
+      // Realistic physical bell strike with harmonic overtones and acoustic decay
+      const ringBellStrike = (startTime, baseFreq, volume = 0.35) => {
+        // Bell partials (fundamental, minor 3rd, 5th, octave, superquint, metallic strike ping)
+        const partials = [
+          { mult: 0.5,  gain: 0.15, decay: 1.4 },  // Subharmonic hum tone
+          { mult: 1.0,  gain: 0.40, decay: 1.2 },  // Prime / Fundamental
+          { mult: 1.19, gain: 0.25, decay: 0.9 },  // Tierce / Minor 3rd
+          { mult: 1.50, gain: 0.20, decay: 0.75 }, // Quint / Fifth
+          { mult: 2.00, gain: 0.16, decay: 0.6 },  // Nominal / Octave
+          { mult: 2.76, gain: 0.10, decay: 0.4 },  // High metallic shimmer
+          { mult: 4.07, gain: 0.06, decay: 0.2 },  // Clapper strike transient
+        ];
+
+        partials.forEach(({ mult, gain: pGain, decay }) => {
+          const osc = ctx.createOscillator();
+          const gainNode = ctx.createGain();
+
+          osc.type = "sine";
+          osc.frequency.setValueAtTime(baseFreq * mult, startTime);
+
+          // Fast strike attack (3ms) followed by natural acoustic exponential ringing decay
+          gainNode.gain.setValueAtTime(0.0001, startTime);
+          gainNode.gain.linearRampToValueAtTime(pGain * volume, startTime + 0.003);
+          gainNode.gain.exponentialRampToValueAtTime(0.0001, startTime + decay);
+
+          osc.connect(gainNode);
+          gainNode.connect(ctx.destination);
+
+          osc.start(startTime);
+          osc.stop(startTime + decay);
+        });
+      };
+
+      // Two-strike melodious bell chime ("Ding-Dong!" / "Ding-Ding! 🔔")
+      // Strike 1: A5 (880 Hz)
+      ringBellStrike(now, 880, 0.35);
+      // Strike 2: D6 (1174.66 Hz) ringing out with rich resonance
+      ringBellStrike(now + 0.15, 1174.66, 0.42);
+
+      // Clean up audio context after ringing concludes
+      setTimeout(() => {
+        try {
+          ctx.close();
+        } catch (_) {}
+      }, 2000);
     } catch (_) {}
   };
 
@@ -14971,11 +15011,11 @@ const EndpointUpdatesPage = () => {
                 }}
                 title={
                   alertSoundEnabled
-                    ? "Alert chime is ON. Click to mute sound (visual popups still appear normally)."
-                    : "Alert chime is MUTED. Click to turn sound ON (visual popups still appear silently)."
+                    ? "Alert bell is ON. Click to mute bell sound (visual popups still appear normally)."
+                    : "Alert bell is MUTED. Click to turn bell sound ON (visual popups still appear silently)."
                 }
               >
-                {alertSoundEnabled ? "🔊 Sound ON" : "🔇 Sound Muted"}
+                {alertSoundEnabled ? "🔔 Bell Sound ON" : "🔕 Bell Muted"}
               </button>
 
               {currentUser && (
@@ -15156,11 +15196,11 @@ const EndpointUpdatesPage = () => {
                     }}
                     title={
                       alertSoundEnabled
-                        ? "Turn chime sound off (visual popup will still appear)"
-                        : "Turn chime sound back on"
+                        ? "Turn bell sound off (visual popup will still appear)"
+                        : "Turn bell sound back on"
                     }
                   >
-                    {alertSoundEnabled ? "🔊 Sound ON" : "🔇 Sound Muted"}
+                    {alertSoundEnabled ? "🔔 Bell ON" : "🔕 Bell Muted"}
                   </button>
                   <button
                     type="button"
