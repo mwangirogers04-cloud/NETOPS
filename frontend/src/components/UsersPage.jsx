@@ -26,7 +26,6 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
     email: "",
     phone_number: "",
     role: "user",
-    password: "",
     is_active: true,
     is_verified: true,
   });
@@ -50,7 +49,6 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
   const [formLoading, setFormLoading] = useState(false);
   const [formError, setFormError] = useState("");
   const [showCreatePasswordText, setShowCreatePasswordText] = useState(false);
-  const [showEditPasswordText, setShowEditPasswordText] = useState(false);
   const [createFieldWarnings, setCreateFieldWarnings] = useState({
     username: "",
     email: "",
@@ -291,7 +289,6 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
       email: user.email || "",
       phone_number: user.phone_number || "",
       role: user.role || "user",
-      password: "",
       is_active: user.is_active ?? true,
       is_verified: user.is_verified ?? false,
     });
@@ -307,13 +304,6 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
       setEditError("Username, Email, and Phone Number cannot be blank.");
       return;
     }
-    if (editFormState.password && editFormState.password.trim()) {
-      const pwdErr = validatePasswordComplexity(editFormState.password.trim());
-      if (pwdErr) {
-        setEditError(pwdErr);
-        return;
-      }
-    }
 
     setEditLoading(true);
     setEditError("");
@@ -326,9 +316,6 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
       is_active: editFormState.is_active,
       is_verified: editFormState.is_verified,
     };
-    if (editFormState.password && editFormState.password.trim()) {
-      payload.password = editFormState.password.trim();
-    }
 
     try {
       const checkData = await recheckFieldAvailability(
@@ -1271,38 +1258,7 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                 </select>
               </div>
 
-              <div className="form-group" style={{ marginBottom: "20px" }}>
-                <label className="form-label" style={{ fontSize: "11px", fontWeight: "700", color: "#334155", display: "block", marginBottom: "4px" }}>
-                  Change Password (Optional — min 8 chars, A-Z, a-z, special)
-                </label>
-                <div style={{ position: "relative" }}>
-                  <input
-                    type={showEditPasswordText ? "text" : "password"}
-                    className="login-input"
-                    placeholder="Leave blank to keep existing password"
-                    value={editFormState.password}
-                    onChange={(e) => setEditFormState({ ...editFormState, password: e.target.value })}
-                    disabled={editLoading}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowEditPasswordText(!showEditPasswordText)}
-                    style={{ position: "absolute", right: "10px", top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", fontSize: "14px" }}
-                    title={showEditPasswordText ? "Hide password" : "Show password"}
-                  >
-                    {showEditPasswordText ? "👁️‍🗨️" : "👁️"}
-                  </button>
-                </div>
-                {editFormState.password ? (
-                  renderPasswordChecklist(editFormState.password)
-                ) : (
-                  <div style={{ fontSize: "11px", color: "#64748b", marginTop: "3px" }}>
-                    Only enter a value if you wish to reset this user's password.
-                  </div>
-                )}
-              </div>
-
-              <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
+              <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end", marginTop: "20px" }}>
                 <button
                   type="button"
                   className="secondary-button"
