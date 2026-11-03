@@ -40,6 +40,8 @@ function App() {
     }
   });
 
+  const [activePage, setActivePage] = useState("dashboard");
+
   const [activationToken] = useState(() => {
     try {
       const params = new URLSearchParams(window.location.search);
@@ -304,7 +306,6 @@ function App() {
       });
   }, []);
 
-  const [activePage, setActivePage] = useState("dashboard");
   const [devices, setDevices] = useState([]);
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
