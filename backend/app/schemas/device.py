@@ -16,6 +16,8 @@ class DeviceCreate(BaseModel):
     vlan_id: int | None = None
     ip_assignment: str = "dhcp"
     notes: str | None = None
+    owner_id: int | None = None
+    network_name: str | None = None
 
     @field_validator("network_interface", mode="before")
     @classmethod

@@ -1,8 +1,12 @@
+import os
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
 from ..database import get_db
+from ..models.user import User
+from ..services.auth_service import get_optional_current_user
 from ..services.discovery import (
     detect_local_subnets,
     discover_devices,
@@ -37,9 +41,25 @@ class DiscoveryRequest(BaseModel):
         return value
 
 
+class AgentDeviceItem(BaseModel):
+    mac_address: str
+    ip_address: str | None = None
+    hostname: str | None = None
+    vendor: str | None = None
+    device_type: str | None = None
+    network_interface: str | None = None
+
+
+class AgentSyncRequest(BaseModel):
+    network: str
+    interface: str | None = None
+    devices: list[AgentDeviceItem]
+
+
 @router.post("/scan")
 def run_discovery_scan(
     request: DiscoveryRequest,
+    current_user: User | None = Depends(get_optional_current_user),
     db: Session = Depends(get_db),
 ):
     """
@@ -48,6 +68,7 @@ def run_discovery_scan(
     Example network:
         192.168.0.0/24
     """
+    owner_id = current_user.id if current_user else 1
 
     try:
         clean_iface = (
@@ -64,6 +85,7 @@ def run_discovery_scan(
                 discovered_devices,
                 db,
                 scanned_interface=clean_iface,
+                owner_id=owner_id,
             )
         else:
             discovered_devices = discover_devices(
@@ -72,6 +94,7 @@ def run_discovery_scan(
             saved_devices = save_discovered_devices(
                 discovered_devices,
                 db,
+                owner_id=owner_id,
             )
 
         return {
@@ -128,3 +151,47 @@ def run_discovery_scan(
             status_code=500,
             detail="Discovery scan failed due to an internal error.",
         ) from exc
+
+
+@router.post("/agent-sync")
+def sync_agent_devices(
+    request: AgentSyncRequest,
+    current_user: User | None = Depends(get_optional_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Receives scan results from a remote user's client-side scan probe,
+    storing and scoping them under the user's isolated account.
+    """
+    owner_id = current_user.id if current_user else 1
+    raw_devices = [d.model_dump() for d in request.devices]
+    clean_iface = request.interface.strip() if request.interface and request.interface.strip() else None
+    saved = save_discovered_devices(
+        raw_devices,
+        db=db,
+        scanned_interface=clean_iface,
+        owner_id=owner_id,
+    )
+    return {
+        "status": "completed",
+        "network": request.network,
+        "owner_id": owner_id,
+        "devices_discovered": len(raw_devices),
+        "devices_saved": len(saved),
+    }
+
+
+@router.get("/probe-script")
+def download_probe_script():
+    """
+    Serves the standalone NetOps LAN probe script for remote clients to download.
+    """
+    probe_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../agent/netops_probe.py"))
+    if not os.path.exists(probe_path):
+        raise HTTPException(status_code=404, detail="Probe script not found.")
+    return FileResponse(
+        probe_path,
+        media_type="text/x-python",
+        filename="netops_probe.py",
+    )
+

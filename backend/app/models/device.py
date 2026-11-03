@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..database import Base
@@ -12,6 +12,18 @@ class Device(Base):
     id: Mapped[int] = mapped_column(
         primary_key=True,
         index=True,
+    )
+
+    owner_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    network_name: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
     )
 
     mac_address: Mapped[str] = mapped_column(

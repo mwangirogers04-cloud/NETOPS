@@ -731,6 +731,7 @@ def save_discovered_devices(
     devices: list[dict],
     db: Session,
     scanned_interface: str | None = None,
+    owner_id: int | None = None,
 ):
     """
     Save discovered devices and update their state.
@@ -752,9 +753,10 @@ def save_discovered_devices(
         if device.get("mac_address")
     }
 
-    existing_devices = db.scalars(
-        select(Device)
-    ).all()
+    existing_query = select(Device)
+    if owner_id is not None:
+        existing_query = existing_query.where(Device.owner_id == owner_id)
+    existing_devices = db.scalars(existing_query).all()
 
     # ---------------------------------------------------------
     # Mark missing devices offline (scoped to scanned_interface if specified)
@@ -863,8 +865,11 @@ def save_discovered_devices(
             )
         )
 
-        if existing_device and existing_device.mac_address != mac_address:
-            existing_device.mac_address = mac_address
+        if existing_device:
+            if existing_device.mac_address != mac_address:
+                existing_device.mac_address = mac_address
+            if existing_device.owner_id is None and owner_id is not None:
+                existing_device.owner_id = owner_id
 
         hostname = discovered.get("hostname")
         vendor = discovered.get("vendor")
@@ -1183,6 +1188,7 @@ def save_discovered_devices(
                 vendor=vendor,
                 device_type=device_type,
                 network_interface=discovered.get("interface") or (scanned_interface if scanned_interface and scanned_interface != "all" else get_default_interface()),
+                owner_id=owner_id,
                 classification_status="normal",
                 status="offline",
                 approval_status="pending",

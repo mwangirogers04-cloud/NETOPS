@@ -356,6 +356,10 @@ function App() {
   const [cveResult, setCveResult] = useState(null);
   const [cveError, setCveError] = useState(null);
 
+  // Client Scanner Probe
+  const [probeCopied, setProbeCopied] = useState(false);
+  const [showProbeModal, setShowProbeModal] = useState(false);
+
   const [alertSoundEnabled, setAlertSoundEnabled] = useState(() => {
     try {
       const saved = localStorage.getItem("netops_alert_sound_enabled");
@@ -445,7 +449,10 @@ function App() {
     try {
       const response = await fetch(`${API_URL}/discovery/scan`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuthHeaders(),
+        },
         body: JSON.stringify({
           network: targetNetwork,
           interface: targetInterface,
@@ -846,7 +853,9 @@ function App() {
 
   const loadDevices = async () => {
     try {
-      const response = await fetch(`${API_URL}/devices/`);
+      const response = await fetch(`${API_URL}/devices/`, {
+        headers: getAuthHeaders(),
+      });
 
       if (!response.ok) {
         throw new Error("Failed to load devices");
@@ -1249,7 +1258,9 @@ const loadEvents = async () => {
       // Only notify while the device is still awaiting approval.
       let stillPending = false;
       try {
-        const res = await fetch(`${API_URL}/devices/`);
+        const res = await fetch(`${API_URL}/devices/`, {
+          headers: getAuthHeaders(),
+        });
         if (res.ok) {
           const list = await res.json();
           const dev = Array.isArray(list)
@@ -3997,6 +4008,127 @@ const LanScannerPage = () => {
           <div><strong>Standard User (Read-Only Scanner View):</strong> You have read-only visibility into discovered LAN devices. Triggering network sweeps and updating device approvals require Administrator privileges.</div>
         </div>
       )}
+
+      {/* REMOTE PHYSICAL NETWORK PROBE (FOR HOSTED / CLOUD INSTANCES) */}
+      <div
+        className="panel"
+        style={{
+          background: "linear-gradient(135deg, rgba(30, 41, 59, 0.95) 0%, rgba(15, 23, 42, 0.98) 100%)",
+          color: "#f8fafc",
+          border: "1px solid #334155",
+          borderRadius: "12px",
+          padding: "20px",
+          marginBottom: "16px",
+          boxShadow: "0 4px 20px rgba(0, 0, 0, 0.15)",
+        }}
+      >
+        <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "flex-start", gap: "16px" }}>
+          <div style={{ maxWidth: "700px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+              <span style={{ fontSize: "18px" }}>🚀</span>
+              <span style={{ fontSize: "15px", fontWeight: "700", color: "#38bdf8", letterSpacing: "0.02em" }}>
+                Remote Physical Network Scanner (Client Probe)
+              </span>
+              <span
+                style={{
+                  background: "rgba(56, 189, 248, 0.2)",
+                  color: "#38bdf8",
+                  padding: "2px 8px",
+                  borderRadius: "999px",
+                  fontSize: "11px",
+                  fontWeight: "600",
+                }}
+              >
+                Multi-Tenant Isolated
+              </span>
+            </div>
+            <p style={{ margin: "0 0 12px 0", fontSize: "13px", lineHeight: "1.5", color: "#cbd5e1" }}>
+              Because NETOPS is hosted online, web browsers cannot directly scan your local physical network (home or office Wi-Fi/LAN) across the internet. Run this lightweight, zero-dependency Python probe on your machine to scan your local network and securely populate your personal dashboard.
+            </p>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center" }}>
+              <a
+                href={`${API_URL}/discovery/probe-script`}
+                download="netops_probe.py"
+                className="primary-button"
+                style={{
+                  fontSize: "12px",
+                  padding: "8px 14px",
+                  background: "#0284c7",
+                  borderColor: "#38bdf8",
+                  textDecoration: "none",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                }}
+              >
+                <span>📥</span> Download netops_probe.py
+              </a>
+
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => {
+                  const token = localStorage.getItem("netops_token") || "";
+                  const cmd = `curl -sO ${API_URL}/discovery/probe-script && python3 netops_probe.py --server ${API_URL}${token ? ` --token ${token}` : ""}`;
+                  navigator.clipboard?.writeText(cmd);
+                  setProbeCopied(true);
+                  setTimeout(() => setProbeCopied(false), 3000);
+                }}
+                style={{
+                  fontSize: "12px",
+                  padding: "8px 14px",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  background: "#1e293b",
+                  borderColor: "#475569",
+                  color: "#f8fafc",
+                }}
+              >
+                <span>{probeCopied ? "✅" : "📋"}</span>
+                {probeCopied ? "Command Copied to Clipboard!" : "Copy 1-Click Run Command"}
+              </button>
+
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => setShowProbeModal(true)}
+                style={{
+                  fontSize: "12px",
+                  padding: "8px 14px",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  background: "#0f172a",
+                  borderColor: "#334155",
+                  color: "#94a3b8",
+                }}
+              >
+                <span>📖</span> Setup Guide &amp; Daemon Mode
+              </button>
+            </div>
+          </div>
+
+          <div
+            style={{
+              background: "#0b1120",
+              border: "1px solid #1e293b",
+              borderRadius: "8px",
+              padding: "12px 16px",
+              fontFamily: "monospace",
+              fontSize: "12px",
+              maxWidth: "460px",
+              color: "#38bdf8",
+              overflowX: "auto",
+            }}
+          >
+            <div style={{ color: "#64748b", fontSize: "11px", marginBottom: "4px" }}># Quick 1-Line Run (Linux / macOS / Windows):</div>
+            <code>
+              python netops_probe.py --server {API_URL} --token {"<your_token>"}
+            </code>
+          </div>
+        </div>
+      </div>
 
       {/* CONTROL & SCAN PANEL */}
       <div className="panel" style={{ background: "linear-gradient(180deg, #f8fafc 0%, #ffffff 100%)", borderColor: "#334155", marginBottom: "16px" }}>
@@ -12864,6 +12996,155 @@ const EndpointUpdatesPage = () => {
   };
 
   // ------------------------------------------------------------
+  // REMOTE CLIENT SCANNER PROBE MODAL
+  // ------------------------------------------------------------
+  const renderProbeModal = () => {
+    if (!showProbeModal) return null;
+    const token = localStorage.getItem("netops_token") || "";
+
+    const curlCmd = `curl -sO ${API_URL}/discovery/probe-script && python3 netops_probe.py --server ${API_URL}${token ? ` --token ${token}` : ""}`;
+    const winCmd = `Invoke-WebRequest -Uri "${API_URL}/discovery/probe-script" -OutFile "netops_probe.py"; python netops_probe.py --server ${API_URL}${token ? ` --token ${token}` : ""}`;
+    const daemonCmd = `python3 netops_probe.py --server ${API_URL}${token ? ` --token ${token}` : ""} --interval 60`;
+
+    return (
+      <div
+        className="modal-overlay"
+        onClick={() => setShowProbeModal(false)}
+        style={{ zIndex: 99999 }}
+      >
+        <div
+          className="automation-modal"
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            maxWidth: "780px",
+            width: "95%",
+            maxHeight: "90vh",
+            display: "flex",
+            flexDirection: "column",
+            background: "#0f172a",
+            color: "#f8fafc",
+            border: "1px solid #334155",
+            borderRadius: "12px",
+            boxShadow: "0 20px 40px rgba(0,0,0,0.5)",
+          }}
+        >
+          {/* Header */}
+          <div className="automation-modal-header" style={{ borderBottom: "1px solid #1e293b", padding: "16px 20px" }}>
+            <div>
+              <div className="automation-label" style={{ color: "#38bdf8", fontSize: "11px", fontWeight: "700" }}>
+                MULTI-TENANT LAN SCANNER
+              </div>
+              <div className="automation-title" style={{ display: "flex", alignItems: "center", gap: "8px", color: "#f8fafc", fontSize: "18px", fontWeight: "700" }}>
+                <span>🚀</span>
+                Physical Network Probe (Client Scanner)
+              </div>
+            </div>
+            <button
+              type="button"
+              className="ghost-button"
+              onClick={() => setShowProbeModal(false)}
+              style={{ fontSize: "20px", color: "#94a3b8", cursor: "pointer", background: "none", border: "none" }}
+            >
+              ✕
+            </button>
+          </div>
+
+          {/* Body */}
+          <div style={{ padding: "20px", overflowY: "auto", flex: 1, fontSize: "13px", lineHeight: "1.6" }}>
+            <div style={{ background: "rgba(56, 189, 248, 0.1)", border: "1px solid rgba(56, 189, 248, 0.3)", borderRadius: "8px", padding: "12px 16px", marginBottom: "16px", color: "#e2e8f0" }}>
+              <strong>🔒 Strict Tenant Privacy:</strong> When you run the probe, discovered devices are isolated under your private account (<code>User ID: {currentUser?.id || "Active"}</code>). Devices from other users or the developer will never mix with your dashboard view.
+            </div>
+
+            <div style={{ marginBottom: "18px" }}>
+              <h4 style={{ margin: "0 0 6px 0", color: "#38bdf8", fontSize: "14px" }}>Option 1: Quick 1-Liner (Linux, macOS, WSL)</h4>
+              <div style={{ background: "#020617", border: "1px solid #1e293b", borderRadius: "6px", padding: "10px 14px", fontFamily: "monospace", fontSize: "12px", color: "#a5f3fc", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px" }}>
+                <span style={{ overflowX: "auto", whiteSpace: "nowrap" }}>{curlCmd}</span>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => {
+                    navigator.clipboard?.writeText(curlCmd);
+                    setProbeCopied(true);
+                    setTimeout(() => setProbeCopied(false), 2500);
+                  }}
+                  style={{ padding: "4px 10px", fontSize: "11px", whiteSpace: "nowrap" }}
+                >
+                  {probeCopied ? "✅ Copied" : "📋 Copy"}
+                </button>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: "18px" }}>
+              <h4 style={{ margin: "0 0 6px 0", color: "#38bdf8", fontSize: "14px" }}>Option 2: Windows PowerShell</h4>
+              <div style={{ background: "#020617", border: "1px solid #1e293b", borderRadius: "6px", padding: "10px 14px", fontFamily: "monospace", fontSize: "12px", color: "#a5f3fc", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px" }}>
+                <span style={{ overflowX: "auto", whiteSpace: "nowrap" }}>{winCmd}</span>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => {
+                    navigator.clipboard?.writeText(winCmd);
+                    setProbeCopied(true);
+                    setTimeout(() => setProbeCopied(false), 2500);
+                  }}
+                  style={{ padding: "4px 10px", fontSize: "11px", whiteSpace: "nowrap" }}
+                >
+                  {probeCopied ? "✅ Copied" : "📋 Copy"}
+                </button>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: "18px" }}>
+              <h4 style={{ margin: "0 0 6px 0", color: "#38bdf8", fontSize: "14px" }}>Option 3: Continuous Daemon Mode (Periodic Sync)</h4>
+              <p style={{ margin: "0 0 6px 0", color: "#94a3b8", fontSize: "12px" }}>
+                Run the probe in the background every 60 seconds to automatically discover new devices or mark offline machines:
+              </p>
+              <div style={{ background: "#020617", border: "1px solid #1e293b", borderRadius: "6px", padding: "10px 14px", fontFamily: "monospace", fontSize: "12px", color: "#a5f3fc" }}>
+                {daemonCmd}
+              </div>
+            </div>
+
+            <div>
+              <h4 style={{ margin: "0 0 6px 0", color: "#38bdf8", fontSize: "14px" }}>Option 4: Download Script Directly</h4>
+              <p style={{ margin: "0 0 8px 0", color: "#94a3b8", fontSize: "12px" }}>
+                Save <code>netops_probe.py</code> to your machine and run <code>python netops_probe.py --interactive</code>.
+              </p>
+              <a
+                href={`${API_URL}/discovery/probe-script`}
+                download="netops_probe.py"
+                className="primary-button"
+                style={{
+                  fontSize: "12px",
+                  padding: "8px 16px",
+                  textDecoration: "none",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  background: "#0284c7",
+                  borderColor: "#38bdf8",
+                }}
+              >
+                <span>📥</span> Download netops_probe.py
+              </a>
+            </div>
+          </div>
+
+          {/* Footer */}
+          <div style={{ padding: "12px 20px", borderTop: "1px solid #1e293b", display: "flex", justifyContent: "flex-end" }}>
+            <button
+              type="button"
+              className="primary-button"
+              onClick={() => setShowProbeModal(false)}
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+
+  // ------------------------------------------------------------
   // MAIN UI
   // ------------------------------------------------------------
 
@@ -14918,6 +15199,7 @@ const EndpointUpdatesPage = () => {
         {renderPatchModals()}
         {renderTroubleshootModal()}
         {renderCveModal()}
+        {renderProbeModal()}
 
 
         {showChangePasswordModal && (

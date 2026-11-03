@@ -195,11 +195,45 @@ def attach_update_information(devices: list[Device], db: Session):
     response_model=list[DeviceResponse],
 )
 def get_devices(
+    scope: str | None = None,
+    current_user: User | None = Depends(get_optional_current_user),
     db: Session = Depends(get_db),
 ):
-    devices = db.scalars(
-        select(Device).order_by(Device.id)
-    ).all()
+    if not current_user:
+        return []
+
+    query = select(Device).order_by(Device.id)
+
+    is_super = (
+        current_user.role == "super_admin"
+        or current_user.username.lower() == "developer"
+    )
+    if not is_super:
+        # Strict multi-tenant isolation:
+        # Regular users / non-super-admins ONLY see devices belonging to their own account
+        query = query.where(Device.owner_id == current_user.id)
+    else:
+        # Super admin / Developer:
+        # - scope == "all": view all devices across the platform
+        # - scope == "user_<id>": view specific user's network
+        # - default: view developer's network (owner_id == current_user.id or owner_id IS NULL)
+        if scope == "all":
+            pass
+        elif scope and scope.startswith("user_"):
+            try:
+                uid = int(scope.replace("user_", ""))
+                query = query.where(Device.owner_id == uid)
+            except ValueError:
+                pass
+        elif scope == "unassigned":
+            query = query.where(Device.owner_id.is_(None))
+        else:
+            # Default for developer: view developer's devices or unassigned
+            query = query.where(
+                or_(Device.owner_id == current_user.id, Device.owner_id.is_(None))
+            )
+
+    devices = db.scalars(query).all()
 
     for device in devices:
         # Quarantined or isolated devices must read offline until authorized for internet
@@ -225,6 +259,7 @@ def get_devices(
 )
 def create_device(
     device_data: DeviceCreate,
+    current_user: User | None = Depends(get_optional_current_user),
     db: Session = Depends(get_db),
 ):
     existing_device = db.scalar(
@@ -239,14 +274,21 @@ def create_device(
             detail="Device with this MAC address already exists",
         )
 
+    owner_id = (
+        device_data.owner_id
+        if (current_user and (current_user.role == "super_admin" or current_user.username.lower() == "developer") and device_data.owner_id)
+        else (current_user.id if current_user else device_data.owner_id)
+    )
+
     # --------------------------------------------------------
     # EVERY NEW DEVICE STARTS IN QUARANTINE
     # --------------------------------------------------------
 
     device = Device(
         **device_data.model_dump(
-            exclude={"vlan_id"}
+            exclude={"vlan_id", "owner_id"}
         ),
+        owner_id=owner_id,
         status="offline",
         approval_status="pending",
         classification_status="normal",
