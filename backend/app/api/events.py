@@ -3,9 +3,10 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
+from ..models.device import Device
 from ..models.event import Event
 from ..models.user import User
-from ..services.auth_service import require_super_admin
+from ..services.auth_service import get_optional_current_user, require_super_admin
 
 
 router = APIRouter(
@@ -19,12 +20,16 @@ def get_events(
     event_type: str | None = Query(default=None, min_length=1),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    current_user: User | None = Depends(get_optional_current_user),
     db: Session = Depends(get_db),
 ):
     query = select(Event)
 
     if event_type is not None:
         query = query.where(Event.event_type == event_type)
+
+    if current_user and current_user.role not in ("admin", "super_admin") and current_user.username.lower() not in ("developer", "admin"):
+        query = query.join(Device, Event.device_id == Device.id).where(Device.owner_id == current_user.id)
 
     query = (
         query
