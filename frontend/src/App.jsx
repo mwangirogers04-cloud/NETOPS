@@ -121,6 +121,33 @@ function App() {
       return;
     }
 
+    // Disallow password containing username or email
+    const pwdLower = newPw.toLowerCase();
+    const disallowed = [currentUser?.username, currentUser?.email].filter(Boolean);
+    const checkTerms = new Set();
+    disallowed.forEach((raw) => {
+      const term = String(raw).trim().toLowerCase();
+      if (!term) return;
+      if (term.length >= 3) checkTerms.add(term);
+      if (term.includes("@")) {
+        const local = term.split("@")[0];
+        if (local.length >= 3) checkTerms.add(local);
+        local.split(/[._\-+]/).forEach((part) => {
+          if (part.length >= 3) checkTerms.add(part);
+        });
+      } else {
+        term.split(/[\s._\-]+/).forEach((word) => {
+          if (word.length >= 3) checkTerms.add(word);
+        });
+      }
+    });
+    for (const t of checkTerms) {
+      if (pwdLower.includes(t)) {
+        setPwChangeError("Password cannot contain your name or email address.");
+        return;
+      }
+    }
+
     setPwChangeLoading(true);
     setPwChangeError("");
     setPwChangeSuccess("");

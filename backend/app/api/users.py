@@ -192,19 +192,18 @@ def create_user(
             detail="Permission Denied: Administrators cannot create accounts with Developer (Super Admin) rights. Administrators can only create Standard Users or other Administrators. Only Developers can create Developer accounts.",
         )
 
-    # Validate initial password complexity (min 8 chars, 1 uppercase, 1 lowercase, 1 number, 1 special)
+    clean_username = req.username.strip()
+    clean_email = str(req.email).strip().lower()
+    clean_phone = req.phone_number.strip()
+
+    # Validate initial password complexity (min 8 chars, 1 uppercase, 1 lowercase, 1 number, 1 special, no name/email)
     try:
-        validate_password_complexity(req.password)
+        validate_password_complexity(req.password, disallowed_terms=[clean_username, clean_email])
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         )
-
-    # Check for existing username, email, or phone number
-    clean_username = req.username.strip()
-    clean_email = str(req.email).strip().lower()
-    clean_phone = req.phone_number.strip()
 
     conflicts = check_user_conflicts(
         db=db,
@@ -373,7 +372,7 @@ def update_user(
     # Password
     if req.password is not None and req.password.strip():
         try:
-            validate_password_complexity(req.password)
+            validate_password_complexity(req.password, disallowed_terms=[user.username, user.email])
         except ValueError as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

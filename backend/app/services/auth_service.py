@@ -1,6 +1,7 @@
 import json
 import logging
 from pathlib import Path
+import re
 import secrets
 import smtplib
 import urllib.parse
@@ -134,7 +135,10 @@ def check_user_conflicts(
 # PASSWORD COMPLEXITY & HASHING
 # -------------------------------------------------------------
 
-def validate_password_complexity(password: str) -> str:
+def validate_password_complexity(
+    password: str,
+    disallowed_terms: list[str] | None = None,
+) -> str:
     """
     Validate that a password meets complexity requirements:
       - Minimum 8 characters
@@ -142,6 +146,7 @@ def validate_password_complexity(password: str) -> str:
       - At least one lowercase letter (a-z)
       - At least one number (0-9)
       - At least one special character (non-alphanumeric)
+      - Cannot contain the user's name, username, or email address
     """
     if not password or len(password) < 8:
         raise ValueError(
@@ -163,6 +168,39 @@ def validate_password_complexity(password: str) -> str:
         raise ValueError(
             "Password must contain at least one special character (e.g. @, #, $, %, !, &, *)."
         )
+
+    if disallowed_terms:
+        pwd_lower = password.lower()
+        for raw_term in disallowed_terms:
+            if not raw_term:
+                continue
+            term = str(raw_term).strip().lower()
+            if not term:
+                continue
+
+            terms_to_check = set()
+            if "@" in term:
+                if len(term) >= 3:
+                    terms_to_check.add(term)
+                local_part = term.split("@")[0]
+                if len(local_part) >= 3:
+                    terms_to_check.add(local_part)
+                for subpart in re.split(r"[._\-+]", local_part):
+                    if len(subpart) >= 3:
+                        terms_to_check.add(subpart)
+            else:
+                if len(term) >= 3:
+                    terms_to_check.add(term)
+                for word in re.split(r"[\s._\-]+", term):
+                    if len(word) >= 3:
+                        terms_to_check.add(word)
+
+            for check_t in terms_to_check:
+                if check_t in pwd_lower:
+                    raise ValueError(
+                        "Password cannot contain your name or email address."
+                    )
+
     return password
 
 

@@ -159,17 +159,50 @@ export default function LoginPage({
     return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
   };
 
-  // Validate password complexity: min 8 chars, 1 uppercase, 1 lowercase, 1 number, 1 special character
-  const getPasswordRuleStatus = (pwd = "") => ({
+  const containsPersonalInfo = (pwd = "", disallowed = []) => {
+    if (!pwd) return false;
+    const pwdLower = pwd.toLowerCase();
+    for (const raw of disallowed) {
+      if (!raw) continue;
+      const term = String(raw).trim().toLowerCase();
+      if (!term) continue;
+
+      const checkTerms = new Set();
+      if (term.length >= 3) checkTerms.add(term);
+
+      if (term.includes("@")) {
+        const local = term.split("@")[0];
+        if (local.length >= 3) checkTerms.add(local);
+        local.split(/[._\-+]/).forEach((part) => {
+          if (part.length >= 3) checkTerms.add(part);
+        });
+      } else {
+        term.split(/[\s._\-]+/).forEach((word) => {
+          if (word.length >= 3) checkTerms.add(word);
+        });
+      }
+
+      for (const t of checkTerms) {
+        if (pwdLower.includes(t)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+
+  // Validate password complexity: min 8 chars, 1 uppercase, 1 lowercase, 1 number, 1 special character, no name/email
+  const getPasswordRuleStatus = (pwd = "", disallowed = []) => ({
     minLength: pwd.length >= 8,
     hasUpper: /[A-Z]/.test(pwd),
     hasLower: /[a-z]/.test(pwd),
     hasNumber: /[0-9]/.test(pwd),
     hasSpecial: /[^A-Za-z0-9\s]/.test(pwd),
+    noPersonal: pwd.length > 0 && !containsPersonalInfo(pwd, disallowed),
   });
 
-  const validatePasswordComplexity = (pwd = "") => {
-    const rules = getPasswordRuleStatus(pwd);
+  const validatePasswordComplexity = (pwd = "", disallowed = []) => {
+    const rules = getPasswordRuleStatus(pwd, disallowed);
     if (!rules.minLength) {
       return "Password must be at least 8 characters long and include at least one uppercase letter, one lowercase letter, one number, and one special character.";
     }
@@ -185,11 +218,14 @@ export default function LoginPage({
     if (!rules.hasSpecial) {
       return "Password must contain at least one special character (e.g. @, #, $, %, !, &, *).";
     }
+    if (containsPersonalInfo(pwd, disallowed)) {
+      return "Password cannot contain your name or email address.";
+    }
     return null;
   };
 
-  const renderPasswordChecklist = (pwd = "") => {
-    const r = getPasswordRuleStatus(pwd);
+  const renderPasswordChecklist = (pwd = "", disallowed = []) => {
+    const r = getPasswordRuleStatus(pwd, disallowed);
     const itemStyle = (ok) => ({
       display: "flex",
       alignItems: "center",
@@ -216,6 +252,7 @@ export default function LoginPage({
         <div style={itemStyle(r.hasLower)}>{r.hasLower ? "✓" : "○"} 1 Lowercase (a–z)</div>
         <div style={itemStyle(r.hasNumber)}>{r.hasNumber ? "✓" : "○"} 1 Number (0–9)</div>
         <div style={itemStyle(r.hasSpecial)}>{r.hasSpecial ? "✓" : "○"} 1 Special (@#$%!&*)</div>
+        <div style={itemStyle(r.noPersonal)}>{r.noPersonal ? "✓" : "○"} No name or email</div>
       </div>
     );
   };
@@ -316,7 +353,7 @@ export default function LoginPage({
       setErrorMessage("Please enter a new password.");
       return;
     }
-    const complexityErr = validatePasswordComplexity(expiredAdminNewPassword);
+    const complexityErr = validatePasswordComplexity(expiredAdminNewPassword, [expiredAdminIdentifier]);
     if (complexityErr) {
       setErrorMessage(complexityErr);
       return;
@@ -422,7 +459,7 @@ export default function LoginPage({
       setErrorMessage("Please enter the 6-digit OTP code.");
       return;
     }
-    const complexityErr = validatePasswordComplexity(newPassword);
+    const complexityErr = validatePasswordComplexity(newPassword, [forgotIdentifier]);
     if (complexityErr) {
       setErrorMessage(complexityErr);
       return;
@@ -485,7 +522,7 @@ export default function LoginPage({
       setErrorMessage("Please enter your Administrator or Developer username/email and password to authorize the reset.");
       return;
     }
-    const complexityErr = validatePasswordComplexity(adminNewPassword);
+    const complexityErr = validatePasswordComplexity(adminNewPassword, [targetIdent]);
     if (complexityErr) {
       setErrorMessage(complexityErr);
       return;
@@ -1268,7 +1305,7 @@ export default function LoginPage({
                   disabled={loading}
                   required
                 />
-                {renderPasswordChecklist(expiredAdminNewPassword)}
+                {renderPasswordChecklist(expiredAdminNewPassword, [expiredAdminIdentifier])}
               </div>
 
               <div className="form-group">
@@ -1444,7 +1481,7 @@ export default function LoginPage({
                       {showAdminNewPassword ? "👁️‍🗨️" : "👁️"}
                     </button>
                   </div>
-                  {renderPasswordChecklist(adminNewPassword)}
+                  {renderPasswordChecklist(adminNewPassword, [adminTargetUser, forgotIdentifier])}
                 </div>
 
                 <div className="form-group">

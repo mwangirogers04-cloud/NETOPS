@@ -281,7 +281,7 @@ def register_account(
     clean_phone = req.phone_number.strip()
 
     try:
-        validate_password_complexity(req.password)
+        validate_password_complexity(req.password, disallowed_terms=[clean_username, clean_email])
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -900,20 +900,20 @@ def reset_password(
     db: Session = Depends(get_db),
 ):
     """Validate 5-minute OTP and reset password (enforcing 8+ chars, uppercase, lowercase, special char)."""
-    try:
-        validate_password_complexity(req.new_password)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
-        )
-
     user = _find_user_by_identifier(db, req.identifier)
 
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User account not found.",
+        )
+
+    try:
+        validate_password_complexity(req.new_password, disallowed_terms=[user.username, user.email])
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
         )
 
     if user.role not in ("admin", "super_admin"):
@@ -1037,7 +1037,7 @@ def admin_direct_reset_password(
 
     # Enforce password complexity: >= 8 chars, 1 uppercase, 1 lowercase, 1 special character
     try:
-        validate_password_complexity(req.new_password)
+        validate_password_complexity(req.new_password, disallowed_terms=[target_user.username, target_user.email])
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1129,7 +1129,7 @@ def change_expired_password(
         )
 
     try:
-        validate_password_complexity(req.new_password)
+        validate_password_complexity(req.new_password, disallowed_terms=[user.username, user.email])
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1250,7 +1250,7 @@ def change_my_password(
         )
 
     try:
-        validate_password_complexity(req.new_password)
+        validate_password_complexity(req.new_password, disallowed_terms=[current_user.username, current_user.email])
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
