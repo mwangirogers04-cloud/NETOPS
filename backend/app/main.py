@@ -61,6 +61,8 @@ try:
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;"))
         conn.execute(text("ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS current_page VARCHAR(100);"))
         conn.execute(text("ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS location VARCHAR(150);"))
+        conn.execute(text("ALTER TABLE devices ADD COLUMN IF NOT EXISTS owner_id INTEGER;"))
+        conn.execute(text("ALTER TABLE devices ADD COLUMN IF NOT EXISTS network_name VARCHAR(100);"))
 except Exception:
     pass
 
@@ -87,7 +89,7 @@ app.add_middleware(
         for origin in settings.cors_origins.split(",")
         if origin.strip()
     ],
-    allow_origin_regex=r"https://.*\.vercel\.app|https://.*\.net-ops\.ac\.ke",
+    allow_origin_regex=r"https://.*\.vercel\.app|https://.*\.net-ops\.ac\.ke|https://.*\.netops\.co\.ke",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
