@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models.user import User
-from ..services.auth_service import require_admin
+from ..services.auth_service import require_developer
 from ..services.user_monitoring_service import (
     get_user_monitoring_summary,
     get_live_active_sessions,
@@ -18,7 +18,7 @@ router = APIRouter(prefix="/user-monitoring", tags=["User Monitoring & Live Acti
 
 @router.get("/summary")
 def read_monitoring_summary(
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_developer),
     db: Session = Depends(get_db),
 ):
     """
@@ -30,7 +30,7 @@ def read_monitoring_summary(
 
 @router.get("/live-sessions")
 def read_live_sessions(
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_developer),
     db: Session = Depends(get_db),
 ):
     """
@@ -42,7 +42,7 @@ def read_live_sessions(
 
 @router.get("/users-overview")
 def read_users_overview(
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_developer),
     db: Session = Depends(get_db),
 ):
     """
@@ -58,7 +58,7 @@ def read_sessions_history(
     offset: int = Query(0, ge=0),
     search: str | None = Query(None),
     status_filter: str = Query("all", pattern="^(all|online|active|ended)$"),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_developer),
     db: Session = Depends(get_db),
 ):
     """
@@ -76,7 +76,7 @@ def read_sessions_history(
 @router.post("/terminate-session/{session_id}")
 def terminate_user_session_endpoint(
     session_id: int,
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_developer),
     db: Session = Depends(get_db),
 ):
     """
@@ -94,7 +94,7 @@ def terminate_user_session_endpoint(
 @router.post("/terminate-user/{user_id}")
 def terminate_all_sessions_for_user_endpoint(
     user_id: int,
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_developer),
     db: Session = Depends(get_db),
 ):
     """

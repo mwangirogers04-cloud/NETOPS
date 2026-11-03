@@ -53,7 +53,8 @@ function App() {
 
   const isDeveloper =
     currentUser?.username?.toLowerCase() === "developer" ||
-    currentUser?.role?.toLowerCase() === "developer";
+    currentUser?.role?.toLowerCase() === "developer" ||
+    currentUser?.role?.toLowerCase() === "super_admin";
   const isSuperAdmin =
     currentUser?.role === "super_admin" ||
     currentUser?.role === "developer" ||
@@ -11336,6 +11337,9 @@ const EndpointUpdatesPage = () => {
         return <UsersPage API_URL={API_URL} currentUser={currentUser} getAuthHeaders={getAuthHeaders} />;
 
       case "monitoring":
+        if (!isDeveloper) {
+          return Dashboard();
+        }
         return <UserMonitoringPage API_URL={API_URL} currentUser={currentUser} getAuthHeaders={getAuthHeaders} setActivePage={setActivePage} />;
 
       case "settings":
@@ -14803,16 +14807,18 @@ const EndpointUpdatesPage = () => {
                   }
                 />
 
-                <NavItem
-                  icon="📡"
-                  label="User Activity"
-                  active={
-                    activePage === "monitoring"
-                  }
-                  onClick={() =>
-                    setActivePage("monitoring")
-                  }
-                />
+                {isDeveloper && (
+                  <NavItem
+                    icon="📡"
+                    label="User Activity"
+                    active={
+                      activePage === "monitoring"
+                    }
+                    onClick={() =>
+                      setActivePage("monitoring")
+                    }
+                  />
+                )}
 
                 <div className="nav-section-title">
                   SYSTEM

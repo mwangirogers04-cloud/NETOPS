@@ -310,6 +310,19 @@ def require_super_admin(current_user: User = Depends(get_current_user)) -> User:
     return current_user
 
 
+def require_developer(current_user: User = Depends(get_current_user)) -> User:
+    """Dependency: Requires Developer role or developer username."""
+    uname = getattr(current_user, "username", "").lower()
+    role = getattr(current_user, "role", "").lower()
+    is_dev = uname == "developer" or role in ("developer", "super_admin")
+    if not is_dev:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Developer access required to access User Activity monitoring.",
+        )
+    return current_user
+
+
 # -------------------------------------------------------------
 # NOTIFICATION GATEWAY SETTINGS (EMAIL SMTP & SMS GATEWAY)
 # -------------------------------------------------------------
