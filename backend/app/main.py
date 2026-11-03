@@ -82,14 +82,26 @@ app = FastAPI(
 # CORS CONFIGURATION
 # ---------------------------------------------------------
 
+cors_origins_list = [
+    origin.strip()
+    for origin in settings.cors_origins.split(",")
+    if origin.strip()
+]
+for explicit_origin in [
+    "https://netops.co.ke",
+    "https://www.netops.co.ke",
+    "https://net-ops.ac.ke",
+    "https://www.net-ops.ac.ke",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]:
+    if explicit_origin not in cors_origins_list:
+        cors_origins_list.append(explicit_origin)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        origin.strip()
-        for origin in settings.cors_origins.split(",")
-        if origin.strip()
-    ],
-    allow_origin_regex=r"https://.*\.vercel\.app|https://.*\.net-ops\.ac\.ke|https://.*\.netops\.co\.ke",
+    allow_origins=cors_origins_list,
+    allow_origin_regex=r"https://([a-zA-Z0-9\-]+\.)*(vercel\.app|netops\.co\.ke|net-ops\.ac\.ke)",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

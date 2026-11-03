@@ -15,17 +15,32 @@ import {
 } from "./utils/networkInterfaceStatus";
 import { playBellSound } from "./utils/bellAudio";
 
-const API_URL =
-  import.meta.env.VITE_API_URL ||
-  (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
-    ? "http://127.0.0.1:8000"
-    : `${window.location.protocol}//${window.location.hostname}:8000`);
+const getDefaultApiUrl = () => {
+  if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL;
+  const host = typeof window !== "undefined" ? window.location.hostname : "";
+  if (host === "localhost" || host === "127.0.0.1") {
+    return "http://127.0.0.1:8000";
+  }
+  if (host.includes("netops.co.ke") || host.includes("vercel.app") || host.includes("net-ops.ac.ke")) {
+    return "https://api.netops.co.ke";
+  }
+  return `${window.location.protocol}//${host}:8000`;
+};
 
-const WS_URL =
-  import.meta.env.VITE_WS_URL ||
-  (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
-    ? "ws://127.0.0.1:8000/ws/events"
-    : `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.hostname}:8000/ws/events`);
+const getDefaultWsUrl = () => {
+  if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL;
+  const host = typeof window !== "undefined" ? window.location.hostname : "";
+  if (host === "localhost" || host === "127.0.0.1") {
+    return "ws://127.0.0.1:8000/ws/events";
+  }
+  if (host.includes("netops.co.ke") || host.includes("vercel.app") || host.includes("net-ops.ac.ke")) {
+    return "wss://api.netops.co.ke/ws/events";
+  }
+  return `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${host}:8000/ws/events`;
+};
+
+const API_URL = getDefaultApiUrl();
+const WS_URL = getDefaultWsUrl();
 
 function App() {
   const [currentUser, setCurrentUser] = useState(() => {

@@ -1,6 +1,18 @@
 import React, { useEffect, useState } from "react";
 import { NETOPS_FAQS } from "../data/faqs";
 
+const formatFetchError = (err, defaultMsg = "Request failed.") => {
+  const msg = err?.message || "";
+  if (
+    msg.toLowerCase().includes("failed to fetch") ||
+    msg.toLowerCase().includes("networkerror") ||
+    msg.toLowerCase().includes("load failed")
+  ) {
+    return "Unable to reach the NETOPS server. Please check your internet connection or verify the backend service is running.";
+  }
+  return msg || defaultMsg;
+};
+
 export default function LoginPage({
   API_URL,
   onLoginSuccess,
@@ -133,7 +145,7 @@ export default function LoginPage({
         } catch (_) {}
       })
       .catch((err) => {
-        setErrorMessage(err.message || "Failed to activate account with link.");
+        setErrorMessage(formatFetchError(err, "Failed to activate account with link."));
       })
       .finally(() => setLoading(false));
   }, [initialActivationToken, API_URL]);
@@ -340,7 +352,7 @@ export default function LoginPage({
 
       onLoginSuccess(data.user, data.access_token);
     } catch (err) {
-      setErrorMessage(err.message || "Sign in failed.");
+      setErrorMessage(formatFetchError(err, "Sign in failed."));
     } finally {
       setLoading(false);
     }
@@ -385,7 +397,7 @@ export default function LoginPage({
       }
       onLoginSuccess(data.user, data.access_token);
     } catch (err) {
-      setErrorMessage(err.message || "Failed to reset administrator password.");
+      setErrorMessage(formatFetchError(err, "Failed to reset administrator password."));
     } finally {
       setLoading(false);
     }
@@ -414,7 +426,7 @@ export default function LoginPage({
       setSelectedChannel(data.has_email ? "email" : "sms");
       setForgotStep(2);
     } catch (err) {
-      setErrorMessage(err.message || "Could not find account.");
+      setErrorMessage(formatFetchError(err, "Could not find account."));
     } finally {
       setLoading(false);
     }
@@ -446,7 +458,7 @@ export default function LoginPage({
         data.message || "A 6-digit OTP has been generated (valid for 5 minutes)."
       );
     } catch (err) {
-      setErrorMessage(err.message || "Failed to dispatch OTP.");
+      setErrorMessage(formatFetchError(err, "Failed to dispatch OTP."));
     } finally {
       setLoading(false);
     }
@@ -501,7 +513,7 @@ export default function LoginPage({
       setPassword("");
       setSuccessMessage("✅ Password reset successfully! You can now sign in with your new password.");
     } catch (err) {
-      setErrorMessage(err.message || "Failed to reset password.");
+      setErrorMessage(formatFetchError(err, "Failed to reset password."));
     } finally {
       setLoading(false);
     }
@@ -575,7 +587,7 @@ export default function LoginPage({
           `✅ Password for '${resetUsername}' has been directly reset using Admin/Developer rights (no OTP required).`
       );
     } catch (err) {
-      setErrorMessage(err.message || "Failed to reset user password.");
+      setErrorMessage(formatFetchError(err, "Failed to reset user password."));
     } finally {
       setLoading(false);
     }
