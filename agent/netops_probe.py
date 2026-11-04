@@ -149,6 +149,25 @@ def scan_local_subnet(network_cidr, max_workers=60):
     return devices
 
 
+def login_for_token(server_url, username, password):
+    """Authenticate with NETOPS credentials and obtain JWT access token."""
+    endpoint = f"{server_url.rstrip('/')}/auth/login"
+    payload = json.dumps({"username": username, "password": password}).encode("utf-8")
+    req = urllib.request.Request(
+        endpoint,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+            return data.get("access_token")
+    except Exception as e:
+        print(f"[!] Authentication failed on {server_url}: {e}")
+        return None
+
+
 def sync_to_netops(server_url, token, network, devices):
     """Upload discovered devices to NETOPS cloud endpoint."""
     endpoint = f"{server_url.rstrip('/')}/discovery/agent-sync"
@@ -183,26 +202,44 @@ def sync_to_netops(server_url, token, network, devices):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="NETOPS Remote LAN Scanner Probe")
-    parser.add_argument("--server", help="NETOPS backend URL (e.g. https://your-server.com or http://localhost:8000)")
+    parser = argparse.ArgumentParser(description="NETOPS Remote Physical LAN Scanner Probe")
+    parser.add_argument("--server", default="https://api.netops.co.ke", help="NETOPS backend URL (defaults to https://api.netops.co.ke)")
     parser.add_argument("--token", help="Your NETOPS user authentication JWT token")
+    parser.add_argument("--username", help="Your NETOPS account username")
+    parser.add_argument("--password", help="Your NETOPS account password")
     parser.add_argument("--network", help="Subnet to scan (defaults to auto-detected local LAN e.g. 192.168.1.0/24)")
     parser.add_argument("--interactive", action="store_true", help="Prompt interactively for credentials and network")
 
     args = parser.parse_args()
 
-    server_url = args.server
+    server_url = (args.server or "https://api.netops.co.ke").strip().rstrip("/")
     token = args.token
     network = args.network
 
-    if args.interactive or not server_url or not token:
-        print("=" * 60)
-        print("  NETOPS Remote Physical LAN Scanner Probe")
-        print("=" * 60)
-        if not server_url:
-            server_url = input("Enter NETOPS Server URL (e.g. https://net-ops.ac.ke or http://localhost:8000): ").strip()
+    if not token and (args.username and args.password):
+        print(f"[*] Authenticating with {server_url} as {args.username}...")
+        token = login_for_token(server_url, args.username, args.password)
         if not token:
-            token = input("Enter your NETOPS Auth Token (from browser localStorage 'netops_token'): ").strip()
+            print("[!] Exiting due to authentication failure.")
+            sys.exit(1)
+
+    if not token:
+        print("=" * 64)
+        print("  NETOPS Remote Physical LAN Scanner")
+        print(f"  Target Cloud Server: {server_url}")
+        print("=" * 64)
+        try:
+            uname = input("Username / Email: ").strip()
+            import getpass
+            pwd = getpass.getpass("Password: ").strip()
+            token = login_for_token(server_url, uname, pwd)
+            if not token:
+                print("[!] Authentication failed. Please verify your credentials.")
+                sys.exit(1)
+            print("[✓] Authenticated successfully!")
+        except (KeyboardInterrupt, EOFError):
+            print("\n[!] Canceled.")
+            sys.exit(0)
 
     local_ip, auto_subnet = get_local_ip_and_subnet()
     if not network:
@@ -214,8 +251,11 @@ def main():
     for d in devices:
         print(f"    - IP: {d['ip_address']:16} MAC: {d['mac_address']:17} Name: {d['hostname']}")
 
-    print(f"[*] Uploading to {server_url} ...")
+    print(f"[*] Syncing {len(devices)} device(s) to {server_url} ...")
     sync_to_netops(server_url, token, network, devices)
+    print("=" * 64)
+    print("  All done! Refresh your dashboard at https://www.netops.co.ke")
+    print("=" * 64)
 
 
 if __name__ == "__main__":

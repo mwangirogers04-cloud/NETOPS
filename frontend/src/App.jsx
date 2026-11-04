@@ -4024,15 +4024,37 @@ const LanScannerPage = () => {
           </div>
         </div>
 
-        <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+        <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+          {isAdmin && (
+            <button
+              type="button"
+              className="primary-button"
+              onClick={() => {
+                setSelectedInterface("all");
+                scanAllLanDevices(detectedSubnet, "all");
+              }}
+              disabled={lanDevicesScanning}
+              style={{
+                fontSize: "13px",
+                fontWeight: "700",
+                padding: "10px 18px",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "8px",
+                background: "#2563eb",
+                boxShadow: "0 4px 14px rgba(59, 130, 246, 0.3)",
+                cursor: lanDevicesScanning ? "not-allowed" : "pointer",
+              }}
+            >
+              <span>{lanDevicesScanning ? "⏳" : "🚀"}</span>
+              {lanDevicesScanning ? "Scanning Physical LAN..." : "Scan Server LAN"}
+            </button>
+          )}
+
           <button
             type="button"
             className="primary-button"
-            onClick={() => {
-              setSelectedInterface("all");
-              scanAllLanDevices(detectedSubnet, "all");
-            }}
-            disabled={lanDevicesScanning}
+            onClick={() => setShowProbeModal(true)}
             style={{
               fontSize: "13px",
               fontWeight: "700",
@@ -4040,13 +4062,14 @@ const LanScannerPage = () => {
               display: "inline-flex",
               alignItems: "center",
               gap: "8px",
-              background: "#2563eb",
-              boxShadow: "0 4px 14px rgba(59, 130, 246, 0.3)",
-              cursor: lanDevicesScanning ? "not-allowed" : "pointer",
+              background: "#059669",
+              borderColor: "#10b981",
+              boxShadow: "0 4px 14px rgba(16, 185, 129, 0.3)",
+              cursor: "pointer",
             }}
           >
-            <span>{lanDevicesScanning ? "⏳" : "🚀"}</span>
-            {lanDevicesScanning ? "Scanning Physical LAN..." : "Scan Devices (Physical LAN)"}
+            <span>💻</span>
+            Scan Remote Wi-Fi (1-Click)
           </button>
 
           <button
@@ -4094,34 +4117,59 @@ const LanScannerPage = () => {
               </span>
             </div>
             <div style={{ fontSize: "12px", color: "#475569", marginTop: "2px" }}>
-              Directly connected to your physical local network (<strong>{detectedSubnet || "192.168.0.0/24"}</strong>) across wired LAN and wireless interfaces. Zero client software or manual scripts required.
+              Directly connected to host server network (<strong>{detectedSubnet || "192.168.0.0/24"}</strong>). Are you connected to a different Wi-Fi on your laptop? Click <strong>Scan Remote Wi-Fi</strong> to scan your current network.
             </div>
           </div>
         </div>
 
-        <button
-          type="button"
-          className="primary-button"
-          onClick={() => {
-            setSelectedInterface("all");
-            scanAllLanDevices(detectedSubnet, "all");
-          }}
-          disabled={lanDevicesScanning}
-          style={{
-            fontSize: "13px",
-            fontWeight: "700",
-            padding: "9px 20px",
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "8px",
-            background: "#2563eb",
-            boxShadow: "0 4px 12px rgba(37, 99, 235, 0.25)",
-            cursor: lanDevicesScanning ? "not-allowed" : "pointer",
-          }}
-        >
-          <span>{lanDevicesScanning ? "⏳" : "🚀"}</span>
-          {lanDevicesScanning ? "Scanning Network..." : "Scan Devices Now"}
-        </button>
+        <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+          <button
+            type="button"
+            className="primary-button"
+            onClick={() => setShowProbeModal(true)}
+            style={{
+              fontSize: "13px",
+              fontWeight: "700",
+              padding: "9px 18px",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "8px",
+              background: "#059669",
+              borderColor: "#10b981",
+              boxShadow: "0 4px 12px rgba(16, 185, 129, 0.25)",
+              cursor: "pointer",
+            }}
+          >
+            <span>💻</span>
+            Scan Remote Wi-Fi (1-Click)
+          </button>
+
+          {isAdmin && (
+            <button
+              type="button"
+              className="primary-button"
+              onClick={() => {
+                setSelectedInterface("all");
+                scanAllLanDevices(detectedSubnet, "all");
+              }}
+              disabled={lanDevicesScanning}
+              style={{
+                fontSize: "13px",
+                fontWeight: "700",
+                padding: "9px 20px",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "8px",
+                background: "#2563eb",
+                boxShadow: "0 4px 12px rgba(37, 99, 235, 0.25)",
+                cursor: lanDevicesScanning ? "not-allowed" : "pointer",
+              }}
+            >
+              <span>{lanDevicesScanning ? "⏳" : "🚀"}</span>
+              {lanDevicesScanning ? "Scanning Server LAN..." : "Scan Server LAN"}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* CONTROL & SCAN PANEL */}
@@ -13066,10 +13114,11 @@ const EndpointUpdatesPage = () => {
   const renderProbeModal = () => {
     if (!showProbeModal) return null;
     const token = localStorage.getItem("netops_token") || "";
+    const winDownloadUrl = `${API_URL}/discovery/launcher/windows?token=${encodeURIComponent(token)}`;
+    const macLinuxDownloadUrl = `${API_URL}/discovery/launcher/linux-mac?token=${encodeURIComponent(token)}`;
 
-    const curlCmd = `curl -sO ${API_URL}/discovery/probe-script && python3 netops_probe.py --server ${API_URL}${token ? ` --token ${token}` : ""}`;
-    const winCmd = `Invoke-WebRequest -Uri "${API_URL}/discovery/probe-script" -OutFile "netops_probe.py"; python netops_probe.py --server ${API_URL}${token ? ` --token ${token}` : ""}`;
-    const daemonCmd = `python3 netops_probe.py --server ${API_URL}${token ? ` --token ${token}` : ""} --interval 60`;
+    const curlCmd = `curl -sSL "${API_URL}/discovery/launcher/linux-mac?token=${encodeURIComponent(token)}" | bash`;
+    const winPsCmd = `powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; (New-Object Net.WebClient).DownloadFile('${API_URL}/discovery/probe-script', 'netops_probe.py'); python netops_probe.py --token '${token}'"`;
 
     return (
       <div
@@ -13081,48 +13130,134 @@ const EndpointUpdatesPage = () => {
           className="automation-modal"
           onClick={(e) => e.stopPropagation()}
           style={{
-            maxWidth: "780px",
+            maxWidth: "760px",
             width: "95%",
-            maxHeight: "90vh",
+            maxHeight: "92vh",
             display: "flex",
             flexDirection: "column",
             background: "#0f172a",
             color: "#f8fafc",
             border: "1px solid #334155",
-            borderRadius: "12px",
-            boxShadow: "0 20px 40px rgba(0,0,0,0.5)",
+            borderRadius: "14px",
+            boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.7)",
           }}
         >
           {/* Header */}
-          <div className="automation-modal-header" style={{ borderBottom: "1px solid #1e293b", padding: "16px 20px" }}>
+          <div className="automation-modal-header" style={{ borderBottom: "1px solid #1e293b", padding: "18px 24px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div>
-              <div className="automation-label" style={{ color: "#38bdf8", fontSize: "11px", fontWeight: "700" }}>
-                MULTI-TENANT LAN SCANNER
+              <div className="automation-label" style={{ color: "#38bdf8", fontSize: "11px", fontWeight: "700", letterSpacing: "0.5px" }}>
+                REMOTE WI-FI &amp; PHYSICAL LAN SCANNER
               </div>
-              <div className="automation-title" style={{ display: "flex", alignItems: "center", gap: "8px", color: "#f8fafc", fontSize: "18px", fontWeight: "700" }}>
-                <span>🚀</span>
-                Physical Network Probe (Client Scanner)
+              <div className="automation-title" style={{ display: "flex", alignItems: "center", gap: "10px", color: "#f8fafc", fontSize: "19px", fontWeight: "700", marginTop: "2px" }}>
+                <span>💻</span>
+                Scan Your Current Physical Network
               </div>
             </div>
             <button
               type="button"
               className="ghost-button"
               onClick={() => setShowProbeModal(false)}
-              style={{ fontSize: "20px", color: "#94a3b8", cursor: "pointer", background: "none", border: "none" }}
+              style={{ fontSize: "22px", color: "#94a3b8", cursor: "pointer", background: "none", border: "none", lineHeight: 1 }}
             >
               ✕
             </button>
           </div>
 
           {/* Body */}
-          <div style={{ padding: "20px", overflowY: "auto", flex: 1, fontSize: "13px", lineHeight: "1.6" }}>
-            <div style={{ background: "rgba(56, 189, 248, 0.1)", border: "1px solid rgba(56, 189, 248, 0.3)", borderRadius: "8px", padding: "12px 16px", marginBottom: "16px", color: "#e2e8f0" }}>
-              <strong>🔒 Strict Tenant Privacy:</strong> When you run the probe, discovered devices are isolated under your private account (<code>User ID: {currentUser?.id || "Active"}</code>). Devices from other users or the developer will never mix with your dashboard view.
+          <div style={{ padding: "22px 24px", overflowY: "auto", flex: 1, fontSize: "13px", lineHeight: "1.6" }}>
+            {/* Info notice */}
+            <div style={{ background: "rgba(56, 189, 248, 0.08)", border: "1px solid rgba(56, 189, 248, 0.25)", borderRadius: "10px", padding: "14px 18px", marginBottom: "20px", color: "#e2e8f0" }}>
+              <div style={{ fontWeight: "700", color: "#38bdf8", marginBottom: "4px", display: "flex", alignItems: "center", gap: "6px" }}>
+                <span>💡</span> Why is a 1-click launcher used for remote networks?
+              </div>
+              <div style={{ fontSize: "12.5px", color: "#cbd5e1" }}>
+                Web browsers run inside a sandboxed environment and cannot broadcast raw Layer 2 ARP frames across your physical Wi-Fi. Our 1-click scanner runs locally on your computer for 5 seconds, scans your current subnet, and immediately syncs the discovered machines to your NETOPS dashboard.
+              </div>
             </div>
 
-            <div style={{ marginBottom: "18px" }}>
-              <h4 style={{ margin: "0 0 6px 0", color: "#38bdf8", fontSize: "14px" }}>Option 1: Quick 1-Liner (Linux, macOS, WSL)</h4>
-              <div style={{ background: "#020617", border: "1px solid #1e293b", borderRadius: "6px", padding: "10px 14px", fontFamily: "monospace", fontSize: "12px", color: "#a5f3fc", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px" }}>
+            {/* 1-Click Launchers */}
+            <div style={{ marginBottom: "24px" }}>
+              <div style={{ fontSize: "14px", fontWeight: "700", color: "#f8fafc", marginBottom: "12px", display: "flex", alignItems: "center", gap: "8px" }}>
+                <span>🚀</span> 1-Click Desktop Scanners (Zero Setup &bull; Auto-Authenticated)
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "14px" }}>
+                {/* Windows Card */}
+                <div style={{ background: "#1e293b", border: "1px solid #334155", borderRadius: "10px", padding: "16px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", fontWeight: "700", color: "#38bdf8", fontSize: "14px" }}>
+                      <span>🪟</span> Windows (.bat)
+                    </div>
+                    <p style={{ margin: "6px 0 14px 0", color: "#94a3b8", fontSize: "12px", lineHeight: "1.4" }}>
+                      Double-click the downloaded <code>scan_wifi.bat</code> on your PC. Your login is already authenticated!
+                    </p>
+                  </div>
+                  <a
+                    href={winDownloadUrl}
+                    download="scan_wifi.bat"
+                    className="primary-button"
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: "8px",
+                      padding: "10px 16px",
+                      background: "#2563eb",
+                      borderColor: "#3b82f6",
+                      color: "#fff",
+                      textDecoration: "none",
+                      fontWeight: "700",
+                      borderRadius: "8px",
+                      fontSize: "13px",
+                      textAlign: "center",
+                    }}
+                  >
+                    <span>⬇️</span> Download scan_wifi.bat
+                  </a>
+                </div>
+
+                {/* Mac & Linux Card */}
+                <div style={{ background: "#1e293b", border: "1px solid #334155", borderRadius: "10px", padding: "16px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", fontWeight: "700", color: "#34d399", fontSize: "14px" }}>
+                      <span>🍎 / 🐧</span> macOS &amp; Linux (.sh)
+                    </div>
+                    <p style={{ margin: "6px 0 14px 0", color: "#94a3b8", fontSize: "12px", lineHeight: "1.4" }}>
+                      Download and run <code>bash scan_wifi.sh</code> in terminal. Scans your local subnet immediately.
+                    </p>
+                  </div>
+                  <a
+                    href={macLinuxDownloadUrl}
+                    download="scan_wifi.sh"
+                    className="primary-button"
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: "8px",
+                      padding: "10px 16px",
+                      background: "#059669",
+                      borderColor: "#10b981",
+                      color: "#fff",
+                      textDecoration: "none",
+                      fontWeight: "700",
+                      borderRadius: "8px",
+                      fontSize: "13px",
+                      textAlign: "center",
+                    }}
+                  >
+                    <span>⬇️</span> Download scan_wifi.sh
+                  </a>
+                </div>
+              </div>
+            </div>
+
+            {/* Terminal Command Fallback */}
+            <div style={{ borderTop: "1px solid #1e293b", paddingTop: "18px" }}>
+              <div style={{ fontSize: "13px", fontWeight: "700", color: "#94a3b8", marginBottom: "8px", display: "flex", alignItems: "center", gap: "6px" }}>
+                <span>⚡</span> Or Run Directly From Terminal (1-Liner)
+              </div>
+              <div style={{ background: "#020617", border: "1px solid #1e293b", borderRadius: "8px", padding: "10px 14px", fontFamily: "monospace", fontSize: "12px", color: "#a5f3fc", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px" }}>
                 <span style={{ overflowX: "auto", whiteSpace: "nowrap" }}>{curlCmd}</span>
                 <button
                   type="button"
@@ -13132,75 +13267,26 @@ const EndpointUpdatesPage = () => {
                     setProbeCopied(true);
                     setTimeout(() => setProbeCopied(false), 2500);
                   }}
-                  style={{ padding: "4px 10px", fontSize: "11px", whiteSpace: "nowrap" }}
+                  style={{ padding: "4px 10px", fontSize: "11px", whiteSpace: "nowrap", flexShrink: 0 }}
                 >
                   {probeCopied ? "✅ Copied" : "📋 Copy"}
                 </button>
               </div>
-            </div>
-
-            <div style={{ marginBottom: "18px" }}>
-              <h4 style={{ margin: "0 0 6px 0", color: "#38bdf8", fontSize: "14px" }}>Option 2: Windows PowerShell</h4>
-              <div style={{ background: "#020617", border: "1px solid #1e293b", borderRadius: "6px", padding: "10px 14px", fontFamily: "monospace", fontSize: "12px", color: "#a5f3fc", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px" }}>
-                <span style={{ overflowX: "auto", whiteSpace: "nowrap" }}>{winCmd}</span>
-                <button
-                  type="button"
-                  className="secondary-button"
-                  onClick={() => {
-                    navigator.clipboard?.writeText(winCmd);
-                    setProbeCopied(true);
-                    setTimeout(() => setProbeCopied(false), 2500);
-                  }}
-                  style={{ padding: "4px 10px", fontSize: "11px", whiteSpace: "nowrap" }}
-                >
-                  {probeCopied ? "✅ Copied" : "📋 Copy"}
-                </button>
-              </div>
-            </div>
-
-            <div style={{ marginBottom: "18px" }}>
-              <h4 style={{ margin: "0 0 6px 0", color: "#38bdf8", fontSize: "14px" }}>Option 3: Continuous Daemon Mode (Periodic Sync)</h4>
-              <p style={{ margin: "0 0 6px 0", color: "#94a3b8", fontSize: "12px" }}>
-                Run the probe in the background every 60 seconds to automatically discover new devices or mark offline machines:
-              </p>
-              <div style={{ background: "#020617", border: "1px solid #1e293b", borderRadius: "6px", padding: "10px 14px", fontFamily: "monospace", fontSize: "12px", color: "#a5f3fc" }}>
-                {daemonCmd}
-              </div>
-            </div>
-
-            <div>
-              <h4 style={{ margin: "0 0 6px 0", color: "#38bdf8", fontSize: "14px" }}>Option 4: Download Script Directly</h4>
-              <p style={{ margin: "0 0 8px 0", color: "#94a3b8", fontSize: "12px" }}>
-                Save <code>netops_probe.py</code> to your machine and run <code>python netops_probe.py --interactive</code>.
-              </p>
-              <a
-                href={`${API_URL}/discovery/probe-script`}
-                download="netops_probe.py"
-                className="primary-button"
-                style={{
-                  fontSize: "12px",
-                  padding: "8px 16px",
-                  textDecoration: "none",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "6px",
-                  background: "#0284c7",
-                  borderColor: "#38bdf8",
-                }}
-              >
-                <span>📥</span> Download netops_probe.py
-              </a>
             </div>
           </div>
 
           {/* Footer */}
-          <div style={{ padding: "12px 20px", borderTop: "1px solid #1e293b", display: "flex", justifyContent: "flex-end" }}>
+          <div style={{ padding: "14px 24px", borderTop: "1px solid #1e293b", display: "flex", justifyContent: "space-between", alignItems: "center", background: "#090d16" }}>
+            <span style={{ fontSize: "12px", color: "#64748b" }}>
+              Discovered machines appear on your dashboard instantly upon scan completion.
+            </span>
             <button
               type="button"
               className="primary-button"
               onClick={() => setShowProbeModal(false)}
+              style={{ padding: "8px 20px", fontSize: "13px" }}
             >
-              Close
+              Done
             </button>
           </div>
         </div>
@@ -14982,6 +15068,30 @@ const EndpointUpdatesPage = () => {
                 title="View Frequently Asked Questions & Operational Knowledge Base"
               >
                 <span>❓</span> FAQs
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowProbeModal(true)}
+                className="sound-toggle-btn"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "5px 12px",
+                  borderRadius: "20px",
+                  border: "1px solid #10b981",
+                  background: "#ecfdf5",
+                  color: "#047857",
+                  fontSize: "12px",
+                  fontWeight: "700",
+                  cursor: "pointer",
+                  transition: "all 0.15s ease",
+                  userSelect: "none",
+                }}
+                title="Scan whatever physical Wi-Fi or wired network this laptop is currently connected to"
+              >
+                <span>📶</span> Scan Remote Wi-Fi
               </button>
 
               <div style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>

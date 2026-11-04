@@ -1,6 +1,6 @@
 import os
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
@@ -203,5 +203,91 @@ def download_probe_script():
         probe_path,
         media_type="text/x-python",
         filename="netops_probe.py",
+    )
+
+
+@router.get("/launcher/windows")
+def download_windows_launcher(token: str | None = Query(None, description="User auth token for 1-click execution")):
+    """
+    Serves a 1-click .bat script for Windows users to scan their remote physical Wi-Fi/LAN.
+    """
+    token_flag = f' --token "{token.strip()}"' if token and token.strip() else ""
+    bat_content = (
+        "@echo off\r\n"
+        "title NETOPS Wi-Fi Scanner\r\n"
+        "echo ========================================================\r\n"
+        "echo   NETOPS Remote Physical Wi-Fi / LAN Scanner\r\n"
+        "echo ========================================================\r\n"
+        "echo.\r\n"
+        "echo [*] Checking Python installation...\r\n"
+        "python --version >nul 2>&1\r\n"
+        "if %errorlevel% neq 0 (\r\n"
+        "    echo [!] Python is not installed or not in your PATH.\r\n"
+        "    echo [!] Please download and install Python from: https://www.python.org/downloads/\r\n"
+        "    echo [!] NOTE: Be sure to check 'Add Python to PATH' during installation.\r\n"
+        "    pause\r\n"
+        "    exit /b 1\r\n"
+        ")\r\n\r\n"
+        "echo [*] Fetching latest network probe from NETOPS Cloud...\r\n"
+        "powershell -NoProfile -ExecutionPolicy Bypass -Command \"[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; (New-Object Net.WebClient).DownloadFile('https://api.netops.co.ke/discovery/probe-script', 'netops_probe.py')\" >nul 2>&1\r\n"
+        "if not exist netops_probe.py (\r\n"
+        "    curl -sSL https://api.netops.co.ke/discovery/probe-script -o netops_probe.py\r\n"
+        ")\r\n\r\n"
+        "if not exist netops_probe.py (\r\n"
+        "    echo [!] Error: Could not download scanner probe from https://api.netops.co.ke\r\n"
+        "    pause\r\n"
+        "    exit /b 1\r\n"
+        ")\r\n\r\n"
+        "echo [*] Starting scan on your local Wi-Fi / LAN network...\r\n"
+        "echo.\r\n"
+        f"python netops_probe.py{token_flag}\r\n"
+        "echo.\r\n"
+        "echo ========================================================\r\n"
+        "echo [✓] Scan complete! Refresh https://www.netops.co.ke to view your devices.\r\n"
+        "echo ========================================================\r\n"
+        "pause\r\n"
+    )
+    return Response(
+        content=bat_content,
+        media_type="application/x-bat",
+        headers={"Content-Disposition": "attachment; filename=scan_wifi.bat"},
+    )
+
+
+@router.get("/launcher/linux-mac")
+def download_linux_mac_launcher(token: str | None = Query(None, description="User auth token for 1-click execution")):
+    """
+    Serves a 1-click shell script for Linux/macOS users to scan their remote physical Wi-Fi/LAN.
+    """
+    token_flag = f' --token "{token.strip()}"' if token and token.strip() else ""
+    sh_content = (
+        "#!/usr/bin/env bash\n"
+        "set -e\n"
+        "echo '========================================================'\n"
+        "echo '  NETOPS Remote Physical Wi-Fi / LAN Scanner'\n"
+        "echo '========================================================'\n"
+        "echo ''\n\n"
+        "if command -v python3 >/dev/null 2>&1; then\n"
+        "    PY_CMD='python3'\n"
+        "elif command -v python >/dev/null 2>&1; then\n"
+        "    PY_CMD='python'\n"
+        "else\n"
+        "    echo '[!] Python is not installed. Please install Python 3.'\n"
+        "    exit 1\n"
+        "fi\n\n"
+        "echo '[*] Fetching latest network probe from NETOPS Cloud...'\n"
+        "curl -sSL 'https://api.netops.co.ke/discovery/probe-script' -o 'netops_probe.py'\n\n"
+        "echo '[*] Starting scan on your local Wi-Fi / LAN network...'\n"
+        "echo ''\n"
+        f"$PY_CMD netops_probe.py{token_flag}\n"
+        "echo ''\n"
+        "echo '========================================================'\n"
+        "echo '[✓] Scan complete! Refresh https://www.netops.co.ke to view your devices.'\n"
+        "echo '========================================================'\n"
+    )
+    return Response(
+        content=sh_content,
+        media_type="application/x-sh",
+        headers={"Content-Disposition": "attachment; filename=scan_wifi.sh"},
     )
 
