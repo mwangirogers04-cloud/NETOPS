@@ -69,6 +69,8 @@ function App() {
 
   const isDeveloper =
     currentUser?.username?.toLowerCase() === "developer" ||
+    currentUser?.username?.toLowerCase() === "rogers mwangi" ||
+    currentUser?.email?.toLowerCase() === "rogersiru@gmail.com" ||
     currentUser?.role?.toLowerCase() === "developer" ||
     currentUser?.role?.toLowerCase() === "super_admin";
   const isSuperAdmin =
@@ -7929,6 +7931,8 @@ return (
   const [testResult, setTestResult] = useState(null);
   const [savingConfig, setSavingConfig] = useState(false);
   const [saveFeedback, setSaveFeedback] = useState(null);
+  const [showFirewallPassword, setShowFirewallPassword] = useState(false);
+  const [showFirewallApiKey, setShowFirewallApiKey] = useState(false);
 
   const [form, setForm] = useState({
     id: null,
@@ -8072,13 +8076,33 @@ return (
       setVendorUserPicked(true);
       setSelectedVendor(vendorId);
       const v = firewallVendors.find((item) => item.id === vendorId);
-      setForm((prev) => ({
-        ...prev,
-        id: null,
-        vendor: vendorId,
-        name: `${v?.name || vendorId} Profile`,
-        management_url: v?.url_placeholder || "",
-      }));
+      const existing = savedConfigs.find((item) => item.vendor === vendorId);
+      if (existing) {
+        setForm({
+          id: existing.id,
+          vendor: existing.vendor,
+          name: existing.name || `${v?.name || vendorId} Profile`,
+          management_url: existing.management_url || v?.url_placeholder || "",
+          api_key: existing.api_key || "",
+          username: existing.username || (v?.requires_username ? "Admin" : ""),
+          password: existing.password || "",
+          verify_tls: existing.verify_tls ?? false,
+          quarantine_group: existing.quarantine_group || "NETOPS_Quarantine",
+          quarantine_rule: existing.quarantine_rule || "NETOPS_Quarantine_Block",
+          is_active: existing.is_active ?? true,
+        });
+      } else {
+        setForm((prev) => ({
+          ...prev,
+          id: null,
+          vendor: vendorId,
+          name: `${v?.name || vendorId} Profile`,
+          management_url: v?.url_placeholder || "",
+          api_key: "",
+          username: v?.requires_username ? (prev.username || "Admin") : "",
+          password: "",
+        }));
+      }
       setTestResult(null);
       setSaveFeedback(null);
       setActiveTab("configure");
@@ -8560,7 +8584,7 @@ return (
               <form onSubmit={handleSaveConfig}>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "16px" }}>
                   <div>
-                    <label style={{ display: "block", marginBottom: "6px", fontSize: "12px", fontWeight: "700", color: "#334155" }}>
+                    <label style={{ display: "block", marginBottom: "6px", fontSize: "12px", fontWeight: "700", color: "#1e293b" }}>
                       Profile Name
                     </label>
                     <input
@@ -8569,12 +8593,12 @@ return (
                       onChange={(e) => setForm({ ...form, name: e.target.value })}
                       placeholder="e.g. Primary Edge Firewall"
                       required
-                      style={{ width: "100%", padding: "8px 12px", background: "#f8fafc", border: "1px solid #cbd5e1", borderRadius: "6px", color: "#f8fafc", fontSize: "13px" }}
+                      style={{ width: "100%", padding: "10px 12px", background: "#ffffff", border: "1.5px solid #94a3b8", borderRadius: "6px", color: "#0f172a", fontSize: "13px", fontWeight: "500", outline: "none", boxSizing: "border-box" }}
                     />
                   </div>
 
                   <div>
-                    <label style={{ display: "block", marginBottom: "6px", fontSize: "12px", fontWeight: "700", color: "#334155" }}>
+                    <label style={{ display: "block", marginBottom: "6px", fontSize: "12px", fontWeight: "700", color: "#1e293b" }}>
                       Management URL / IP
                     </label>
                     <input
@@ -8582,23 +8606,33 @@ return (
                       value={form.management_url}
                       onChange={(e) => setForm({ ...form, management_url: e.target.value })}
                       placeholder={curVendorMeta.url_placeholder || "https://192.168.0.1"}
-                      style={{ width: "100%", padding: "8px 12px", background: "#f8fafc", border: "1px solid #cbd5e1", borderRadius: "6px", color: "#f8fafc", fontSize: "13px", fontFamily: "monospace" }}
+                      style={{ width: "100%", padding: "10px 12px", background: "#ffffff", border: "1.5px solid #94a3b8", borderRadius: "6px", color: "#0f172a", fontSize: "13px", fontFamily: "monospace", fontWeight: "600", outline: "none", boxSizing: "border-box" }}
                     />
                   </div>
                 </div>
 
                 {curVendorMeta.requires_api_key && (
                   <div style={{ marginBottom: "16px" }}>
-                    <label style={{ display: "block", marginBottom: "6px", fontSize: "12px", fontWeight: "700", color: "#334155" }}>
+                    <label style={{ display: "block", marginBottom: "6px", fontSize: "12px", fontWeight: "700", color: "#1e293b" }}>
                       API Token / Secret Key
                     </label>
-                    <input
-                      type="password"
-                      value={form.api_key}
-                      onChange={(e) => setForm({ ...form, api_key: e.target.value })}
-                      placeholder="Enter API token (e.g. FortiOS REST token or pfSense key)"
-                      style={{ width: "100%", padding: "8px 12px", background: "#f8fafc", border: "1px solid #cbd5e1", borderRadius: "6px", color: "#f8fafc", fontSize: "13px", fontFamily: "monospace" }}
-                    />
+                    <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+                      <input
+                        type={showFirewallApiKey ? "text" : "password"}
+                        value={form.api_key}
+                        onChange={(e) => setForm({ ...form, api_key: e.target.value })}
+                        placeholder="Enter API token (e.g. FortiOS REST token or pfSense key)"
+                        style={{ width: "100%", padding: "10px 42px 10px 12px", background: "#ffffff", border: "1.5px solid #94a3b8", borderRadius: "6px", color: "#0f172a", fontSize: "13px", fontFamily: "monospace", fontWeight: "600", outline: "none", boxSizing: "border-box" }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowFirewallApiKey(!showFirewallApiKey)}
+                        style={{ position: "absolute", right: "10px", background: "none", border: "none", cursor: "pointer", fontSize: "16px", padding: "4px" }}
+                        title={showFirewallApiKey ? "Hide API Key" : "Show API Key"}
+                      >
+                        {showFirewallApiKey ? "👁️" : "🙈"}
+                      </button>
+                    </div>
                   </div>
                 )}
 
@@ -8606,7 +8640,7 @@ return (
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "16px" }}>
                     {curVendorMeta.requires_username && (
                       <div>
-                        <label style={{ display: "block", marginBottom: "6px", fontSize: "12px", fontWeight: "700", color: "#334155" }}>
+                        <label style={{ display: "block", marginBottom: "6px", fontSize: "12px", fontWeight: "700", color: "#1e293b" }}>
                           Administrator Username
                         </label>
                         <input
@@ -8614,22 +8648,32 @@ return (
                           value={form.username}
                           onChange={(e) => setForm({ ...form, username: e.target.value })}
                           placeholder="e.g. Admin or admin"
-                          style={{ width: "100%", padding: "8px 12px", background: "#f8fafc", border: "1px solid #cbd5e1", borderRadius: "6px", color: "#f8fafc", fontSize: "13px" }}
+                          style={{ width: "100%", padding: "10px 12px", background: "#ffffff", border: "1.5px solid #94a3b8", borderRadius: "6px", color: "#0f172a", fontSize: "13px", fontWeight: "500", outline: "none", boxSizing: "border-box" }}
                         />
                       </div>
                     )}
                     {curVendorMeta.requires_password && (
                       <div>
-                        <label style={{ display: "block", marginBottom: "6px", fontSize: "12px", fontWeight: "700", color: "#334155" }}>
+                        <label style={{ display: "block", marginBottom: "6px", fontSize: "12px", fontWeight: "700", color: "#1e293b" }}>
                           Administrator Password
                         </label>
-                        <input
-                          type="password"
-                          value={form.password}
-                          onChange={(e) => setForm({ ...form, password: e.target.value })}
-                          placeholder="••••••••"
-                          style={{ width: "100%", padding: "8px 12px", background: "#f8fafc", border: "1px solid #cbd5e1", borderRadius: "6px", color: "#f8fafc", fontSize: "13px" }}
-                        />
+                        <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+                          <input
+                            type={showFirewallPassword ? "text" : "password"}
+                            value={form.password}
+                            onChange={(e) => setForm({ ...form, password: e.target.value })}
+                            placeholder="Enter firewall admin password"
+                            style={{ width: "100%", padding: "10px 42px 10px 12px", background: "#ffffff", border: "1.5px solid #94a3b8", borderRadius: "6px", color: "#0f172a", fontSize: "13px", fontWeight: "500", outline: "none", boxSizing: "border-box" }}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowFirewallPassword(!showFirewallPassword)}
+                            style={{ position: "absolute", right: "10px", background: "none", border: "none", cursor: "pointer", fontSize: "16px", padding: "4px" }}
+                            title={showFirewallPassword ? "Hide password" : "Show password"}
+                          >
+                            {showFirewallPassword ? "👁️" : "🙈"}
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -8637,25 +8681,25 @@ return (
 
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "16px" }}>
                   <div>
-                    <label style={{ display: "block", marginBottom: "6px", fontSize: "12px", fontWeight: "700", color: "#334155" }}>
+                    <label style={{ display: "block", marginBottom: "6px", fontSize: "12px", fontWeight: "700", color: "#1e293b" }}>
                       Quarantine Group / Address List Name
                     </label>
                     <input
                       type="text"
                       value={form.quarantine_group}
                       onChange={(e) => setForm({ ...form, quarantine_group: e.target.value })}
-                      style={{ width: "100%", padding: "8px 12px", background: "#f8fafc", border: "1px solid #cbd5e1", borderRadius: "6px", color: "#f8fafc", fontSize: "13px", fontFamily: "monospace" }}
+                      style={{ width: "100%", padding: "10px 12px", background: "#ffffff", border: "1.5px solid #94a3b8", borderRadius: "6px", color: "#0f172a", fontSize: "13px", fontFamily: "monospace", fontWeight: "600", outline: "none", boxSizing: "border-box" }}
                     />
                   </div>
                   <div>
-                    <label style={{ display: "block", marginBottom: "6px", fontSize: "12px", fontWeight: "700", color: "#334155" }}>
+                    <label style={{ display: "block", marginBottom: "6px", fontSize: "12px", fontWeight: "700", color: "#1e293b" }}>
                       Top Quarantine Block Rule Name
                     </label>
                     <input
                       type="text"
                       value={form.quarantine_rule}
                       onChange={(e) => setForm({ ...form, quarantine_rule: e.target.value })}
-                      style={{ width: "100%", padding: "8px 12px", background: "#f8fafc", border: "1px solid #cbd5e1", borderRadius: "6px", color: "#f8fafc", fontSize: "13px", fontFamily: "monospace" }}
+                      style={{ width: "100%", padding: "10px 12px", background: "#ffffff", border: "1.5px solid #94a3b8", borderRadius: "6px", color: "#0f172a", fontSize: "13px", fontFamily: "monospace", fontWeight: "600", outline: "none", boxSizing: "border-box" }}
                     />
                   </div>
                 </div>
@@ -8785,6 +8829,32 @@ return (
                         <td><code style={{ fontSize: "12px" }}>{cfg.management_url || "Local"}</code></td>
                         <td><code>{cfg.quarantine_rule}</code></td>
                         <td style={{ textAlign: "right" }}>
+                          {isSuperAdmin && (
+                            <button
+                              type="button"
+                              className="secondary-button small"
+                              style={{ marginRight: "6px" }}
+                              onClick={() => {
+                                setSelectedVendor(cfg.vendor);
+                                setForm({
+                                  id: cfg.id,
+                                  vendor: cfg.vendor,
+                                  name: cfg.name || "",
+                                  management_url: cfg.management_url || "",
+                                  api_key: cfg.api_key || "",
+                                  username: cfg.username || "",
+                                  password: cfg.password || "",
+                                  verify_tls: cfg.verify_tls ?? false,
+                                  quarantine_group: cfg.quarantine_group || "NETOPS_Quarantine",
+                                  quarantine_rule: cfg.quarantine_rule || "NETOPS_Quarantine_Block",
+                                  is_active: cfg.is_active ?? false,
+                                });
+                                setActiveTab("configure");
+                              }}
+                            >
+                              ✏️ Edit
+                            </button>
+                          )}
                           {!cfg.is_active && isSuperAdmin && (
                             <button
                               type="button"
