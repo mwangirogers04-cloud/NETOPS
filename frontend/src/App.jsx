@@ -4026,13 +4026,39 @@ const LanScannerPage = () => {
           </div>
         </div>
 
-        <button
-          className="secondary-button"
-          onClick={refreshAll}
-          disabled={lanDevicesScanning || refreshingAll}
-        >
-          {refreshingAll ? "Refreshing..." : "🔄 Refresh"}
-        </button>
+        <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+          <button
+            type="button"
+            className="primary-button"
+            onClick={() => {
+              setSelectedInterface("all");
+              scanAllLanDevices(detectedSubnet, "all");
+            }}
+            disabled={lanDevicesScanning}
+            style={{
+              fontSize: "13px",
+              fontWeight: "700",
+              padding: "10px 18px",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "8px",
+              background: "#2563eb",
+              boxShadow: "0 4px 14px rgba(59, 130, 246, 0.3)",
+              cursor: lanDevicesScanning ? "not-allowed" : "pointer",
+            }}
+          >
+            <span>{lanDevicesScanning ? "⏳" : "🚀"}</span>
+            {lanDevicesScanning ? "Scanning Physical LAN..." : "Scan Devices (Physical LAN)"}
+          </button>
+
+          <button
+            className="secondary-button"
+            onClick={refreshAll}
+            disabled={lanDevicesScanning || refreshingAll}
+          >
+            {refreshingAll ? "Refreshing..." : "🔄 Refresh"}
+          </button>
+        </div>
       </div>
 
       {!isAdmin && (
@@ -4042,125 +4068,62 @@ const LanScannerPage = () => {
         </div>
       )}
 
-      {/* REMOTE PHYSICAL NETWORK PROBE (FOR HOSTED / CLOUD INSTANCES) */}
+      {/* BUILT-IN PHYSICAL NETWORK ENGINE STATUS */}
       <div
         className="panel"
         style={{
-          background: "linear-gradient(135deg, rgba(30, 41, 59, 0.95) 0%, rgba(15, 23, 42, 0.98) 100%)",
-          color: "#f8fafc",
-          border: "1px solid #334155",
-          borderRadius: "12px",
-          padding: "20px",
+          background: "linear-gradient(135deg, #eff6ff 0%, #f8fafc 100%)",
+          border: "1.5px solid #bfdbfe",
+          borderRadius: "10px",
+          padding: "16px 20px",
           marginBottom: "16px",
-          boxShadow: "0 4px 20px rgba(0, 0, 0, 0.15)",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          flexWrap: "wrap",
+          gap: "14px",
         }}
       >
-        <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "flex-start", gap: "16px" }}>
-          <div style={{ maxWidth: "700px" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
-              <span style={{ fontSize: "18px" }}>🚀</span>
-              <span style={{ fontSize: "15px", fontWeight: "700", color: "#38bdf8", letterSpacing: "0.02em" }}>
-                Remote Physical Network Scanner (Client Probe)
-              </span>
-              <span
-                style={{
-                  background: "rgba(56, 189, 248, 0.2)",
-                  color: "#38bdf8",
-                  padding: "2px 8px",
-                  borderRadius: "999px",
-                  fontSize: "11px",
-                  fontWeight: "600",
-                }}
-              >
-                Multi-Tenant Isolated
-              </span>
-            </div>
-            <p style={{ margin: "0 0 12px 0", fontSize: "13px", lineHeight: "1.5", color: "#cbd5e1" }}>
-              Because NETOPS is hosted online, web browsers cannot directly scan your local physical network (home or office Wi-Fi/LAN) across the internet. Run this lightweight, zero-dependency Python probe on your machine to scan your local network and securely populate your personal dashboard.
-            </p>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center" }}>
-              <a
-                href={`${API_URL}/discovery/probe-script`}
-                download="netops_probe.py"
-                className="primary-button"
-                style={{
-                  fontSize: "12px",
-                  padding: "8px 14px",
-                  background: "#0284c7",
-                  borderColor: "#38bdf8",
-                  textDecoration: "none",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "6px",
-                }}
-              >
-                <span>📥</span> Download netops_probe.py
-              </a>
-
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() => {
-                  const token = localStorage.getItem("netops_token") || "";
-                  const cmd = `curl -sO ${API_URL}/discovery/probe-script && python3 netops_probe.py --server ${API_URL}${token ? ` --token ${token}` : ""}`;
-                  navigator.clipboard?.writeText(cmd);
-                  setProbeCopied(true);
-                  setTimeout(() => setProbeCopied(false), 3000);
-                }}
-                style={{
-                  fontSize: "12px",
-                  padding: "8px 14px",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "6px",
-                  background: "#1e293b",
-                  borderColor: "#475569",
-                  color: "#f8fafc",
-                }}
-              >
-                <span>{probeCopied ? "✅" : "📋"}</span>
-                {probeCopied ? "Command Copied to Clipboard!" : "Copy 1-Click Run Command"}
-              </button>
-
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() => setShowProbeModal(true)}
-                style={{
-                  fontSize: "12px",
-                  padding: "8px 14px",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "6px",
-                  background: "#0f172a",
-                  borderColor: "#334155",
-                  color: "#94a3b8",
-                }}
-              >
-                <span>📖</span> Setup Guide &amp; Daemon Mode
-              </button>
-            </div>
+        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+          <div style={{ width: "42px", height: "42px", borderRadius: "10px", background: "#dbeafe", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "22px" }}>
+            📡
           </div>
-
-          <div
-            style={{
-              background: "#0b1120",
-              border: "1px solid #1e293b",
-              borderRadius: "8px",
-              padding: "12px 16px",
-              fontFamily: "monospace",
-              fontSize: "12px",
-              maxWidth: "460px",
-              color: "#38bdf8",
-              overflowX: "auto",
-            }}
-          >
-            <div style={{ color: "#64748b", fontSize: "11px", marginBottom: "4px" }}># Quick 1-Line Run (Linux / macOS / Windows):</div>
-            <code>
-              python netops_probe.py --server {API_URL} --token {"<your_token>"}
-            </code>
+          <div>
+            <div style={{ fontWeight: "700", fontSize: "14px", color: "#1e3a8a", display: "flex", alignItems: "center", gap: "8px" }}>
+              <span>Built-in Physical Network Scanner</span>
+              <span className="status-badge allowed" style={{ fontSize: "10px", padding: "1px 6px" }}>
+                ONLINE ENGINE
+              </span>
+            </div>
+            <div style={{ fontSize: "12px", color: "#475569", marginTop: "2px" }}>
+              Directly connected to your physical local network (<strong>{detectedSubnet || "192.168.0.0/24"}</strong>) across wired LAN and wireless interfaces. Zero client software or manual scripts required.
+            </div>
           </div>
         </div>
+
+        <button
+          type="button"
+          className="primary-button"
+          onClick={() => {
+            setSelectedInterface("all");
+            scanAllLanDevices(detectedSubnet, "all");
+          }}
+          disabled={lanDevicesScanning}
+          style={{
+            fontSize: "13px",
+            fontWeight: "700",
+            padding: "9px 20px",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "8px",
+            background: "#2563eb",
+            boxShadow: "0 4px 12px rgba(37, 99, 235, 0.25)",
+            cursor: lanDevicesScanning ? "not-allowed" : "pointer",
+          }}
+        >
+          <span>{lanDevicesScanning ? "⏳" : "🚀"}</span>
+          {lanDevicesScanning ? "Scanning Network..." : "Scan Devices Now"}
+        </button>
       </div>
 
       {/* CONTROL & SCAN PANEL */}
