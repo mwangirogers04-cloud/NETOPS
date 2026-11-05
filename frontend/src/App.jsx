@@ -17,26 +17,12 @@ import { playBellSound } from "./utils/bellAudio";
 
 const getDefaultApiUrl = () => {
   if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL;
-  const host = typeof window !== "undefined" ? window.location.hostname : "";
-  if (host === "localhost" || host === "127.0.0.1") {
-    return "http://127.0.0.1:8000";
-  }
-  if (host.includes("netops.co.ke") || host.includes("vercel.app") || host.includes("net-ops.ac.ke")) {
-    return "https://api.netops.co.ke";
-  }
-  return `${window.location.protocol}//${host}:8000`;
+  return "https://api.netops.co.ke";
 };
 
 const getDefaultWsUrl = () => {
   if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL;
-  const host = typeof window !== "undefined" ? window.location.hostname : "";
-  if (host === "localhost" || host === "127.0.0.1") {
-    return "ws://127.0.0.1:8000/ws/events";
-  }
-  if (host.includes("netops.co.ke") || host.includes("vercel.app") || host.includes("net-ops.ac.ke")) {
-    return "wss://api.netops.co.ke/ws/events";
-  }
-  return `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${host}:8000/ws/events`;
+  return "wss://api.netops.co.ke/ws/events";
 };
 
 const API_URL = getDefaultApiUrl();
