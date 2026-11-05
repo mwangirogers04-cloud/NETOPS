@@ -217,9 +217,6 @@ def create_user(
             detail=conflicts["detail"],
         )
 
-    token = generate_activation_token()
-    login_link = generate_activation_link(token)
-
     new_user = User(
         username=clean_username,
         email=clean_email,
@@ -227,8 +224,8 @@ def create_user(
         hashed_password=hash_password(req.password),
         role=req.role,
         is_active=True,
-        is_verified=False,
-        activation_token=token,
+        is_verified=True,
+        activation_token=None,
         created_by=current_user.username,
         password_changed_at=datetime.now(timezone.utc).replace(tzinfo=None),
     )
@@ -242,31 +239,24 @@ def create_user(
         event_type="user_created",
         message=(
             f"New user '{new_user.username}' (role: {new_user.role}) created by "
-            f"{current_user.role} '{current_user.username}'. Activation link dispatched to {new_user.email}."
+            f"{current_user.role} '{current_user.username}'. Direct access granted."
         ),
         device_id=None,
         actor=current_user.username,
     )
     db.commit()
 
-    # Dispatch email activation link
-    send_activation_email(
-        email=new_user.email,
-        username=new_user.username,
-        login_link=login_link,
-        initial_password=req.password,
-    )
-
     return {
         "status": "created",
-        "message": f"User '{new_user.username}' created successfully. An activation login link has been sent to {new_user.email}.",
-        "activation_link": login_link,
+        "message": f"User '{new_user.username}' created successfully and is ready to sign in immediately.",
+        "activation_link": None,
         "user": {
             "id": new_user.id,
             "username": new_user.username,
             "email": new_user.email,
             "phone_number": new_user.phone_number,
             "role": new_user.role,
+            "is_active": new_user.is_active,
             "is_verified": new_user.is_verified,
             "created_by": new_user.created_by,
         },
@@ -475,22 +465,15 @@ def resend_activation_link(
             detail="Permission Denied: Only Developers (Super Administrators) can resend activation links for Developer accounts.",
         )
 
-    token = generate_activation_token()
-    login_link = generate_activation_link(token)
-
-    user.activation_token = token
+    user.is_active = True
+    user.is_verified = True
+    user.activation_token = None
     db.commit()
 
-    send_activation_email(
-        email=user.email,
-        username=user.username,
-        login_link=login_link,
-    )
-
     return {
-        "status": "sent",
-        "message": f"Activation login link resent to {user.email}.",
-        "activation_link": login_link,
+        "status": "active",
+        "message": f"User '{user.username}' has direct access and can log in immediately.",
+        "activation_link": None,
     }
 
 

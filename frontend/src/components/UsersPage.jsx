@@ -590,7 +590,7 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
             User Management & RBAC Access
           </div>
           <div className="page-description" style={{ color: "#475569", fontSize: "13px", marginTop: "4px" }}>
-            Super Administrators and Administrators can manage console users, assign permissions, and send email activation login links.
+            Super Administrators and Administrators can manage console users, assign permissions, and grant direct system access.
           </div>
         </div>
 
@@ -678,7 +678,7 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                 <th>Contact Details</th>
                 <th>Role & Privileges</th>
                 <th>Password Expiry (3 Mo)</th>
-                <th>Activation Status</th>
+                <th>Status</th>
                 <th>Created</th>
                 <th style={{ textAlign: "right" }}>Actions</th>
               </tr>
@@ -783,13 +783,13 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                       </td>
 
                       <td>
-                        {u.is_verified ? (
+                        {u.is_active ? (
                           <span className="status-badge online" style={{ fontSize: "10px" }}>
-                            🟢 Verified & Active
+                            🟢 Active
                           </span>
                         ) : (
-                          <span className="status-badge pending" style={{ fontSize: "10px" }}>
-                            🟡 Pending Activation
+                          <span className="status-badge offline" style={{ fontSize: "10px" }}>
+                            🔴 Deactivated
                           </span>
                         )}
                       </td>
@@ -845,31 +845,6 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                             🔑 Reset Password
                           </button>
 
-                          {/* COPY ACTIVATION LINK */}
-                          {u.activation_link && (
-                            <button
-                              type="button"
-                              className="copy-pill-btn"
-                              onClick={() => handleCopyLink(u.activation_link, u.id)}
-                              title="Copy account activation login link to clipboard"
-                            >
-                              {copiedId === u.id ? "✅ Copied!" : "📋 Copy Link"}
-                            </button>
-                          )}
-
-                          {/* RESEND ACTIVATION LINK */}
-                          {!u.is_verified && (
-                            <button
-                              type="button"
-                              className="secondary-button small"
-                              onClick={() => handleResendActivation(u)}
-                              disabled={actionLoadingId === `resend-${u.id}`}
-                              title="Resend activation email to user"
-                            >
-                              {actionLoadingId === `resend-${u.id}` ? "Sending..." : "✉️ Resend Link"}
-                            </button>
-                          )}
-
                           {/* DELETE USER */}
                           {isSuperAdmin && !isCurrent && u.role !== "super_admin" && (
                             <button
@@ -907,44 +882,35 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                     User Account Created!
                   </div>
                   <div style={{ fontSize: "13px", color: "#475569", marginTop: "4px" }}>
-                    An activation link has been sent to <strong>{createdResult.user?.email}</strong>.
+                    Account for <strong>{createdResult.user?.username || createdResult.user?.email}</strong> is active and ready.
                   </div>
                 </div>
 
                 <div style={{ background: "#f8fafc", border: "1px solid #cbd5e1", borderRadius: "8px", padding: "14px", marginBottom: "18px" }}>
-                  <div style={{ fontSize: "11px", fontWeight: "700", color: "#475569", textTransform: "uppercase", marginBottom: "6px" }}>
-                    Activation Login Link
+                  <div style={{ fontSize: "13px", color: "#0f172a", marginBottom: "6px" }}>
+                    <strong>Username:</strong> {createdResult.user?.username}
                   </div>
-                  <div style={{ wordBreak: "break-all", fontSize: "12px", color: "#1d4ed8", fontFamily: "monospace", background: "#eff6ff", border: "1px solid #bfdbfe", padding: "8px", borderRadius: "6px", marginBottom: "10px" }}>
-                    {createdResult.activation_link}
+                  <div style={{ fontSize: "13px", color: "#0f172a", marginBottom: "6px" }}>
+                    <strong>Email:</strong> {createdResult.user?.email}
                   </div>
-                  <button
-                    type="button"
-                    className="primary-button small"
-                    style={{ width: "100%" }}
-                    onClick={() => {
-                      navigator.clipboard.writeText(createdResult.activation_link);
-                      alert("Activation link copied to clipboard!");
-                    }}
-                  >
-                    📋 Copy Activation Link
-                  </button>
-                </div>
-
-                <div style={{ fontSize: "12px", color: "#475569", marginBottom: "20px", lineHeight: "1.4" }}>
-                  The user clicks this link in their email, which verifies access and prompts them to sign in using the password you configured.
+                  <div style={{ fontSize: "13px", color: "#0f172a", marginBottom: "6px" }}>
+                    <strong>Role:</strong> {createdResult.user?.role}
+                  </div>
+                  <div style={{ fontSize: "12px", color: "#059669", fontWeight: "600", marginTop: "8px" }}>
+                    ✅ Direct access granted. The user can sign in immediately at the login page using the credentials you configured.
+                  </div>
                 </div>
 
                 <button
                   type="button"
-                  className="secondary-button"
+                  className="primary-button"
                   style={{ width: "100%" }}
                   onClick={() => {
                     setShowCreateModal(false);
                     setCreatedResult(null);
                   }}
                 >
-                  Close
+                  Done
                 </button>
               </div>
             ) : (
@@ -956,7 +922,7 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                       Create New Account
                     </div>
                     <div style={{ fontSize: "12px", color: "#475569", marginTop: "2px" }}>
-                      The user will receive an email activation link to verify access before signing in.
+                      The user will be given direct access to sign in immediately using their credentials.
                     </div>
                   </div>
                   <button
@@ -1004,7 +970,7 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
 
                 <div className="form-group" style={{ marginBottom: "14px" }}>
                   <label className="form-label" style={{ fontSize: "11px", fontWeight: "700", color: "#334155", display: "block", marginBottom: "4px" }}>
-                    Email Address (For Activation Link) *
+                    Email Address *
                   </label>
                   <input
                     type="email"
@@ -1116,7 +1082,7 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                     className="primary-button"
                     disabled={formLoading}
                   >
-                    {formLoading ? "Creating..." : "Create & Send Activation Link"}
+                    {formLoading ? "Creating..." : "Create User"}
                   </button>
                 </div>
               </form>
@@ -1278,21 +1244,6 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                     <option value="inactive">Deactivated (Blocked)</option>
                   </select>
                 </div>
-              </div>
-
-              <div className="form-group" style={{ marginBottom: "14px" }}>
-                <label className="form-label" style={{ fontSize: "11px", fontWeight: "700", color: "#cbd5e1", display: "block", marginBottom: "4px" }}>
-                  Activation Verification
-                </label>
-                <select
-                  className="login-input"
-                  value={editFormState.is_verified ? "verified" : "pending"}
-                  onChange={(e) => setEditFormState({ ...editFormState, is_verified: e.target.value === "verified" })}
-                  disabled={editLoading}
-                >
-                  <option value="verified">Verified (Access Confirmed)</option>
-                  <option value="pending">Pending Email Activation</option>
-                </select>
               </div>
 
               <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end", marginTop: "20px" }}>

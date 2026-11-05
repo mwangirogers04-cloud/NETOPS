@@ -58,15 +58,6 @@ function App() {
 
   const [activePage, setActivePage] = useState("dashboard");
 
-  const [activationToken] = useState(() => {
-    try {
-      const params = new URLSearchParams(window.location.search);
-      return params.get("activation_token");
-    } catch {
-      return null;
-    }
-  });
-
   const isDeveloper =
     currentUser?.username?.toLowerCase() === "developer" ||
     currentUser?.role?.toLowerCase() === "developer" ||
@@ -13066,7 +13057,6 @@ const EndpointUpdatesPage = () => {
       <LoginPage
         API_URL={API_URL}
         onLoginSuccess={handleLoginSuccess}
-        initialActivationToken={activationToken}
         inactivityNotice={inactivityNotice}
         onClearInactivityNotice={() => setInactivityNotice("")}
       />

@@ -300,9 +300,6 @@ def register_account(
             detail=conflicts["detail"],
         )
 
-    token = generate_activation_token()
-    login_link = generate_activation_link(token)
-
     new_user = User(
         username=clean_username,
         email=clean_email,
@@ -317,12 +314,6 @@ def register_account(
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
-
-    send_activation_email(
-        email=new_user.email,
-        username=new_user.username,
-        login_link=login_link,
-    )
 
     return {
         "status": "registered",

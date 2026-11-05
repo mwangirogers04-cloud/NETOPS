@@ -16,7 +16,6 @@ const formatFetchError = (err, defaultMsg = "Request failed.") => {
 export default function LoginPage({
   API_URL,
   onLoginSuccess,
-  initialActivationToken,
   inactivityNotice = "",
   onClearInactivityNotice,
 }) {
@@ -27,7 +26,6 @@ export default function LoginPage({
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
-  const [activationNotice, setActivationNotice] = useState("");
   const [showLoginFaqs, setShowLoginFaqs] = useState(false);
   const [openLoginFaqIndex, setOpenLoginFaqIndex] = useState(null);
   const [inactivityAlert, setInactivityAlert] = useState(() => {
@@ -118,37 +116,6 @@ export default function LoginPage({
   const [expiredAdminConfirmPassword, setExpiredAdminConfirmPassword] = useState("");
   const [showExpiredAdminPasswords, setShowExpiredAdminPasswords] = useState(false);
   const [expiredUserNotice, setExpiredUserNotice] = useState("");
-
-  // Handle auto-activation when URL has ?activation_token=...
-  useEffect(() => {
-    if (!initialActivationToken) return;
-    setLoading(true);
-    setErrorMessage("");
-    fetch(`${API_URL}/auth/activate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ activation_token: initialActivationToken }),
-    })
-      .then(async (res) => {
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          throw new Error(data.detail || "Activation token is invalid or has expired.");
-        }
-        setActivationNotice(
-          `🎉 Account for '${data.username}' successfully activated! Please enter your password to sign in.`
-        );
-        if (data.username) {
-          setIdentifier(data.username);
-        }
-        try {
-          window.history.replaceState({}, document.title, window.location.pathname);
-        } catch (_) {}
-      })
-      .catch((err) => {
-        setErrorMessage(formatFetchError(err, "Failed to activate account with link."));
-      })
-      .finally(() => setLoading(false));
-  }, [initialActivationToken, API_URL]);
 
   // 5-minute countdown timer for OTP
   useEffect(() => {
@@ -897,13 +864,6 @@ export default function LoginPage({
         )}
 
         {/* ALERTS */}
-        {activationNotice && (
-          <div className="login-alert success">
-            <span>🎉</span>
-            <div>{activationNotice}</div>
-          </div>
-        )}
-
         {successMessage && (
           <div className="login-alert success">
             <span>✅</span>
