@@ -63,20 +63,9 @@ def run_discovery_scan(
     db: Session = Depends(get_db),
 ):
     """
-    Discover LAN / WLAN devices on the host server's local interfaces and save them
+    Discover LAN / WLAN devices on physical interfaces and save them
     as infrastructure devices.
     """
-    if current_user:
-        is_admin = (
-            current_user.role in ("admin", "super_admin")
-            or current_user.username.lower() in ("developer", "admin")
-        )
-        if not is_admin:
-            raise HTTPException(
-                status_code=403,
-                detail="Standard users cannot trigger server-side hardware discovery on the host server. To scan your own network, run the NetOps Client Scanner Probe (netops_probe.py) on your local computer.",
-            )
-
     # Server-side physical scan is strictly infrastructure (admin owner)
     owner_id = 1
 

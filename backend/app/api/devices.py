@@ -209,9 +209,14 @@ def get_devices(
         or current_user.username.lower() in ("developer", "admin")
     )
     if not is_admin:
-        # Strict multi-tenant isolation:
-        # Regular users ONLY see devices belonging to their own account
-        query = query.where(Device.owner_id == current_user.id)
+        # Standard office users have full visibility of office LAN infrastructure devices
+        query = query.where(
+            or_(
+                Device.owner_id == current_user.id,
+                Device.owner_id == 1,
+                Device.owner_id.is_(None),
+            )
+        )
     else:
         # Super admin / Admin / Developer:
         # - scope == "all": view all devices across the platform
