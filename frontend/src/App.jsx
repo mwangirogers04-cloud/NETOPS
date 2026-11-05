@@ -490,6 +490,8 @@ function App() {
       setDetectedSubnet(targetNetwork);
     }
     setLanDevicesScanning(true);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 35000);
     try {
       const response = await fetch(`${API_URL}/discovery/scan`, {
         method: "POST",
@@ -501,7 +503,9 @@ function App() {
           network: targetNetwork,
           interface: targetInterface,
         }),
+        signal: controller.signal,
       });
+      clearTimeout(timeoutId);
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
         throw new Error(errData.detail || `Scan failed: ${response.status}`);
@@ -512,8 +516,15 @@ function App() {
       await loadEvents();
       await loadAccessSchedules();
     } catch (err) {
+      clearTimeout(timeoutId);
       console.error("Discovery scan error:", err);
-      alert("LAN/WLAN Discovery scan failed: " + err.message);
+      if (err.name === "AbortError") {
+        alert("Discovery scan timed out: The network sweep took longer than 35 seconds. Please check if your remote network connection is stable or scan a single interface (eth0 or wlan0).");
+      } else if (err.message && err.message.toLowerCase().includes("failed to fetch")) {
+        alert("Connection to NETOPS API failed: The remote server could not be reached or the request timed out. Please verify your connection to api.netops.co.ke.");
+      } else {
+        alert("LAN/WLAN Discovery scan failed: " + err.message);
+      }
     } finally {
       setLanDevicesScanning(false);
     }

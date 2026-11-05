@@ -202,10 +202,10 @@ def awaken_silent_devices(network: str | None = None, interface: str | None = No
 
     # 1. Paced fping pre-sweep if fping is available
     try:
-        cmd = ["fping", "-a", "-g", network, "-r", "1", "-t", "80"]
+        cmd = ["fping", "-a", "-g", network, "-r", "0", "-t", "50"]
         if interface and interface != "all":
             cmd.extend(["-I", interface])
-        subprocess.run(cmd, capture_output=True, check=False, timeout=5)
+        subprocess.run(cmd, capture_output=True, check=False, timeout=3)
     except Exception:
         pass
 
@@ -264,11 +264,11 @@ def _run_arp_scan_on_interface(network: str | None, target_iface: str | None) ->
         awaken_silent_devices(network, target_iface)
 
     # Smartphones (Android/iOS) on Wi-Fi use power-saving sleep (802.11 PSM / DTIM)
-    # Using 4 retries and 1200ms timeout ensures sleeping phones wake up and respond
-    if is_wireless or target_iface == "eth0":
-        cmd.extend(["--retry=4", "--timeout=1200"])
-    else:
+    # Using 2 retries and 800ms timeout ensures sleeping phones respond without lagging the HTTP scan
+    if is_wireless:
         cmd.extend(["--retry=2", "--timeout=800"])
+    else:
+        cmd.extend(["--retry=2", "--timeout=500"])
 
     discovered = []
     try:
@@ -524,8 +524,11 @@ def discover_devices(network: str, interface: str | None = None):
         "nmap",
         "-sn",
         "-PR",
+        "-n",
         "--max-retries",
-        "3",
+        "1",
+        "--min-rate",
+        "300",
     ]
     if specific_iface and os.path.exists(f"/sys/class/net/{specific_iface}"):
         command.extend(["--privileged", "-e", specific_iface])
@@ -787,26 +790,17 @@ def save_discovered_devices(
                 except Exception:
                     pass
                 if not is_still_reachable:
-                    fallback_iface = get_default_interface()
-                    preferred_iface = existing_device.network_interface or (scanned_interface if scanned_interface and scanned_interface != "all" else fallback_iface)
-                    ifaces_to_try = [preferred_iface]
-                    for alt_iface in ("wlan0", "eth0"):
-                        if alt_iface not in ifaces_to_try:
-                            ifaces_to_try.append(alt_iface)
-
-                    for iface in ifaces_to_try:
-                        try:
-                            res = subprocess.run(
-                                ["arping", "-c", "2", "-w", "2", "-i", iface, existing_device.ip_address],
-                                capture_output=True,
-                                timeout=3,
-                            )
-                            if res.returncode == 0:
-                                is_still_reachable = True
-                                existing_device.network_interface = iface
-                                break
-                        except Exception:
-                            pass
+                    target_iface = existing_device.network_interface or (scanned_interface if scanned_interface and scanned_interface != "all" else get_default_interface())
+                    try:
+                        res = subprocess.run(
+                            ["arping", "-c", "1", "-w", "1", "-i", target_iface, existing_device.ip_address],
+                            capture_output=True,
+                            timeout=1.5,
+                        )
+                        if res.returncode == 0:
+                            is_still_reachable = True
+                    except Exception:
+                        pass
 
             if not is_still_reachable and existing_device.status == "online":
                 existing_device.status = "offline"
