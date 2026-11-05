@@ -30,13 +30,13 @@ def get_local_subnets():
 
 
 class DiscoveryRequest(BaseModel):
-    network: str
+    network: str | None = None
     interface: str | None = None
 
     @field_validator("network")
     @classmethod
-    def validate_network(cls, value: str) -> str:
-        if not value.strip():
+    def validate_network(cls, value: str | None) -> str | None:
+        if value is not None and not value.strip():
             raise ValueError("Network range cannot be empty.")
         return value
 
@@ -75,9 +75,21 @@ def run_discovery_scan(
             if request.interface and request.interface.strip() and request.interface.strip().lower() != "all"
             else None
         )
+        target_network = (request.network or "").strip()
+        # Auto-resolve network subnet for the specific interface if not explicitly provided
+        if not target_network or target_network.lower() == "auto":
+            subnets_info = detect_local_subnets()
+            if clean_iface:
+                for if_info in subnets_info.get("interfaces", []):
+                    if if_info.get("interface") == clean_iface and if_info.get("network"):
+                        target_network = if_info["network"]
+                        break
+            if not target_network:
+                target_network = subnets_info.get("default_network", "192.168.0.0/24")
+
         if clean_iface:
             discovered_devices = discover_devices(
-                request.network,
+                target_network,
                 interface=clean_iface,
             )
             saved_devices = save_discovered_devices(
@@ -88,7 +100,7 @@ def run_discovery_scan(
             )
         else:
             discovered_devices = discover_devices(
-                request.network
+                target_network
             )
             saved_devices = save_discovered_devices(
                 discovered_devices,
@@ -98,7 +110,7 @@ def run_discovery_scan(
 
         return {
             "status": "completed",
-            "network": request.network,
+            "network": target_network,
             "interface": clean_iface or "all",
             "devices_discovered": len(
                 discovered_devices

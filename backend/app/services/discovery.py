@@ -326,17 +326,8 @@ def get_arp_scan_devices(network: str | None = None, interface: str | None = Non
     """
     target_ifaces: list[str] = []
     if interface and interface != "all":
+        # Strictly scan ONLY the requested interface (e.g. wlan0 or eth0)
         target_ifaces.append(interface)
-        # If scanning on eth0, also co-scan on wlan0 if present on the same network
-        try:
-            subnets_info = detect_local_subnets()
-            for item in subnets_info.get("interfaces", []):
-                other_iface = item.get("interface")
-                if other_iface and other_iface not in target_ifaces and is_wireless_interface(other_iface):
-                    if not network or item.get("network") == network:
-                        target_ifaces.append(other_iface)
-        except Exception:
-            pass
     else:
         try:
             subnets_info = detect_local_subnets()
