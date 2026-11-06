@@ -126,7 +126,7 @@ def test_admin_cannot_create_or_grant_developer_rights():
             "username": "valid_user_dev",
             "email": "valid_dev@example.com",
             "phone_number": "+254722222299",
-            "password": "ValidUser@123",
+            "password": "ComplexSecret!999",
             "role": "user",
         },
     )
@@ -141,7 +141,7 @@ def test_admin_cannot_create_or_grant_developer_rights():
             "username": "new_net_admin",
             "email": "new_admin@example.com",
             "phone_number": "+254733333333",
-            "password": "NewAdminPass@123",
+            "password": "SuperSecure!123",
             "role": "admin",
         },
     )
@@ -195,7 +195,7 @@ def test_admin_cannot_create_or_grant_developer_rights():
             "username": "second_developer",
             "email": "second_dev@example.com",
             "phone_number": "+254744444444",
-            "password": "SecondDevSecret@123",
+            "password": "ComplexP@ssw0rd999!",
             "role": "super_admin",
         },
     )

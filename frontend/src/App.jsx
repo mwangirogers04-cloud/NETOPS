@@ -1642,6 +1642,7 @@ const loadEvents = async () => {
         next.delete(deviceId);
         return next;
       });
+      setDevices((prev) => prev.filter((d) => d.id !== deviceId));
       await Promise.allSettled([
         loadDevices(),
         loadEvents(),
@@ -1707,8 +1708,8 @@ const loadEvents = async () => {
   };
 
   const deleteDevicePermanently = async (device) => {
-    if (!isSuperAdmin) {
-      alert("Permission Denied: Only Super Administrators (Developers) can permanently delete devices and audit records. Administrators can isolate, unapprove, or reject devices.");
+    if (!isAdmin && !isSuperAdmin) {
+      alert("Permission Denied: Administrator or Developer privileges required to delete devices.");
       return;
     }
     const name = device.hostname || device.mac_address || "this machine";
@@ -1727,8 +1728,8 @@ const loadEvents = async () => {
   };
 
   const deleteBulkDevices = async (idsToDelete = null) => {
-    if (!isSuperAdmin) {
-      alert("Permission Denied: Only Super Administrators (Developers) can permanently delete devices and audit records. Administrators can isolate, unapprove, or reject devices.");
+    if (!isAdmin && !isSuperAdmin) {
+      alert("Permission Denied: Administrator or Developer privileges required to delete devices.");
       return;
     }
     const ids = idsToDelete || Array.from(selectedDeviceIds);
@@ -1755,6 +1756,7 @@ const loadEvents = async () => {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.detail || `HTTP ${res.status}`);
       }
+      setDevices((prev) => prev.filter((d) => !ids.includes(d.id)));
       setSelectedDeviceIds(new Set());
       await Promise.allSettled([
         loadDevices(),
@@ -2789,7 +2791,7 @@ const DevicesPage = () => {
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-            {isSuperAdmin && (
+            {(isSuperAdmin || isAdmin) && (
               <button
                 type="button"
                 className="secondary-button small"
@@ -3994,7 +3996,7 @@ const DevicesPage = () => {
                           </button>
                         )}
 
-                        {isSuperAdmin && (
+                        {(isSuperAdmin || isAdmin) && (
                           <button
                             type="button"
                             className="secondary-button small"

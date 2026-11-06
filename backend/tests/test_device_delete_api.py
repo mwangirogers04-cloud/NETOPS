@@ -59,7 +59,15 @@ def setup_database():
         is_active=True,
         is_verified=True,
     )
-    db.add_all([dev_user, admin_user])
+    normal_user = User(
+        username="normal_user",
+        email="user@netops.local",
+        hashed_password=hash_password("UserPass@123"),
+        role="user",
+        is_active=True,
+        is_verified=True,
+    )
+    db.add_all([dev_user, admin_user, normal_user])
     db.commit()
     db.close()
 
@@ -69,7 +77,12 @@ def setup_database():
 
 
 def get_auth_headers(role: str = "super_admin"):
-    username = "dev_admin" if role == "super_admin" else "netops_admin"
+    if role == "super_admin":
+        username = "dev_admin"
+    elif role == "admin":
+        username = "netops_admin"
+    else:
+        username = "normal_user"
     token = create_access_token({"sub": username, "role": role})
     return {"Authorization": f"Bearer {token}"}
 
@@ -135,13 +148,13 @@ def test_delete_device_permanently_cascades_and_removes_state():
     db.commit()
     db.close()
 
-    # 1. Administrator is DENIED permanent deletion (403 Forbidden)
-    admin_res = client.delete(f"/devices/{dev_id}", headers=get_auth_headers("admin"))
-    assert admin_res.status_code == 403
-    assert "super administrator access required" in admin_res.json()["detail"].lower()
+    # 1. Standard user is DENIED permanent deletion (403 Forbidden)
+    user_res = client.delete(f"/devices/{dev_id}", headers=get_auth_headers("user"))
+    assert user_res.status_code == 403
+    assert "administrative privileges required" in user_res.json()["detail"].lower()
 
-    # 2. Super Administrator is ALLOWED permanent deletion (200 OK)
-    res = client.delete(f"/devices/{dev_id}", headers=get_auth_headers("super_admin"))
+    # 2. Administrator is ALLOWED permanent deletion (200 OK)
+    res = client.delete(f"/devices/{dev_id}", headers=get_auth_headers("admin"))
     assert res.status_code == 200
     data = res.json()
     assert data["status"] == "deleted"
@@ -185,18 +198,18 @@ def test_bulk_delete_devices_permanently():
     id1, id2, id3 = dev1.id, dev2.id, dev3.id
     db.close()
 
-    # Administrator cannot bulk delete (403 Forbidden)
-    admin_res = client.post(
+    # Standard user cannot bulk delete (403 Forbidden)
+    user_res = client.post(
         "/devices/bulk-delete",
-        headers=get_auth_headers("admin"),
+        headers=get_auth_headers("user"),
         json={"device_ids": [id1, id2]},
     )
-    assert admin_res.status_code == 403
+    assert user_res.status_code == 403
 
-    # Super Administrator can bulk delete
+    # Administrator can bulk delete (200 OK)
     res = client.post(
         "/devices/bulk-delete",
-        headers=get_auth_headers("super_admin"),
+        headers=get_auth_headers("admin"),
         json={"device_ids": [id1, id2]},
     )
     assert res.status_code == 200
