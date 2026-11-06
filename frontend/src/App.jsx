@@ -872,25 +872,25 @@ function App() {
     return devIface === selectedInterface.toLowerCase();
   };
 
-  const scopedDevices = (activeTab === "lan" && selectedInterface && selectedInterface !== "all")
+  const scopedDevices = (selectedInterface && selectedInterface !== "all")
     ? devices.filter(matchesSelectedInterface).slice().sort((a, b) => ipToNum(a.ip_address) - ipToNum(b.ip_address))
     : devices.slice().sort((a, b) => ipToNum(a.ip_address) - ipToNum(b.ip_address));
 
   const totalDevices = devices.length;
   const onlineDevices = devices.filter((device) => device.status === "online").length;
-  const pendingDevices = scopedDevices.filter(
+  const pendingDevices = devices.filter(
     (device) => device.approval_status === "pending"
   ).length;
 
-  const rejectedDevices = scopedDevices.filter(
+  const rejectedDevices = devices.filter(
     (device) => device.approval_status === "rejected"
   ).length;
 
-  const quarantinedDevices = scopedDevices.filter(
+  const quarantinedDevices = devices.filter(
     (device) => device.enforcement_status === "quarantined"
   ).length;
 
-  const isolatedDevices = scopedDevices.filter(
+  const isolatedDevices = devices.filter(
     (device) => device.enforcement_status === "isolated"
   ).length;
 
