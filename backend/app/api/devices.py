@@ -208,35 +208,20 @@ def get_devices(
         current_user.role in ("admin", "super_admin")
         or current_user.username.lower() in ("developer", "admin")
     )
-    if not is_admin:
-        # Standard office users have full visibility of office LAN infrastructure devices
-        query = query.where(
-            or_(
-                Device.owner_id == current_user.id,
-                Device.owner_id == 1,
-                Device.owner_id.is_(None),
-            )
-        )
-    else:
-        # Super admin / Admin / Developer:
-        # - scope == "all": view all devices across the platform
-        # - scope == "user_<id>": view specific user's network
-        # - scope == "my": view devices owned directly by current admin
-        # - default: view all infrastructure devices
-        if scope and scope.startswith("user_"):
-            try:
-                uid = int(scope.replace("user_", ""))
-                query = query.where(Device.owner_id == uid)
-            except ValueError:
-                pass
-        elif scope == "unassigned":
-            query = query.where(Device.owner_id.is_(None))
-        elif scope == "my":
+    if scope == "all" and is_admin:
+        # Super admin / Admin explicitly requesting platform-wide device inventory
+        pass
+    elif scope and scope.startswith("user_") and is_admin:
+        try:
+            uid = int(scope.replace("user_", ""))
+            query = query.where(Device.owner_id == uid)
+        except ValueError:
             query = query.where(Device.owner_id == current_user.id)
-        else:
-            # Default for administrator:
-            # View all infrastructure devices
-            pass
+    else:
+        # Strict per-user network isolation:
+        # Every user (standard user, admin, developer) starts with a clean slate
+        # and only sees devices discovered/owned under their specific account.
+        query = query.where(Device.owner_id == current_user.id)
 
     devices = db.scalars(query).all()
 

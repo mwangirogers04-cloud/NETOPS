@@ -66,8 +66,8 @@ def run_discovery_scan(
     Discover LAN / WLAN devices on physical interfaces and save them
     as infrastructure devices.
     """
-    # Server-side physical scan is strictly infrastructure (admin owner)
-    owner_id = 1
+    # Physical scan devices are isolated to the active user who initiated the scan
+    owner_id = current_user.id if current_user else 1
 
     try:
         clean_iface = (

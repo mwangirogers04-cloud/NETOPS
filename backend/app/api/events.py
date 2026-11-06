@@ -28,7 +28,7 @@ def get_events(
     if event_type is not None:
         query = query.where(Event.event_type == event_type)
 
-    if current_user and current_user.role not in ("admin", "super_admin") and current_user.username.lower() not in ("developer", "admin"):
+    if current_user and current_user.username.lower() != "developer":
         query = query.join(Device, Event.device_id == Device.id).where(Device.owner_id == current_user.id)
 
     query = (
