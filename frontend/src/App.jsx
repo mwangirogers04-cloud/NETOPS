@@ -868,17 +868,16 @@ function App() {
 
   const matchesSelectedInterface = (device) => {
     if (!selectedInterface || selectedInterface === "all") return true;
-    const devIface = device.network_interface || "eth0";
-    return devIface === selectedInterface;
+    const devIface = (device.network_interface || "").toLowerCase();
+    return devIface === selectedInterface.toLowerCase();
   };
 
-  const scopedDevices = devices
-    .filter(matchesSelectedInterface)
-    .slice()
-    .sort((a, b) => ipToNum(a.ip_address) - ipToNum(b.ip_address));
+  const scopedDevices = (activeTab === "lan" && selectedInterface && selectedInterface !== "all")
+    ? devices.filter(matchesSelectedInterface).slice().sort((a, b) => ipToNum(a.ip_address) - ipToNum(b.ip_address))
+    : devices.slice().sort((a, b) => ipToNum(a.ip_address) - ipToNum(b.ip_address));
 
-  const totalDevices = scopedDevices.length;
-  const onlineDevices = scopedDevices.filter((device) => device.status === "online").length;
+  const totalDevices = devices.length;
+  const onlineDevices = devices.filter((device) => device.status === "online").length;
   const pendingDevices = scopedDevices.filter(
     (device) => device.approval_status === "pending"
   ).length;
@@ -4034,7 +4033,7 @@ const DevicesPage = () => {
 // ------------------------------------------------------------
 
 const LanScannerPage = () => {
-  const interfaceDevices = scopedDevices;
+  const interfaceDevices = devices;
   const isAllInterfaces = !selectedInterface || selectedInterface === "all";
   const displayedInterfaceDevices = isAllInterfaces
     ? interfaceDevices
@@ -4483,6 +4482,38 @@ const LanScannerPage = () => {
               style={{ padding: "2px 8px", fontSize: "11px" }}
             >
               Dismiss
+            </button>
+          </div>
+        )}
+        {/* ACTIVE FILTER NOTICE */}
+        {!isAllInterfaces && (
+          <div
+            style={{
+              marginTop: "16px",
+              padding: "12px 16px",
+              borderRadius: "8px",
+              background: selectedInterface === "wlan0" ? "#ecfdf5" : "#f1f5f9",
+              border: selectedInterface === "wlan0" ? "1.5px solid #10b981" : "1.5px solid #64748b",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              flexWrap: "wrap",
+              gap: "12px",
+            }}
+          >
+            <div style={{ fontSize: "13px", color: selectedInterface === "wlan0" ? "#065f46" : "#1e293b", display: "flex", alignItems: "center", gap: "8px" }}>
+              <span>ℹ️</span>
+              <span>
+                Displaying <strong>{displayedInterfaceDevices.length}</strong> device(s) on <strong>{selectedInterface === "wlan0" ? "Wi-Fi (wlan0)" : "Wired LAN (eth0)"}</strong>. Devices on other interfaces ({devices.length - displayedInterfaceDevices.length}) are hidden by this filter.
+              </span>
+            </div>
+            <button
+              type="button"
+              className="secondary-button small"
+              onClick={() => setSelectedInterface("all")}
+              style={{ fontWeight: "700", background: "#ffffff", borderColor: "#cbd5e1" }}
+            >
+              🌐 Show All {devices.length} Devices
             </button>
           </div>
         )}

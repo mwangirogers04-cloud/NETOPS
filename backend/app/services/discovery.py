@@ -704,19 +704,24 @@ def discover_devices(network: str, interface: str | None = None):
         neighbor["medium"] = "wireless" if is_wireless_interface(iface) else "wired"
         discovered_by_mac[mac_address] = neighbor
 
-    # Ensure the local interface IP/MAC on specific_iface is present when scanning a live interface
-    if specific_iface and local_ip and local_mac and os.path.exists(f"/sys/class/net/{specific_iface}"):
-        norm_local_mac = local_mac.upper()
-        if norm_local_mac not in discovered_by_mac:
-            discovered_by_mac[norm_local_mac] = {
-                "ip_address": local_ip,
-                "mac_address": norm_local_mac,
-                "interface": specific_iface,
-                "medium": "wireless" if is_wireless_interface(specific_iface) else "wired",
-                "hostname": socket.gethostname(),
-                "vendor": "Local Machine",
-                "device_type": "computer",
-            }
+    # Ensure the local host interface IP/MAC is present when scanning
+    host_ifaces = [specific_iface] if specific_iface else ["eth0", "wlan0"]
+    for h_iface in host_ifaces:
+        if h_iface and os.path.exists(f"/sys/class/net/{h_iface}"):
+            h_ip = get_local_ip(h_iface)
+            h_mac = get_local_mac(h_iface)
+            if h_ip and h_mac:
+                norm_h_mac = h_mac.upper()
+                if norm_h_mac not in discovered_by_mac:
+                    discovered_by_mac[norm_h_mac] = {
+                        "ip_address": h_ip,
+                        "mac_address": norm_h_mac,
+                        "interface": h_iface,
+                        "medium": "wireless" if is_wireless_interface(h_iface) else "wired",
+                        "hostname": socket.gethostname(),
+                        "vendor": "Local Machine",
+                        "device_type": "computer",
+                    }
 
     return list(discovered_by_mac.values())
 
@@ -757,18 +762,27 @@ def save_discovered_devices(
     # ---------------------------------------------------------
 
     for existing_device in existing_devices:
-        if (
-            scanned_interface
-            and existing_device.network_interface
-            and existing_device.network_interface != scanned_interface
-        ):
-            continue
+        # If performing a single-interface scan (e.g. wlan0 or eth0), NEVER mark devices on other interfaces offline
+        if scanned_interface and scanned_interface != "all":
+            if (existing_device.network_interface or "").lower() != scanned_interface.lower():
+                continue
 
         dev_mac = (
             existing_device.mac_address.replace(":", "").replace("-", "").upper()
             if existing_device.mac_address
             else ""
         )
+
+        # Never mark local machine interfaces offline
+        local_host_macs = {
+            (get_local_mac("eth0") or "").replace(":", "").replace("-", "").upper(),
+            (get_local_mac("wlan0") or "").replace(":", "").replace("-", "").upper(),
+        }
+        if dev_mac in local_host_macs:
+            if existing_device.status != "online":
+                existing_device.status = "online"
+            continue
+
         if (
             existing_device.status == "online"
             and dev_mac not in discovered_macs
@@ -790,17 +804,22 @@ def save_discovered_devices(
                 except Exception:
                     pass
                 if not is_still_reachable:
-                    target_iface = existing_device.network_interface or (scanned_interface if scanned_interface and scanned_interface != "all" else get_default_interface())
-                    try:
-                        res = subprocess.run(
-                            ["arping", "-c", "1", "-w", "1", "-i", target_iface, existing_device.ip_address],
-                            capture_output=True,
-                            timeout=1.5,
-                        )
-                        if res.returncode == 0:
-                            is_still_reachable = True
-                    except Exception:
-                        pass
+                    target_ifaces = [existing_device.network_interface] if (existing_device.network_interface and existing_device.network_interface != "all") else ["eth0", "wlan0"]
+                    for t_if in target_ifaces:
+                        if not t_if or not os.path.exists(f"/sys/class/net/{t_if}"):
+                            continue
+                        try:
+                            res = subprocess.run(
+                                ["arping", "-c", "1", "-w", "1", "-i", t_if, existing_device.ip_address],
+                                capture_output=True,
+                                timeout=1.5,
+                            )
+                            if res.returncode == 0:
+                                is_still_reachable = True
+                                existing_device.network_interface = t_if
+                                break
+                        except Exception:
+                            pass
 
             if not is_still_reachable and existing_device.status == "online":
                 existing_device.status = "offline"
