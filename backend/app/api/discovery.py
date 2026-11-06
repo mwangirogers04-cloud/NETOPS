@@ -67,7 +67,7 @@ def run_discovery_scan(
     as infrastructure devices.
     """
     # Physical scan devices are isolated to the active user who initiated the scan
-    owner_id = current_user.id if current_user else 1
+    owner_id = getattr(current_user, "id", 1)
 
     try:
         clean_iface = (
@@ -158,6 +158,8 @@ def run_discovery_scan(
         ) from exc
 
     except Exception as exc:
+        import logging
+        logging.getLogger("discovery").exception("Discovery scan internal error: %s", exc)
         raise HTTPException(
             status_code=500,
             detail="Discovery scan failed due to an internal error.",

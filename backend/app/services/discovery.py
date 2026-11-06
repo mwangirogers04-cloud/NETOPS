@@ -1,5 +1,7 @@
+from concurrent.futures import ThreadPoolExecutor
 import ipaddress
 import os
+import shutil
 import socket
 import subprocess
 import xml.etree.ElementTree as ET
@@ -36,11 +38,23 @@ def is_valid_ip_address(ip_address: str | None) -> bool:
 DISCOVERY_INTERFACE = "eth0"
 
 
+def find_binary(name: str) -> str:
+    found = shutil.which(name)
+    if found:
+        return found
+    for p in ("/usr/sbin", "/sbin", "/usr/bin", "/bin", "/usr/local/bin", "/usr/local/sbin"):
+        full = os.path.join(p, name)
+        if os.path.isfile(full) and os.access(full, os.X_OK):
+            return full
+    return name
+
+
 def get_default_interface() -> str:
     """Find the active physical network interface for the default route or local IP."""
+    ip_cmd = find_binary("ip")
     try:
         res = subprocess.run(
-            ["ip", "-4", "route", "get", "8.8.8.8"],
+            [ip_cmd, "-4", "route", "get", "8.8.8.8"],
             capture_output=True,
             text=True,
             check=False,
@@ -55,7 +69,7 @@ def get_default_interface() -> str:
 
     try:
         res = subprocess.run(
-            ["ip", "-4", "route", "show", "default"],
+            [ip_cmd, "-4", "route", "show", "default"],
             capture_output=True,
             text=True,
             check=False,
@@ -118,10 +132,11 @@ def get_wireless_ssid(interface: str) -> str | None:
 
 
 def get_local_ip(interface: str | None = None):
+    ip_cmd = find_binary("ip")
     if interface and interface != "all":
         try:
             res = subprocess.run(
-                ["ip", "-4", "-o", "addr", "show", "dev", interface, "scope", "global"],
+                [ip_cmd, "-4", "-o", "addr", "show", "dev", interface, "scope", "global"],
                 capture_output=True,
                 text=True,
                 check=False,
@@ -148,9 +163,22 @@ def get_local_ip(interface: str | None = None):
 def get_local_mac(interface: str | None = None) -> str | None:
     target_interface = interface or get_default_interface()
 
+    # Fast direct read from sysfs if available
+    if target_interface:
+        sysfs_path = f"/sys/class/net/{target_interface}/address"
+        if os.path.exists(sysfs_path):
+            try:
+                with open(sysfs_path, "r") as f:
+                    mac = f.read().strip()
+                if mac and mac != "00:00:00:00:00:00":
+                    return mac.upper()
+            except Exception:
+                pass
+
+    ip_cmd = find_binary("ip")
     try:
         result = subprocess.run(
-            ["ip", "link", "show", target_interface],
+            [ip_cmd, "link", "show", target_interface],
             capture_output=True,
             text=True,
             check=True,
@@ -163,15 +191,24 @@ def get_local_mac(interface: str | None = None) -> str | None:
             if line.startswith("link/ether"):
                 return line.split()[1].upper()
     except Exception as exc:
-        print(f"[DISCOVERY] Note getting MAC on {target_interface}: {exc}")
+        pass
 
     # Fallback to standard physical interfaces
     for alt in ("eth0", "wlan0", "enp0s3", "ens33"):
         if alt == target_interface:
             continue
+        sysfs_path = f"/sys/class/net/{alt}/address"
+        if os.path.exists(sysfs_path):
+            try:
+                with open(sysfs_path, "r") as f:
+                    mac = f.read().strip()
+                if mac and mac != "00:00:00:00:00:00":
+                    return mac.upper()
+            except Exception:
+                pass
         try:
             res = subprocess.run(
-                ["ip", "link", "show", alt],
+                [ip_cmd, "link", "show", alt],
                 capture_output=True,
                 text=True,
                 check=False,
@@ -245,6 +282,39 @@ def awaken_silent_devices(network: str | None = None, interface: str | None = No
             sock_m.close()
     except Exception:
         pass
+
+
+def _fast_subnet_ping_sweep(network: str, interface: str | None = None, max_hosts: int = 254) -> None:
+    """
+    Rapidly ping hosts across the CIDR subnet using concurrent ping probes.
+    Populates the kernel ARP / neighbor table even if nmap or arp-scan
+    are not installed on the system.
+    """
+    if _is_test_env() or not network or "/" not in network:
+        return
+
+    try:
+        net = ipaddress.ip_network(network, strict=False)
+        hosts = list(net.hosts())[:max_hosts]
+    except Exception:
+        return
+
+    def _ping_ip(ip_str: str) -> None:
+        cmd = ["ping", "-c", "1", "-W", "1"]
+        if interface and interface != "all":
+            cmd.extend(["-I", interface])
+        cmd.append(ip_str)
+        try:
+            subprocess.run(cmd, capture_output=True, check=False, timeout=1.5)
+        except Exception:
+            pass
+
+    try:
+        workers = min(32, len(hosts) or 1)
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            list(executor.map(_ping_ip, [str(h) for h in hosts]))
+    except Exception as exc:
+        print(f"[DISCOVERY] Note during ping sweep: {exc}")
 
 
 def _run_arp_scan_on_interface(network: str | None, target_iface: str | None) -> list[dict]:
@@ -419,60 +489,64 @@ def get_neighbor_devices():
     This acts as a fallback when subnet-wide Nmap discovery
     misses a device temporarily.
     """
-
-    result = subprocess.run(
-        [
-            "ip",
-            "neigh",
-            "show",
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-
     devices = []
-
-    for line in result.stdout.splitlines():
-        parts = line.split()
-
-        if not parts:
-            continue
-
-        ip_address = parts[0]
-
-        if "lladdr" not in parts:
-            continue
-
-        lladdr_index = parts.index("lladdr")
-
-        if lladdr_index + 1 >= len(parts):
-            continue
-
-        mac_address = parts[lladdr_index + 1].upper()
-
-        if len(mac_address) != 17:
-            continue
-
-        # Check neighbor state (last token in 'ip neigh show')
-        state = parts[-1].upper() if len(parts) > lladdr_index + 1 else "UNKNOWN"
-        dev_iface = parts[parts.index("dev") + 1] if "dev" in parts and parts.index("dev") + 1 < len(parts) else None
-
-        # Exclude failed or incomplete resolution
-        if state in ("FAILED", "INCOMPLETE"):
-            continue
-
-        devices.append(
-            {
-                "ip_address": ip_address,
-                "mac_address": mac_address,
-                "state": state,
-                "interface": dev_iface,
-                "hostname": None,
-                "vendor": None,
-                "device_type": "unknown",
-            }
+    try:
+        result = subprocess.run(
+            [
+                "ip",
+                "neigh",
+                "show",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
         )
+        if result.returncode != 0:
+            return devices
+
+        for line in result.stdout.splitlines():
+            parts = line.split()
+
+            if not parts:
+                continue
+
+            ip_address = parts[0]
+
+            if "lladdr" not in parts:
+                continue
+
+            lladdr_index = parts.index("lladdr")
+
+            if lladdr_index + 1 >= len(parts):
+                continue
+
+            mac_address = parts[lladdr_index + 1].upper()
+
+            if len(mac_address) != 17:
+                continue
+
+            # Check neighbor state (last token in 'ip neigh show')
+            state = parts[-1].upper() if len(parts) > lladdr_index + 1 else "UNKNOWN"
+            dev_iface = parts[parts.index("dev") + 1] if "dev" in parts and parts.index("dev") + 1 < len(parts) else None
+
+            # Exclude failed or incomplete resolution
+            if state in ("FAILED", "INCOMPLETE"):
+                continue
+
+            devices.append(
+                {
+                    "ip_address": ip_address,
+                    "mac_address": mac_address,
+                    "state": state,
+                    "interface": dev_iface,
+                    "hostname": None,
+                    "vendor": None,
+                    "device_type": "unknown",
+                }
+            )
+    except Exception as exc:
+        print(f"[DISCOVERY] Error reading neighbor table: {exc}")
 
     return devices
 
@@ -520,95 +594,105 @@ def discover_devices(network: str, interface: str | None = None):
         local_ip = get_local_ip()
         local_mac = get_local_mac()
 
-    command = [
-        "nmap",
-        "-sn",
-        "-PR",
-        "-n",
-        "--max-retries",
-        "1",
-        "--min-rate",
-        "300",
-    ]
-    if specific_iface and os.path.exists(f"/sys/class/net/{specific_iface}"):
-        command.extend(["--privileged", "-e", specific_iface])
-    command.extend([
-        network,
-        "-oX",
-        "-",
-    ])
-
-    result = subprocess.run(
-        command,
-        capture_output=True,
-        text=True,
-        check=True,
-        timeout=60,
-    )
-
-    root = ET.fromstring(result.stdout)
-
     discovered_by_mac = {}
 
     # ---------------------------------------------------------
-    # Process Nmap results
+    # Process Nmap results (if nmap is available)
     # ---------------------------------------------------------
+    nmap_bin = shutil.which("nmap")
+    if nmap_bin:
+        command = [
+            nmap_bin,
+            "-sn",
+            "-PR",
+            "-n",
+            "--max-retries",
+            "1",
+            "--min-rate",
+            "300",
+        ]
+        if specific_iface and os.path.exists(f"/sys/class/net/{specific_iface}"):
+            command.extend(["--privileged", "-e", specific_iface])
+        command.extend([
+            network,
+            "-oX",
+            "-",
+        ])
 
-    for host in root.findall("host"):
-        status = host.find("status")
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=30,
+            )
 
-        if status is None or status.get("state") != "up":
-            continue
+            if result.returncode == 0 and result.stdout:
+                root = ET.fromstring(result.stdout)
+                for host in root.findall("host"):
+                    status = host.find("status")
 
-        ip_address = None
-        mac_address = None
-        vendor = None
-        hostname = None
+                    if status is None or status.get("state") != "up":
+                        continue
 
-        for address in host.findall("address"):
-            addr_type = address.get("addrtype")
+                    ip_address = None
+                    mac_address = None
+                    vendor = None
+                    hostname = None
 
-            if addr_type == "ipv4":
-                ip_address = address.get("addr")
+                    for address in host.findall("address"):
+                        addr_type = address.get("addrtype")
 
-            elif addr_type == "mac":
-                mac_address = address.get("addr")
-                vendor = address.get("vendor")
+                        if addr_type == "ipv4":
+                            ip_address = address.get("addr")
 
-        hostnames = host.find("hostnames")
+                        elif addr_type == "mac":
+                            mac_address = address.get("addr")
+                            vendor = address.get("vendor")
 
-        if hostnames is not None:
-            hostname_entry = hostnames.find("hostname")
+                    hostnames = host.find("hostnames")
 
-            if hostname_entry is not None:
-                hostname = hostname_entry.get("name")
+                    if hostnames is not None:
+                        hostname_entry = hostnames.find("hostname")
 
-        if ip_address == local_ip and not mac_address:
-            mac_address = local_mac
-            vendor = "Local Machine"
+                        if hostname_entry is not None:
+                            hostname = hostname_entry.get("name")
 
-        if not mac_address:
-            continue
+                    if ip_address == local_ip and not mac_address:
+                        mac_address = local_mac
+                        vendor = "Local Machine"
 
-        mac_address = mac_address.upper()
+                    if not mac_address:
+                        continue
 
-        discovered_by_mac[mac_address] = {
-            "ip_address": ip_address,
-            "mac_address": mac_address,
-            "interface": specific_iface,
-            "medium": (
-                "wireless"
-                if specific_iface and is_wireless_interface(specific_iface)
-                else ("wired" if specific_iface else None)
-            ),
-            "hostname": hostname,
-            "vendor": vendor,
-            "device_type": classify_device(
-                hostname=hostname,
-                vendor=vendor,
-                mac_address=mac_address,
-            ),
-        }
+                    mac_address = mac_address.upper()
+
+                    discovered_by_mac[mac_address] = {
+                        "ip_address": ip_address,
+                        "mac_address": mac_address,
+                        "interface": specific_iface,
+                        "medium": (
+                            "wireless"
+                            if specific_iface and is_wireless_interface(specific_iface)
+                            else ("wired" if specific_iface else None)
+                        ),
+                        "hostname": hostname,
+                        "vendor": vendor,
+                        "device_type": classify_device(
+                            hostname=hostname,
+                            vendor=vendor,
+                            mac_address=mac_address,
+                        ),
+                    }
+        except subprocess.TimeoutExpired:
+            raise
+        except Exception as exc:
+            print(f"[DISCOVERY] Note executing Nmap: {exc}")
+
+    # Fallback ping sweep if nmap was missing or returned no devices
+    if not discovered_by_mac:
+        _fast_subnet_ping_sweep(network, specific_iface)
 
     # ---------------------------------------------------------
     # Process Layer 2 ARP discovery (arp-scan)
