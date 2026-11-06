@@ -625,6 +625,7 @@ def report_job_status(
         progress_percent=payload.progress_percent,
         log_output=payload.log_output,
         error_message=payload.error_message,
+        installed_updates=payload.installed_updates,
     )
     if not job:
         raise HTTPException(status_code=404, detail="Patch job not found")

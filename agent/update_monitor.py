@@ -217,7 +217,7 @@ def collect_update_status():
     }
 
 
-def report_job_status(job_id, status, progress_percent=None, log_output=None, error_message=None, server_url=None):
+def report_job_status(job_id, status, progress_percent=None, log_output=None, error_message=None, installed_updates=None, server_url=None):
     """Report execution progress back to NETOPS job queue."""
     base_url = (server_url or get_server_url()).rstrip("/")
     if base_url.endswith("/endpoint-updates"):
@@ -230,6 +230,7 @@ def report_job_status(job_id, status, progress_percent=None, log_output=None, er
         "progress_percent": progress_percent,
         "log_output": log_output,
         "error_message": error_message,
+        "installed_updates": installed_updates,
     }
     req = urllib.request.Request(
         status_url,

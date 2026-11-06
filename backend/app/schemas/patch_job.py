@@ -1,5 +1,6 @@
+import json
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 
 class CreatePatchJobRequest(BaseModel):
@@ -51,6 +52,7 @@ class UpdateJobStatusRequest(BaseModel):
     progress_percent: int | None = None
     log_output: str | None = None
     error_message: str | None = None
+    installed_updates: list[dict] | str | None = None
 
 
 class PatchJobResponse(BaseModel):
@@ -69,9 +71,20 @@ class PatchJobResponse(BaseModel):
     initiated_by: str
     log_output: str | None = None
     error_message: str | None = None
+    installed_updates: list[dict] | None = None
     scheduled_at: datetime | None = None
     created_at: datetime
     started_at: datetime | None = None
     completed_at: datetime | None = None
     is_local: bool = False
     working_hours_info: dict | None = None
+
+    @field_validator("installed_updates", mode="before")
+    @classmethod
+    def parse_installed_updates(cls, v):
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except Exception:
+                return None
+        return v

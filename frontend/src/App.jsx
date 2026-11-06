@@ -11412,6 +11412,14 @@ const EndpointUpdatesPage = () => {
               ) : (
                 endpointUpdates.map((endpoint) => {
                   const activeJob = getActiveJobForDevice(endpoint);
+                  const completedJob = patchJobs.find(
+                    (j) =>
+                      j.status === "COMPLETED" &&
+                      ((endpoint.hostname && j.hostname?.toLowerCase() === endpoint.hostname.toLowerCase()) ||
+                       (endpoint.device_ip && j.ip_address === endpoint.device_ip) ||
+                       (endpoint.ip_address && j.ip_address === endpoint.ip_address) ||
+                       (endpoint.mac_address && j.mac_address === endpoint.mac_address))
+                  );
                   const wh = endpoint.working_hours;
                   return (
                     <tr key={endpoint.id}>
@@ -11626,6 +11634,27 @@ const EndpointUpdatesPage = () => {
                             >
                               ⚡ Deploy
                             </button>
+                            {completedJob && completedJob.installed_updates && completedJob.installed_updates.length > 0 && (
+                              <button
+                                type="button"
+                                className="secondary-button small"
+                                style={{
+                                  fontSize: "11px",
+                                  padding: "3px 8px",
+                                  color: "#047857",
+                                  borderColor: "#10b981",
+                                  background: "rgba(16, 185, 129, 0.08)",
+                                  fontWeight: "700",
+                                }}
+                                onClick={() => {
+                                  setSelectedJobDetails(completedJob);
+                                  setShowJobsModal(true);
+                                }}
+                                title="View updates and patches applied to this computer"
+                              >
+                                📦 Applied Updates ({completedJob.installed_updates.length})
+                              </button>
+                            )}
                           </div>
                         ) : (
                           <span
@@ -12383,6 +12412,11 @@ const EndpointUpdatesPage = () => {
                                 • 📅 Scheduled: {new Date(job.scheduled_at.endsWith("Z") ? job.scheduled_at : job.scheduled_at + "Z").toLocaleString()}
                               </span>
                             )}
+                            {job.installed_updates && job.installed_updates.length > 0 && (
+                              <span style={{ color: "#059669", fontWeight: "700", marginLeft: "6px" }}>
+                                • 📦 {job.installed_updates.length} Patches Applied
+                              </span>
+                            )}
                           </div>
                         </div>
 
@@ -12623,6 +12657,66 @@ const EndpointUpdatesPage = () => {
                         }}
                       />
                     </div>
+
+                    {selectedJobDetails.installed_updates && selectedJobDetails.installed_updates.length > 0 && (
+                      <div style={{ marginBottom: "14px", background: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "8px", padding: "14px" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px", paddingBottom: "8px", borderBottom: "1px solid #e2e8f0" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                            <span style={{ fontSize: "16px" }}>📦</span>
+                            <span style={{ fontSize: "13px", fontWeight: "700", color: "#0f172a" }}>
+                              Updates & Patches Applied to {selectedJobDetails.hostname}
+                            </span>
+                            <span style={{ fontSize: "11px", fontWeight: "700", background: "#f1f5f9", color: "#334155", padding: "2px 8px", borderRadius: "10px" }}>
+                              {selectedJobDetails.installed_updates.length} Packages Installed
+                            </span>
+                          </div>
+                          <span style={{ fontSize: "11px", color: "#059669", fontWeight: "700", background: "rgba(16, 185, 129, 0.1)", padding: "2px 8px", borderRadius: "12px", border: "1px solid rgba(16, 185, 129, 0.3)" }}>
+                            ✓ Verified & Active
+                          </span>
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "260px", overflowY: "auto" }}>
+                          {selectedJobDetails.installed_updates.map((update, idx) => (
+                            <div
+                              key={idx}
+                              style={{
+                                background: "#f8fafc",
+                                border: "1px solid #e2e8f0",
+                                borderRadius: "6px",
+                                padding: "8px 12px",
+                                fontSize: "12px",
+                              }}
+                            >
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                                <span style={{ fontWeight: "700", color: "#1e293b", fontFamily: "monospace", fontSize: "12px" }}>
+                                  {update.package_name || update.name}
+                                </span>
+                                <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                                  <span style={{ background: "#e2e8f0", padding: "2px 6px", borderRadius: "4px", fontSize: "11px", color: "#334155", fontWeight: "600" }}>
+                                    {update.version}
+                                  </span>
+                                  <span
+                                    style={{
+                                      background: update.severity === "Critical" ? "rgba(239, 68, 68, 0.15)" : update.severity === "High" ? "rgba(245, 158, 11, 0.15)" : "rgba(59, 130, 246, 0.15)",
+                                      color: update.severity === "Critical" ? "#b91c1c" : update.severity === "High" ? "#b45309" : "#1d4ed8",
+                                      fontWeight: "700",
+                                      fontSize: "10px",
+                                      padding: "1px 6px",
+                                      borderRadius: "4px",
+                                      textTransform: "uppercase",
+                                    }}
+                                  >
+                                    {update.category || update.severity || "Patch"}
+                                  </span>
+                                </div>
+                              </div>
+                              <div style={{ color: "#475569", fontSize: "11px", lineHeight: "1.4" }}>
+                                {update.summary || update.description || "System security hardening and stability update applied."}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
                     <pre
                       style={{

@@ -140,6 +140,11 @@ class PatchJob(Base):
         nullable=True,
     )
 
+    installed_updates: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
     scheduled_at: Mapped[datetime | None] = mapped_column(
         DateTime,
         nullable=True,
