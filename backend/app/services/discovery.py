@@ -1200,42 +1200,30 @@ def save_discovered_devices(
                         "normal"
                     )
 
-            # Quarantined, isolated, or Type/VLAN mismatched devices must read offline until authorized
-            type_vlan_matched = is_type_and_vlan_matching(
-                existing_device.device_type,
-                existing_device.vlan_id,
-            )
-            is_quarantined_or_isolated = (
-                existing_device.enforcement_status in ("quarantined", "isolated")
-                or not getattr(existing_device, "internet_access_authorized", True)
-                or not type_vlan_matched
-                or getattr(existing_device, "vlan_id", None) == 90
-            )
-            if is_quarantined_or_isolated:
-                existing_device.status = "offline"
-            else:
-                was_offline = (existing_device.status != "online")
-                existing_device.status = "online"
-                if was_offline:
-                    last_ev = db.scalar(
-                        select(Event)
-                        .where(
-                            Event.device_id == existing_device.id,
-                            Event.event_type.in_(["device_online", "device_offline"]),
-                        )
-                        .order_by(Event.id.desc())
-                        .limit(1)
+            # A physically discovered device is online on the local network.
+            # (Internet authorization and quarantine policy are maintained via enforcement_status)
+            was_offline = (existing_device.status != "online")
+            existing_device.status = "online"
+            if was_offline:
+                last_ev = db.scalar(
+                    select(Event)
+                    .where(
+                        Event.device_id == existing_device.id,
+                        Event.event_type.in_(["device_online", "device_offline"]),
                     )
-                    if not last_ev or last_ev.event_type != "device_online":
-                        create_event(
-                            db,
-                            "device_online",
-                            (
-                                f"Device {existing_device.hostname or existing_device.ip_address} "
-                                f"({existing_device.mac_address}) reconnected and is back online on the LAN."
-                            ),
-                            existing_device.id,
-                        )
+                    .order_by(Event.id.desc())
+                    .limit(1)
+                )
+                if not last_ev or last_ev.event_type != "device_online":
+                    create_event(
+                        db,
+                        "device_online",
+                        (
+                            f"Device {existing_device.hostname or existing_device.ip_address} "
+                            f"({existing_device.mac_address}) reconnected and is back online on the LAN."
+                        ),
+                        existing_device.id,
+                    )
             saved_devices.append(existing_device)
 
             if ip_changed:
@@ -1278,7 +1266,7 @@ def save_discovered_devices(
                 network_interface=discovered.get("interface") or (scanned_interface if scanned_interface and scanned_interface != "all" else get_default_interface()),
                 owner_id=owner_id,
                 classification_status="normal",
-                status="offline",
+                status="online",
                 approval_status="pending",
                 ip_assignment="dhcp",
                 vlan_id=90,

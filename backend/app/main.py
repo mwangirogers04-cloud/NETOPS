@@ -53,19 +53,6 @@ from .services.patch_remediation_service import (
 
 Base.metadata.create_all(bind=engine)
 
-# Ensure newly introduced audit columns exist in database
-try:
-    with engine.begin() as conn:
-        conn.execute(text("ALTER TABLE events ADD COLUMN IF NOT EXISTS actor VARCHAR(100);"))
-        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS created_by VARCHAR(100);"))
-        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;"))
-        conn.execute(text("ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS current_page VARCHAR(100);"))
-        conn.execute(text("ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS location VARCHAR(150);"))
-        conn.execute(text("ALTER TABLE devices ADD COLUMN IF NOT EXISTS owner_id INTEGER;"))
-        conn.execute(text("ALTER TABLE devices ADD COLUMN IF NOT EXISTS network_name VARCHAR(100);"))
-except Exception:
-    pass
-
 
 # ---------------------------------------------------------
 # FASTAPI APPLICATION

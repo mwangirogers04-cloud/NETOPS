@@ -208,27 +208,19 @@ def get_devices(
         current_user.role in ("admin", "super_admin")
         or current_user.username.lower() in ("developer", "admin")
     )
-    if scope == "all" and is_admin:
-        # Super admin / Admin explicitly requesting platform-wide device inventory
-        pass
-    elif scope and scope.startswith("user_") and is_admin:
-        try:
-            uid = int(scope.replace("user_", ""))
-            query = query.where(Device.owner_id == uid)
-        except ValueError:
-            query = query.where(Device.owner_id == current_user.id)
+    if is_admin:
+        if scope and scope.startswith("user_"):
+            try:
+                uid = int(scope.replace("user_", ""))
+                query = query.where(Device.owner_id == uid)
+            except ValueError:
+                pass
+        # Super admin / Admin / Developer sees all network infrastructure devices
     else:
-        # Strict per-user network isolation:
-        # Every user (standard user, admin, developer) starts with a clean slate
-        # and only sees devices discovered/owned under their specific account.
+        # Strict per-user network isolation for regular tenant accounts
         query = query.where(Device.owner_id == current_user.id)
 
     devices = db.scalars(query).all()
-
-    for device in devices:
-        # Quarantined or isolated devices must read offline until authorized for internet
-        if device.enforcement_status in ("quarantined", "isolated") or not getattr(device, "internet_access_authorized", True):
-            device.status = "offline"
 
     attach_update_information(devices, db)
 
@@ -861,10 +853,10 @@ def automate_all_devices_vlan(
             device.enforcement_status = "quarantined"
             enforce_device_access(device, db, force=True)
         else:
-            if device.approval_status == "approved":
-                device.internet_access_authorized = True
-                device.enforcement_status = "allowed"
-                enforce_device_access(device, db, force=True)
+            device.approval_status = "approved"
+            device.internet_access_authorized = True
+            device.enforcement_status = "allowed"
+            enforce_device_access(device, db, force=True)
         add_access_information(device)
         updated.append({
             "id": device.id,
@@ -911,14 +903,14 @@ def automate_device_vlan(
             force=True,
         )
     else:
-        if device.approval_status == "approved":
-            device.internet_access_authorized = True
-            device.enforcement_status = "allowed"
-            enforce_device_access(
-                device,
-                db,
-                force=True,
-            )
+        device.approval_status = "approved"
+        device.internet_access_authorized = True
+        device.enforcement_status = "allowed"
+        enforce_device_access(
+            device,
+            db,
+            force=True,
+        )
 
     db.commit()
     db.refresh(device)
