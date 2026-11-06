@@ -34,7 +34,7 @@ from ..services.access_policy import (
 from ..services.network_enforcement import enforce_device_access
 from ..services.vlan_automation import automate_vlan_assignment
 from ..services.event_service import create_event
-from ..services.auth_service import get_optional_current_user, require_super_admin
+from ..services.auth_service import get_optional_current_user, require_admin, require_super_admin
 from ..services.firewall.manager import get_active_firewall_driver
 from ..services.l2_quarantine import quarantine_device_l2
 from ..services.sophos_enforcement import is_sophos_configured, sophos_block_device
@@ -853,8 +853,49 @@ def enforce_device(
 
 
 # ------------------------------------------------------------
-# AUTOMATIC VLAN ASSIGNMENT
+# AUTOMATIC VLAN ASSIGNMENT (SINGLE & BULK)
 # ------------------------------------------------------------
+
+@router.post(
+    "/automate-all-vlans",
+)
+def automate_all_devices_vlan(
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+):
+    """
+    Automatically detect and assign the optimal VLAN to all registered devices
+    based on their vendor OUI, hostname, and MAC address.
+    """
+    devices = db.scalars(select(Device)).all()
+    updated = []
+    for device in devices:
+        res = automate_vlan_assignment(device, db)
+        if device.vlan_id == 90 or res.get("vlan_id") == 90:
+            device.internet_access_authorized = False
+            device.enforcement_status = "quarantined"
+            enforce_device_access(device, db, force=True)
+        else:
+            if device.approval_status == "approved":
+                device.internet_access_authorized = True
+                device.enforcement_status = "allowed"
+                enforce_device_access(device, db, force=True)
+        add_access_information(device)
+        updated.append({
+            "id": device.id,
+            "hostname": device.hostname,
+            "mac_address": device.mac_address,
+            "vendor": device.vendor,
+            "device_type": device.device_type,
+            "vlan_id": device.vlan_id,
+        })
+    db.commit()
+    return {
+        "status": "completed",
+        "total_processed": len(updated),
+        "devices": updated,
+    }
+
 
 @router.post(
     "/{device_id}/automate-vlan",
@@ -884,6 +925,15 @@ def automate_device_vlan(
             db,
             force=True,
         )
+    else:
+        if device.approval_status == "approved":
+            device.internet_access_authorized = True
+            device.enforcement_status = "allowed"
+            enforce_device_access(
+                device,
+                db,
+                force=True,
+            )
 
     db.commit()
     db.refresh(device)

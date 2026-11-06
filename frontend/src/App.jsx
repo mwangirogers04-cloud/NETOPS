@@ -381,6 +381,9 @@ function App() {
   const [probeCopied, setProbeCopied] = useState(false);
   const [showProbeModal, setShowProbeModal] = useState(false);
 
+  // Auto VLAN Automation
+  const [automatingAllVlans, setAutomatingAllVlans] = useState(false);
+
   const [alertSoundEnabled, setAlertSoundEnabled] = useState(() => {
     try {
       const saved = localStorage.getItem("netops_alert_sound_enabled");
@@ -1669,6 +1672,39 @@ const loadEvents = async () => {
     setActionLoading(null);
   }
 };
+
+  const automateAllVlans = async () => {
+    if (!isAdmin) {
+      alert("Permission Denied: Standard users cannot alter VLAN assignments. Only Administrators can use Auto VLAN.");
+      return;
+    }
+    const confirmed = window.confirm(
+      "Auto-Assign VLANs for all devices?\n\nThis will detect each device's MAC address, vendor (e.g. Dell, Sophos, Tenda, Hikvision), and hardware type to automatically assign the matching VLAN segment (VoIP: 10, Computers: 20, CCTV: 30, Printers: 40, Servers: 50, APs: 60)."
+    );
+    if (!confirmed) return;
+
+    setAutomatingAllVlans(true);
+    try {
+      const response = await fetch(`${API_URL}/devices/automate-all-vlans`, {
+        method: "POST",
+        headers: getAuthHeaders({
+          "Content-Type": "application/json",
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to automate VLANs: HTTP ${response.status}`);
+      }
+      const data = await response.json();
+      await loadDevices();
+      await loadEvents();
+      alert(`Success! Auto-assigned matching VLANs for ${data.total_processed || data.devices?.length || 0} device(s) based on detected MAC addresses and vendors.`);
+    } catch (err) {
+      console.error("Auto VLAN error:", err);
+      alert("Auto VLAN failed: " + err.message);
+    } finally {
+      setAutomatingAllVlans(false);
+    }
+  };
 
   const deleteDevicePermanently = async (device) => {
     if (!isSuperAdmin) {
@@ -3435,47 +3471,81 @@ const DevicesPage = () => {
                     </td>
 
                     <td>
-                      <select
-                        value={device.vlan_id || 90}
-                        disabled={
-                          actionLoading ===
-                          `vlan-${device.id}`
-                        }
-                        onChange={(event) =>
-                          deviceAction(
-                            device.id,
-                            "vlan",
-                            event.target.value
-                          )
-                        }
-                        style={{
-                          padding: "4px 8px",
-                          borderRadius: "6px",
-                          border:
-                            device.vlan_id === 90 || !device.vlan_id
-                              ? "1px solid #ef4444"
-                              : "1px solid #3b82f6",
-                          background:
-                            device.vlan_id === 90 || !device.vlan_id
-                              ? "#450a0a"
-                              : "#f1f5f9",
-                          color:
-                            device.vlan_id === 90 || !device.vlan_id
-                              ? "#fca5a5"
-                              : "#93c5fd",
-                          fontWeight: "600",
-                          cursor: "pointer",
-                        }}
-                        title="Change VLAN: VLAN 90 immediately disconnects internet"
-                      >
-                        <option value="10">VLAN 10 - IP Phones</option>
-                        <option value="20">VLAN 20 - Workstation</option>
-                        <option value="30">VLAN 30 - CCTV</option>
-                        <option value="40">VLAN 40 - Printers</option>
-                        <option value="50">VLAN 50 - Servers</option>
-                        <option value="60">VLAN 60 - Access Points</option>
-                        <option value="90">🚨 VLAN 90 - Quarantine</option>
-                      </select>
+                      <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+                        <select
+                          value={device.vlan_id || 90}
+                          disabled={
+                            actionLoading === `vlan-${device.id}` ||
+                            actionLoading === `automate-vlan-${device.id}`
+                          }
+                          onChange={(event) => {
+                            if (event.target.value === "auto") {
+                              deviceAction(device.id, "automate-vlan");
+                            } else {
+                              deviceAction(
+                                device.id,
+                                "vlan",
+                                event.target.value
+                              );
+                            }
+                          }}
+                          style={{
+                            padding: "4px 8px",
+                            borderRadius: "6px",
+                            border:
+                              device.vlan_id === 90 || !device.vlan_id
+                                ? "1px solid #ef4444"
+                                : "1px solid #3b82f6",
+                            background:
+                              device.vlan_id === 90 || !device.vlan_id
+                                ? "#450a0a"
+                                : "#f1f5f9",
+                            color:
+                              device.vlan_id === 90 || !device.vlan_id
+                                ? "#fca5a5"
+                                : "#93c5fd",
+                            fontWeight: "600",
+                            cursor: "pointer",
+                          }}
+                          title="Change VLAN: Select Auto VLAN to detect by MAC and vendor"
+                        >
+                          <option value="auto">⚡ Auto VLAN (Detect)</option>
+                          <option value="10">VLAN 10 - IP Phones</option>
+                          <option value="20">VLAN 20 - Workstation</option>
+                          <option value="30">VLAN 30 - CCTV</option>
+                          <option value="40">VLAN 40 - Printers</option>
+                          <option value="50">VLAN 50 - Servers</option>
+                          <option value="60">VLAN 60 - Access Points</option>
+                          <option value="90">🚨 VLAN 90 - Quarantine</option>
+                        </select>
+                        <button
+                          type="button"
+                          className="secondary-button small"
+                          title={`Auto-detect VLAN by MAC (${device.mac_address}) & vendor (${device.vendor || "Generic"})`}
+                          disabled={
+                            actionLoading === `automate-vlan-${device.id}` ||
+                            actionLoading === `vlan-${device.id}`
+                          }
+                          onClick={() => deviceAction(device.id, "automate-vlan")}
+                          style={{
+                            padding: "3px 6px",
+                            fontSize: "11px",
+                            fontWeight: "700",
+                            background: "#2563eb",
+                            color: "#ffffff",
+                            borderColor: "#1d4ed8",
+                            borderRadius: "6px",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "3px",
+                            cursor: "pointer",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          <span>{actionLoading === `automate-vlan-${device.id}` ? "⏳" : "⚡"}</span>
+                          {actionLoading === `automate-vlan-${device.id}` ? "Auto..." : "Auto"}
+                        </button>
+                      </div>
                     </td>
 
                     <td>
@@ -4789,34 +4859,63 @@ const LanScannerPage = () => {
 
                       {/* VLAN SEGMENT */}
                       <td>
-                        <select
-                          value={device.vlan_id || 90}
-                          onChange={(e) =>
-                            deviceAction(device.id, "vlan", e.target.value)
-                          }
-                          disabled={actionLoading === `vlan-${device.id}`}
-                          style={{
-                            background: "#ffffff",
-                            color: device.vlan_id === 90 ? "#f87171" : "#38bdf8",
-                            border:
-                              device.vlan_id === 90
-                                ? "1px solid rgba(239, 68, 68, 0.4)"
-                                : "1px solid #cbd5e1",
-                            borderRadius: "5px",
-                            padding: "4px 8px",
-                            fontSize: "12px",
-                            fontWeight: "600",
-                            cursor: "pointer",
-                          }}
-                        >
-                          <option value={10}>VLAN 10 (IP Phones)</option>
-                          <option value={20}>VLAN 20 (Workstations)</option>
-                          <option value={30}>VLAN 30 (CCTV)</option>
-                          <option value={40}>VLAN 40 (Printers)</option>
-                          <option value={50}>VLAN 50 (Servers)</option>
-                          <option value={60}>VLAN 60 (Access Points)</option>
-                          <option value={90}>VLAN 90 (Quarantine)</option>
-                        </select>
+                        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                          <select
+                            value={device.vlan_id || 90}
+                            onChange={(e) => {
+                              if (e.target.value === "auto") {
+                                deviceAction(device.id, "automate-vlan");
+                              } else {
+                                deviceAction(device.id, "vlan", e.target.value);
+                              }
+                            }}
+                            disabled={actionLoading === `vlan-${device.id}` || actionLoading === `automate-vlan-${device.id}`}
+                            style={{
+                              background: "#ffffff",
+                              color: device.vlan_id === 90 ? "#dc2626" : "#2563eb",
+                              border:
+                                device.vlan_id === 90
+                                  ? "1px solid rgba(239, 68, 68, 0.4)"
+                                  : "1px solid #cbd5e1",
+                              borderRadius: "5px",
+                              padding: "4px 8px",
+                              fontSize: "12px",
+                              fontWeight: "600",
+                              cursor: "pointer",
+                            }}
+                            title="Select Auto VLAN or specific VLAN segment"
+                          >
+                            <option value="auto">⚡ Auto VLAN (Detect)</option>
+                            <option value={10}>VLAN 10 (IP Phones)</option>
+                            <option value={20}>VLAN 20 (Workstations)</option>
+                            <option value={30}>VLAN 30 (CCTV)</option>
+                            <option value={40}>VLAN 40 (Printers)</option>
+                            <option value={50}>VLAN 50 (Servers)</option>
+                            <option value={60}>VLAN 60 (Access Points)</option>
+                            <option value={90}>VLAN 90 (Quarantine)</option>
+                          </select>
+                          <button
+                            type="button"
+                            className="secondary-button small"
+                            title={`Auto-detect VLAN by MAC (${device.mac_address}) & vendor (${device.vendor || "Generic"})`}
+                            disabled={actionLoading === `automate-vlan-${device.id}`}
+                            onClick={() => deviceAction(device.id, "automate-vlan")}
+                            style={{
+                              padding: "3px 6px",
+                              fontSize: "11px",
+                              fontWeight: "700",
+                              background: "#2563eb",
+                              color: "#fff",
+                              borderRadius: "5px",
+                              border: "1px solid #1d4ed8",
+                              cursor: "pointer",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            <span>{actionLoading === `automate-vlan-${device.id}` ? "⏳" : "⚡"}</span>
+                            {actionLoading === `automate-vlan-${device.id}` ? "Auto..." : "Auto"}
+                          </button>
+                        </div>
                       </td>
 
                       {/* FIREWALL ACCESS */}
@@ -5063,13 +5162,36 @@ const AccessPage = () => {
 
         </div>
 
-        <button
-          className="secondary-button"
-          onClick={refreshAll}
-          disabled={refreshingAll}
-        >
-          {refreshingAll ? "Refreshing..." : "🔄 Refresh"}
-        </button>
+        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+          <button
+            type="button"
+            className="primary-button"
+            onClick={automateAllVlans}
+            disabled={automatingAllVlans}
+            style={{
+              background: "#2563eb",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+              fontWeight: "700",
+              fontSize: "13px",
+              padding: "8px 14px",
+              boxShadow: "0 2px 6px rgba(37, 99, 235, 0.3)",
+              cursor: automatingAllVlans ? "not-allowed" : "pointer",
+            }}
+            title="Automatically detect MAC address & vendor for all devices and assign the recommended VLAN segment"
+          >
+            <span>{automatingAllVlans ? "⏳" : "⚡"}</span>
+            {automatingAllVlans ? "Auto-Assigning VLANs..." : "Auto VLAN All Devices"}
+          </button>
+          <button
+            className="secondary-button"
+            onClick={refreshAll}
+            disabled={refreshingAll}
+          >
+            {refreshingAll ? "Refreshing..." : "🔄 Refresh"}
+          </button>
+        </div>
 
       </div>
 
@@ -5124,7 +5246,7 @@ const AccessPage = () => {
 
       <div className="panel">
 
-        <div className="panel-header">
+        <div className="panel-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px" }}>
 
           <div>
 
@@ -5133,11 +5255,32 @@ const AccessPage = () => {
             </div>
 
             <div className="panel-subtitle">
-              Approval and Internet enforcement
-              are controlled separately.
+              Approval and Internet enforcement are controlled separately. Auto VLAN detects vendor &amp; MAC to assign optimal network segments.
             </div>
 
           </div>
+
+          <button
+            type="button"
+            className="primary-button small"
+            onClick={automateAllVlans}
+            disabled={automatingAllVlans}
+            style={{
+              background: "#059669",
+              borderColor: "#047857",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+              fontWeight: "700",
+              fontSize: "12px",
+              padding: "6px 12px",
+              cursor: automatingAllVlans ? "not-allowed" : "pointer",
+            }}
+            title="Auto-detect vendor & MAC for all devices to assign correct VLANs"
+          >
+            <span>{automatingAllVlans ? "⏳" : "⚡"}</span>
+            {automatingAllVlans ? "Auto-Assigning..." : "⚡ Auto VLAN (All Devices)"}
+          </button>
 
         </div>
 
@@ -5187,27 +5330,33 @@ const AccessPage = () => {
 
                       <div className="device-primary">
 
-                        {device.device_type ===
-                        "computer"
+                        {device.device_type === "computer"
                           ? "💻"
-                          : device.device_type ===
-                            "cctv"
+                          : device.device_type === "cctv"
                           ? "📹"
-                          : device.device_type ===
-                            "printer"
+                          : device.device_type === "printer"
                           ? "🖨️"
-                          : "⚠️"}
+                          : device.device_type === "ip_phone" || device.device_type === "phone"
+                          ? "📞"
+                          : device.device_type === "server"
+                          ? "🖥️"
+                          : device.device_type === "access_point"
+                          ? "📡"
+                          : "⚠️"}{" "}
 
-                        {" "}
-
-                        {device.hostname ||
-                          "Unknown Device"}
+                        {device.hostname || "Unknown Device"}
 
                       </div>
 
                       <div className="device-secondary">
-                        {device.ip_address}
+                        {device.ip_address || "No IP"} • <code style={{ fontSize: "11px" }}>{device.mac_address}</code>
                       </div>
+
+                      {device.vendor && (
+                        <div style={{ fontSize: "11px", color: "#64748b", marginTop: "2px" }}>
+                          🏢 Vendor: <strong>{device.vendor}</strong>
+                        </div>
+                      )}
 
                     </td>
 
@@ -5224,47 +5373,83 @@ const AccessPage = () => {
 
 
                     <td>
-                      <select
-                        value={device.vlan_id || 90}
-                        disabled={
-                          actionLoading ===
-                          `vlan-${device.id}`
-                        }
-                        onChange={(event) =>
-                          deviceAction(
-                            device.id,
-                            "vlan",
-                            event.target.value
-                          )
-                        }
-                        style={{
-                          padding: "4px 8px",
-                          borderRadius: "6px",
-                          border:
-                            device.vlan_id === 90 || !device.vlan_id
-                              ? "1px solid #ef4444"
-                              : "1px solid #3b82f6",
-                          background:
-                            device.vlan_id === 90 || !device.vlan_id
-                              ? "#450a0a"
-                              : "#f1f5f9",
-                          color:
-                            device.vlan_id === 90 || !device.vlan_id
-                              ? "#fca5a5"
-                              : "#93c5fd",
-                          fontWeight: "600",
-                          cursor: "pointer",
-                        }}
-                        title="Change VLAN: VLAN 90 immediately disconnects internet"
-                      >
-                        <option value="10">VLAN 10</option>
-                        <option value="20">VLAN 20</option>
-                        <option value="30">VLAN 30</option>
-                        <option value="40">VLAN 40</option>
-                        <option value="50">VLAN 50</option>
-                        <option value="60">VLAN 60</option>
-                        <option value="90">🚨 VLAN 90 (Quarantine)</option>
-                      </select>
+                      <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+                        <select
+                          value={device.vlan_id || 90}
+                          disabled={
+                            actionLoading === `vlan-${device.id}` ||
+                            actionLoading === `automate-vlan-${device.id}`
+                          }
+                          onChange={(event) => {
+                            if (event.target.value === "auto") {
+                              deviceAction(device.id, "automate-vlan");
+                            } else {
+                              deviceAction(
+                                device.id,
+                                "vlan",
+                                event.target.value
+                              );
+                            }
+                          }}
+                          style={{
+                            padding: "4px 8px",
+                            borderRadius: "6px",
+                            border:
+                              device.vlan_id === 90 || !device.vlan_id
+                                ? "1px solid #ef4444"
+                                : "1px solid #3b82f6",
+                            background:
+                              device.vlan_id === 90 || !device.vlan_id
+                                ? "#450a0a"
+                                : "#f1f5f9",
+                            color:
+                              device.vlan_id === 90 || !device.vlan_id
+                                ? "#fca5a5"
+                                : "#1e40af",
+                            fontWeight: "600",
+                            cursor: "pointer",
+                            fontSize: "12px",
+                          }}
+                          title="Change VLAN: Select Auto VLAN to detect by MAC and vendor"
+                        >
+                          <option value="auto">⚡ Auto VLAN (by Vendor/MAC)</option>
+                          <option value="10">VLAN 10 (VoIP / Phone)</option>
+                          <option value="20">VLAN 20 (Workstation / PC)</option>
+                          <option value="30">VLAN 30 (CCTV Camera)</option>
+                          <option value="40">VLAN 40 (Printer)</option>
+                          <option value="50">VLAN 50 (Server / Infra)</option>
+                          <option value="60">VLAN 60 (Access Point)</option>
+                          <option value="90">🚨 VLAN 90 (Quarantine)</option>
+                        </select>
+
+                        <button
+                          type="button"
+                          className="secondary-button small"
+                          title={`Auto-assign VLAN based on MAC (${device.mac_address}) & vendor (${device.vendor || "Generic"})`}
+                          disabled={
+                            actionLoading === `automate-vlan-${device.id}` ||
+                            actionLoading === `vlan-${device.id}`
+                          }
+                          onClick={() => deviceAction(device.id, "automate-vlan")}
+                          style={{
+                            padding: "3px 8px",
+                            fontSize: "11px",
+                            fontWeight: "700",
+                            background: "#2563eb",
+                            color: "#ffffff",
+                            borderColor: "#1d4ed8",
+                            borderRadius: "6px",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "3px",
+                            cursor: "pointer",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          <span>{actionLoading === `automate-vlan-${device.id}` ? "⏳" : "⚡"}</span>
+                          {actionLoading === `automate-vlan-${device.id}` ? "Assigning..." : "Auto VLAN"}
+                        </button>
+                      </div>
                     </td>
 
 
@@ -5662,16 +5847,20 @@ const AccessPage = () => {
                           <select
                             value={device.vlan_id || 90}
                             disabled={
-                              actionLoading ===
-                              `vlan-${device.id}`
+                              actionLoading === `vlan-${device.id}` ||
+                              actionLoading === `automate-vlan-${device.id}`
                             }
-                            onChange={(event) =>
-                              deviceAction(
-                                device.id,
-                                "vlan",
-                                event.target.value
-                              )
-                            }
+                            onChange={(event) => {
+                              if (event.target.value === "auto") {
+                                deviceAction(device.id, "automate-vlan");
+                              } else {
+                                deviceAction(
+                                  device.id,
+                                  "vlan",
+                                  event.target.value
+                                );
+                              }
+                            }}
                             style={{
                               padding: "4px 8px",
                               borderRadius: "6px",
@@ -5692,6 +5881,7 @@ const AccessPage = () => {
                             }}
                             title="Change VLAN. Selecting VLAN 90 immediately disconnects internet access."
                           >
+                            <option value="auto">⚡ Auto VLAN (Detect by Vendor/MAC)</option>
                             <option value="10">VLAN 10 (IP Phones)</option>
                             <option value="20">VLAN 20 (Computers)</option>
                             <option value="30">VLAN 30 (CCTV)</option>

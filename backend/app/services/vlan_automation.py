@@ -1,6 +1,7 @@
 from sqlalchemy.orm import Session
 
 from ..models.device import Device
+from .device_classifier import classify_device
 from .event_service import create_event
 from .vlan_policy import get_vlan_for_device_type
 from .switch_mapping import identify_switch_port
@@ -11,29 +12,41 @@ def automate_vlan_assignment(
     db: Session,
 ) -> dict:
     """
-    Automate VLAN assignment for a network device.
+    Automate VLAN assignment for a network device based on detected
+    MAC address, vendor OUI, and hostname.
 
     Current mode:
         simulation
 
     Workflow:
-        1. Determine the VLAN from the central VLAN policy.
-        2. Identify the switch connected to the device.
-        3. Identify the switch port.
-        4. Simulate VLAN configuration.
-        5. Simulate VLAN verification.
-        6. Store switch/port information on the device.
-        7. Record audit events.
-        8. Return the complete automation result.
-
-    Future production mode:
-        Replace the simulation section with real Cisco
-        configuration using SSH/Netmiko/API.
+        1. Classify device type using vendor, MAC, and hostname.
+        2. Determine the VLAN from the central VLAN policy.
+        3. Identify the switch connected to the device.
+        4. Identify the switch port.
+        5. Simulate VLAN configuration.
+        6. Simulate VLAN verification.
+        7. Store switch/port information on the device.
+        8. Record audit events.
+        9. Return the complete automation result.
     """
 
     # =========================================================
-    # 1. Determine VLAN
+    # 1. Determine Device Type and VLAN from Vendor / MAC
     # =========================================================
+
+    valid_types = {"ip_phone", "phone", "voip", "computer", "cctv", "printer", "server", "access_point"}
+    if not device.device_type or device.device_type == "unknown" or device.device_type not in valid_types:
+        classified_type = classify_device(
+            hostname=device.hostname,
+            vendor=device.vendor,
+            mac_address=device.mac_address,
+        )
+
+        if classified_type != "unknown":
+            device.device_type = classified_type
+        elif not device.device_type or device.device_type == "unknown":
+            # If device has an active IP on the LAN/WLAN, default to standard workstation (VLAN 20)
+            device.device_type = "computer"
 
     vlan_id = get_vlan_for_device_type(
         device.device_type
@@ -45,11 +58,10 @@ def automate_vlan_assignment(
         db,
         "vlan_automation",
         (
-            f"VLAN automation started for device "
-            f"{device.ip_address} "
-            f"({device.mac_address}). "
-            f"Device type={device.device_type or 'unknown'}, "
-            f"target VLAN={vlan_id}"
+            f"VLAN automation auto-assigned VLAN {vlan_id} for device "
+            f"{device.hostname or device.ip_address or device.mac_address} "
+            f"({device.mac_address}) based on vendor '{device.vendor or 'Generic'}' "
+            f"and device type '{device.device_type}'."
         ),
         device.id,
     )

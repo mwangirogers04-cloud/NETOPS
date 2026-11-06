@@ -109,8 +109,19 @@ def classify_device(
         "aerohive",
         "ruckus",
         "aruba ap",
+        "aruba",
         "meraki mr",
+        "meraki",
         "tp-link omada",
+        "tp-link",
+        "tplink",
+        "tenda",
+        "routerboard",
+        "mikrotik",
+        "netgear",
+        "d-link",
+        "linksys",
+        "cisco ap",
         "eap",
         "wap",
         "wireless ap",
@@ -140,6 +151,14 @@ def classify_device(
         "domain controller",
         "datacenter",
         "nas",
+        "sophos",
+        "fortinet",
+        "palo alto",
+        "pfsense",
+        "opnsense",
+        "firewall",
+        "gateway",
+        "cisco switch",
     ]
 
     if any(keyword in text for keyword in server_keywords):
@@ -218,6 +237,14 @@ def classify_device(
         "imac",
         "intel",
         "amd",
+        "thinkpad",
+        "workstation",
+        "latitude",
+        "optiplex",
+        "inspiron",
+        "surface",
+        "toshiba",
+        "sony",
     ]
 
     if any(keyword in text for keyword in computer_keywords):
@@ -242,6 +269,19 @@ def classify_device(
 
     if mac_prefix in known_mac_prefixes:
         return known_mac_prefixes[mac_prefix]
+
+    # ---------------------------------------------------------
+    # Smartphone Randomized / Private Wi-Fi MAC Detection
+    # In IEEE 802, bit 1 of octet 0 indicates Locally Administered Address (LAA).
+    # Modern iOS and Android smartphones default to Private Wi-Fi MACs.
+    # ---------------------------------------------------------
+    if len(mac_text) == 17 and ":" in mac_text:
+        try:
+            first_byte = int(mac_text.split(":")[0], 16)
+            if (first_byte & 0x02) != 0:
+                return "phone"
+        except Exception:
+            pass
 
     # ---------------------------------------------------------
     # Unknown
