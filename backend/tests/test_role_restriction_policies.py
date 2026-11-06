@@ -123,9 +123,9 @@ def test_admin_cannot_create_or_grant_developer_rights():
         "/users/",
         headers=admin_hdr,
         json={
-            "username": "valid_user",
-            "email": "valid@example.com",
-            "phone_number": "+254722222222",
+            "username": "valid_user_dev",
+            "email": "valid_dev@example.com",
+            "phone_number": "+254722222299",
             "password": "ValidUser@123",
             "role": "user",
         },
@@ -286,7 +286,7 @@ def test_admin_cannot_edit_switch_or_firewall_secrets():
 # 3. PERMANENTLY DELETE DEVICES & RECORDS
 # -------------------------------------------------------------
 
-def test_admin_cannot_permanently_delete_devices():
+def test_admin_can_permanently_delete_devices():
     admin_hdr = auth_headers("net_admin_1", "admin")
     dev_hdr = auth_headers("lead_developer", "super_admin")
 
@@ -303,22 +303,34 @@ def test_admin_cannot_permanently_delete_devices():
     dev_id = dev.id
     db.close()
 
-    # Administrator CANNOT permanently delete device (403 Forbidden)
+    # Administrator CAN permanently delete device
     res_del_admin = client.delete(f"/devices/{dev_id}", headers=admin_hdr)
-    assert res_del_admin.status_code == 403
+    assert res_del_admin.status_code == 200
+    assert res_del_admin.json()["status"] == "deleted"
 
-    # Administrator CANNOT bulk permanently delete devices (403 Forbidden)
-    res_bulk_admin = client.post("/devices/bulk-delete", headers=admin_hdr, json={"device_ids": [dev_id]})
-    assert res_bulk_admin.status_code == 403
+    # Add another device for bulk delete test
+    db = TestingSessionLocal()
+    dev2 = Device(
+        mac_address="11:22:33:44:55:88",
+        ip_address="192.168.0.78",
+        hostname="WORKSTATION-78",
+        approval_status="approved",
+        vlan_id=20,
+    )
+    db.add(dev2)
+    db.commit()
+    dev2_id = dev2.id
+    db.close()
 
-    # Super Administrator CAN permanently delete device
-    res_del_dev = client.delete(f"/devices/{dev_id}", headers=dev_hdr)
-    assert res_del_dev.status_code == 200
-    assert res_del_dev.json()["status"] == "deleted"
+    # Administrator CAN bulk permanently delete devices
+    res_bulk_admin = client.post("/devices/bulk-delete", headers=admin_hdr, json={"device_ids": [dev2_id]})
+    assert res_bulk_admin.status_code == 200
+    assert res_bulk_admin.json()["status"] == "bulk_deleted"
 
     # Verify device record is purged
     db2 = TestingSessionLocal()
     assert db2.get(Device, dev_id) is None
+    assert db2.get(Device, dev2_id) is None
     db2.close()
 
 
@@ -470,7 +482,7 @@ def test_admin_cannot_bypass_lockouts_or_reset_admin_passwords():
         headers=admin_hdr,
         json={
             "target_identifier": "regular_user",
-            "new_password": "UserNewPass@888",
+            "new_password": "SecurePass@888",
         },
     )
     assert res_reset_user.status_code == 200
@@ -482,7 +494,7 @@ def test_admin_cannot_bypass_lockouts_or_reset_admin_passwords():
         headers=dev_hdr,
         json={
             "target_identifier": "net_admin_2",
-            "new_password": "DevResetAdmin@777",
+            "new_password": "SuperSecret@777",
         },
     )
     assert res_dev_reset_adm.status_code == 200

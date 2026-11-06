@@ -20,6 +20,21 @@ CHECK_INTERVAL_SECONDS = 4
 # In-memory debounce tracking to prevent flapping on transient ARP packet drops
 _consecutive_misses: dict[str, int] = {}
 
+# MAC addresses explicitly deleted by administrators to suppress instant auto-resurrection
+_suppressed_deleted_macs: set[str] = set()
+
+
+def suppress_mac_from_auto_registration(mac: str | None) -> None:
+    if mac:
+        clean = mac.replace(":", "").replace("-", "").upper()
+        _suppressed_deleted_macs.add(clean)
+
+
+def unsuppress_mac_from_auto_registration(mac: str | None) -> None:
+    if mac:
+        clean = mac.replace(":", "").replace("-", "").upper()
+        _suppressed_deleted_macs.discard(clean)
+
 
 def get_endpoint_key(report):
     """Return the strongest available endpoint identifier."""
@@ -174,6 +189,8 @@ async def endpoint_health_monitor_loop():
 
                 # Auto-register any brand-new machine that just connected to eth0 or wlan0
                 for mac_norm, info in live_by_mac.items():
+                    if mac_norm in _suppressed_deleted_macs:
+                        continue
                     if mac_norm not in existing_macs:
                         new_dev = Device(
                             mac_address=info["mac_address"],

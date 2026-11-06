@@ -23,6 +23,7 @@ from .l2_quarantine import restore_device_l2
 from .network_enforcement import enforce_device_access
 
 from .device_classifier import classify_device
+from .endpoint_health_monitor import unsuppress_mac_from_auto_registration
 
 
 def is_valid_ip_address(ip_address: str | None) -> bool:
@@ -1000,6 +1001,8 @@ def save_discovered_devices(
                 hostname = f"Phone-{ip_address.replace('.', '-')}"
             if not vendor or vendor == "LAN Device":
                 vendor = discovered.get("vendor") or "Mobile Phone (Wi-Fi Private MAC)"
+
+        unsuppress_mac_from_auto_registration(mac_address)
 
         # -----------------------------------------------------
         # Existing device

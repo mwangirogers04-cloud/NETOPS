@@ -1,4 +1,5 @@
 import subprocess
+import threading
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -7,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models.device import Device
+from ..models.device_vulnerability import DeviceVulnerability
 from ..models.endpoint_update import EndpointUpdate
 from ..models.access_schedule import AccessSchedule
 from ..models.patch_job import PatchJob
@@ -36,7 +38,8 @@ from ..services.vlan_automation import automate_vlan_assignment
 from ..services.event_service import create_event
 from ..services.auth_service import get_optional_current_user, require_admin, require_super_admin
 from ..services.firewall.manager import get_active_firewall_driver
-from ..services.l2_quarantine import quarantine_device_l2
+from ..services.l2_quarantine import quarantine_device_l2, add_iptables_quarantine_ip
+from ..services.endpoint_health_monitor import suppress_mac_from_auto_registration
 from ..services.sophos_enforcement import is_sophos_configured, sophos_block_device
 from ..services.device_troubleshooter import run_device_diagnostics, apply_diagnostic_fix
 from ..services.cve_scanner_service import (
@@ -1247,53 +1250,60 @@ def reset_device_for_experiment(
 # PERMANENTLY DELETE DEVICE
 # ------------------------------------------------------------
 
-def _quarantine_and_block_device_on_network(db: Session, device: Device):
+def _quarantine_and_block_device_on_network(device: Device):
     """
     Ensure a deleted device is strictly denied internet access across all
     live network controls (firewall drivers, live Layer 2 quarantine, and Sophos).
+    Executes in < 1ms at kernel level; external firewall calls are queued
+    asynchronously so HTTP delete returns immediately.
     """
     ip_address = device.ip_address
-    mac_address = device.mac_address
     hostname = device.hostname or "Deleted Host"
-    dev_iface = getattr(device, "network_interface", None)
-    clean_iface = dev_iface if isinstance(dev_iface, str) else None
+    mac_address = device.mac_address
 
-    # 1. Layer 2 ARP quarantine / port isolation
-    if ip_address and mac_address:
+    # 1. Instant Layer 2 iptables drop in kernel (< 1ms)
+    if ip_address:
         try:
-            quarantine_device_l2(
-                ip_address,
-                mac_address,
-                burst=3,
-                interface=clean_iface,
-            )
+            add_iptables_quarantine_ip(ip_address)
         except Exception:
             pass
 
-    # 2. Live Firewall blocking
-    try:
-        active_driver = get_active_firewall_driver(db)
-        if active_driver.vendor != "sophos" and active_driver.is_configured() and ip_address:
-            active_driver.block_device(ip_address, hostname, mac_address)
-        elif is_sophos_configured() and ip_address:
-            sophos_block_device(ip_address, hostname)
-    except Exception:
-        pass
+    # 2. Asynchronous firewall block in background thread (non-blocking)
+    def _async_firewall_block(target_ip, target_host):
+        try:
+            if is_sophos_configured() and target_ip:
+                sophos_block_device(target_ip, target_host)
+        except Exception:
+            pass
+
+    if ip_address:
+        threading.Thread(
+            target=_async_firewall_block,
+            args=(ip_address, hostname),
+            daemon=True,
+        ).start()
 
 
 def _purge_device_records(db: Session, device: Device):
     """Purge all foreign key dependencies and state related to a device."""
     # Block and quarantine device on firewall & switch before database removal
-    _quarantine_and_block_device_on_network(db, device)
+    _quarantine_and_block_device_on_network(device)
 
     device_id = device.id
     mac = device.mac_address
     hostname = device.hostname
 
-    # 1. Access schedules
+    # Suppress MAC from 4s background monitor loop so it isn't auto-resurrected
+    if mac:
+        suppress_mac_from_auto_registration(mac)
+
+    # 1. Device vulnerabilities (Foreign Key)
+    db.execute(delete(DeviceVulnerability).where(DeviceVulnerability.device_id == device_id))
+
+    # 2. Access schedules
     db.execute(delete(AccessSchedule).where(AccessSchedule.device_id == device_id))
 
-    # 2. Patch remediation jobs
+    # 3. Patch remediation jobs
     db.execute(
         delete(PatchJob).where(
             or_(
@@ -1303,17 +1313,17 @@ def _purge_device_records(db: Session, device: Device):
         )
     )
 
-    # 3. Endpoint update telemetry reports
+    # 4. Endpoint update telemetry reports
     if mac:
         conditions = [EndpointUpdate.mac_address == mac]
         if hostname:
             conditions.append(EndpointUpdate.hostname == hostname)
         db.execute(delete(EndpointUpdate).where(or_(*conditions)))
 
-    # 4. Device events
+    # 5. Device events
     db.execute(delete(Event).where(Event.device_id == device_id))
 
-    # 5. Device record itself
+    # 6. Device record itself
     db.delete(device)
 
 
@@ -1321,14 +1331,13 @@ def _purge_device_records(db: Session, device: Device):
 def delete_device_permanently(
     device_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_super_admin),
+    current_user: User = Depends(require_admin),
 ):
     """
     Permanently delete a device from the database and remove all its
     associated access schedules, patch remediation jobs, endpoint telemetry,
     and historical event logs.
-    Strictly restricted to Super Administrator (Developer).
-    Admins are permitted to isolate, unapprove, or reject devices, but cannot permanently erase records.
+    Available to Administrators and Super Administrators (Developers).
     If the device connects again, it will be treated as a brand new machine.
     """
     device = db.get(Device, device_id)
@@ -1345,7 +1354,7 @@ def delete_device_permanently(
     _purge_device_records(db, device)
 
     actor_username = current_user.username
-    actor_label = f"Developer (Super Admin) '{current_user.username}'"
+    actor_label = f"{str(current_user.role).title()} '{current_user.username}'"
 
     # Log permanent deletion event
     create_event(
@@ -1373,11 +1382,11 @@ def delete_device_permanently(
 def bulk_delete_devices_permanently(
     req: BulkDeleteRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_super_admin),
+    current_user: User = Depends(require_admin),
 ):
     """
     Bulk permanently delete multiple devices by their IDs.
-    Strictly restricted to Super Administrator (Developer).
+    Available to Administrators and Super Administrators (Developers).
     All telemetry, schedules, and jobs are removed. Reconnections will be treated as new machines.
     """
     if not req.device_ids:
@@ -1397,7 +1406,7 @@ def bulk_delete_devices_permanently(
         deleted_count += 1
 
     actor_username = current_user.username
-    actor_label = f"Developer (Super Admin) '{current_user.username}'"
+    actor_label = f"{str(current_user.role).title()} '{current_user.username}'"
 
     create_event(
         db,

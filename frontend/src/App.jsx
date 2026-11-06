@@ -347,6 +347,7 @@ function App() {
     enabled: true,
   });
   const [deviceFilter, setDeviceFilter] = useState("all");
+  const [dashboardDeviceFilter, setDashboardDeviceFilter] = useState("all");
   const [selectedDeviceIds, setSelectedDeviceIds] = useState(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [vlanFilter, setVlanFilter] = useState("all");
@@ -10093,6 +10094,22 @@ const Dashboard = () => {
       device.device_type === "unknown"
   ).length;
 
+  const filteredDashboardDevices = devices.filter((device) => {
+    if (dashboardDeviceFilter === "online") return device.status === "online";
+    if (dashboardDeviceFilter === "pending") return device.approval_status === "pending";
+    if (dashboardDeviceFilter === "quarantined") {
+      return (
+        device.enforcement_status === "quarantined" ||
+        device.access_decision === "quarantine" ||
+        device.approval_status === "pending" ||
+        device.approval_status === "rejected" ||
+        !device.internet_access_authorized
+      );
+    }
+    if (dashboardDeviceFilter === "rejected") return device.approval_status === "rejected";
+    return true;
+  });
+
   return (
     <div className="page">
 
@@ -10138,52 +10155,311 @@ const Dashboard = () => {
           title="Total Devices"
           value={totalDevices}
           text="Devices detected on the LAN"
-          onClick={isAdmin ? () => {
-  setDeviceFilter("all");
-  setActivePage("devices");
-} : undefined}
+          onClick={() => setDashboardDeviceFilter("all")}
+          active={dashboardDeviceFilter === "all"}
         />
 
         <AccessSummary
           title="Online"
           value={onlineDevices}
           text="Currently connected"
-          onClick={isAdmin ? () => {
-  setDeviceFilter("online");
-  setActivePage("devices");
-} : undefined}
+          onClick={() => setDashboardDeviceFilter("online")}
+          active={dashboardDeviceFilter === "online"}
         />
 
         <AccessSummary
           title="Pending"
           value={pendingDevices}
           text="Awaiting administrator approval"
-          onClick={isAdmin ? () => {
-  setDeviceFilter("pending");
-  setActivePage("devices");
-} : undefined}
+          onClick={() => setDashboardDeviceFilter("pending")}
+          active={dashboardDeviceFilter === "pending"}
         />
 
         <AccessSummary
           title="Quarantined"
           value={quarantinedDevices}
           text="Internet access blocked"
-          onClick={isAdmin ? () => {
-  setDeviceFilter("quarantined");
-  setActivePage("devices");
-} : undefined}
+          onClick={() => setDashboardDeviceFilter("quarantined")}
+          active={dashboardDeviceFilter === "quarantined"}
         />
 
- <AccessSummary
+        <AccessSummary
           title="Rejected"
           value={rejectedDevices}
           text="Devices rejected by administrator"
-          onClick={isAdmin ? () => {
-            setDeviceFilter("rejected");
-            setActivePage("devices");
-          } : undefined}
+          onClick={() => setDashboardDeviceFilter("rejected")}
+          active={dashboardDeviceFilter === "rejected"}
         />
 
+      </div>
+
+      {/* LIVE CONNECTED NETWORK DEVICES ON THE DASHBOARD */}
+      <div className="panel" style={{ marginTop: "4px", marginBottom: "22px" }}>
+        <div
+          className="panel-header"
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            flexWrap: "wrap",
+            gap: "12px",
+          }}
+        >
+          <div>
+            <div className="panel-title" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <span>🖥️</span> Connected Network Devices ({filteredDashboardDevices.length})
+            </div>
+            <div className="panel-subtitle">
+              Live LAN &amp; Wi-Fi devices detected across your network infrastructure
+            </div>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+            <div
+              style={{
+                display: "inline-flex",
+                gap: "4px",
+                background: "#f1f5f9",
+                padding: "3px",
+                borderRadius: "8px",
+                border: "1px solid #cbd5e1",
+              }}
+            >
+              <button
+                type="button"
+                className={`secondary-button small ${dashboardDeviceFilter === "all" ? "active" : ""}`}
+                style={
+                  dashboardDeviceFilter === "all"
+                    ? { background: "#2563eb", color: "#ffffff", fontWeight: "700" }
+                    : { padding: "4px 9px", fontSize: "11px" }
+                }
+                onClick={() => setDashboardDeviceFilter("all")}
+              >
+                All ({totalDevices})
+              </button>
+              <button
+                type="button"
+                className={`secondary-button small ${dashboardDeviceFilter === "online" ? "active" : ""}`}
+                style={
+                  dashboardDeviceFilter === "online"
+                    ? { background: "#10b981", color: "#ffffff", fontWeight: "700" }
+                    : { padding: "4px 9px", fontSize: "11px" }
+                }
+                onClick={() => setDashboardDeviceFilter("online")}
+              >
+                Online ({onlineDevices})
+              </button>
+              <button
+                type="button"
+                className={`secondary-button small ${dashboardDeviceFilter === "pending" ? "active" : ""}`}
+                style={
+                  dashboardDeviceFilter === "pending"
+                    ? { background: "#f59e0b", color: "#ffffff", fontWeight: "700" }
+                    : { padding: "4px 9px", fontSize: "11px" }
+                }
+                onClick={() => setDashboardDeviceFilter("pending")}
+              >
+                Pending ({pendingDevices})
+              </button>
+              <button
+                type="button"
+                className={`secondary-button small ${dashboardDeviceFilter === "quarantined" ? "active" : ""}`}
+                style={
+                  dashboardDeviceFilter === "quarantined"
+                    ? { background: "#dc2626", color: "#ffffff", fontWeight: "700" }
+                    : { padding: "4px 9px", fontSize: "11px" }
+                }
+                onClick={() => setDashboardDeviceFilter("quarantined")}
+              >
+                Quarantined ({quarantinedDevices})
+              </button>
+            </div>
+
+            <button
+              type="button"
+              className="secondary-button small"
+              onClick={() => {
+                setDeviceFilter(dashboardDeviceFilter);
+                setActivePage("devices");
+              }}
+              style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontWeight: "600" }}
+              title="Open full Inventory management page"
+            >
+              <span>▣</span> Full Devices Inventory →
+            </button>
+
+            {isAdmin && (
+              <button
+                type="button"
+                className="primary-button small"
+                onClick={() => setActivePage("lan-scanner")}
+                style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}
+              >
+                <span>📡</span> Run Discovery Scan
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className="table-container">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>DEVICE / HOSTNAME</th>
+                <th>IP &amp; MAC ADDRESS</th>
+                <th>INTERFACE</th>
+                <th>TYPE</th>
+                <th>VLAN</th>
+                <th>STATUS</th>
+                <th>ACCESS DECISION</th>
+                <th>ACTION</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredDashboardDevices.length === 0 ? (
+                <tr>
+                  <td colSpan="8">
+                    <div className="empty-state" style={{ padding: "28px", textAlign: "center" }}>
+                      <div style={{ fontSize: "28px", marginBottom: "6px" }}>🔍</div>
+                      <strong style={{ fontSize: "14px", color: "#0f172a" }}>
+                        {devices.length === 0
+                          ? "No devices detected on this network yet."
+                          : `No devices match current filter: ${dashboardDeviceFilter.toUpperCase()}`}
+                      </strong>
+                      <div style={{ color: "#64748b", fontSize: "12px", marginTop: "4px" }}>
+                        {devices.length === 0
+                          ? "Click 'Run Discovery Scan' above or from the LAN Scanner to detect connected machines."
+                          : "Click 'All' to view all connected devices."}
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+                filteredDashboardDevices.map((device) => {
+                  const isOnline = device.status === "online";
+                  return (
+                    <tr
+                      key={`dash-dev-${device.id}`}
+                      style={{
+                        background: highlightedDeviceId === device.id ? "rgba(59, 130, 246, 0.08)" : undefined,
+                        transition: "background-color 0.2s",
+                      }}
+                    >
+                      <td>
+                        <div className="device-primary" style={{ fontWeight: "700", color: "#0f172a" }}>
+                          {device.hostname || "Unknown Device"}
+                        </div>
+                        <div className="device-secondary" style={{ fontSize: "11px", color: "#64748b" }}>
+                          {device.vendor || "Network Host"}
+                        </div>
+                      </td>
+
+                      <td>
+                        <div style={{ fontWeight: "600", fontFamily: "monospace", fontSize: "12px", color: "#1e293b" }}>
+                          {device.ip_address || "—"}
+                        </div>
+                        <div style={{ fontSize: "11px", fontFamily: "monospace", color: "#64748b" }}>
+                          {device.mac_address || "—"}
+                        </div>
+                      </td>
+
+                      <td>
+                        <DeviceInterfaceBadge device={device} compact={true} />
+                      </td>
+
+                      <td>
+                        <TypeBadge type={device.device_type} />
+                      </td>
+
+                      <td>
+                        <span className="vlan-badge">
+                          VLAN {device.vlan_id || 90}
+                        </span>
+                      </td>
+
+                      <td>
+                        <span className={`status-badge ${isOnline ? "allowed" : "blocked"}`}>
+                          {isOnline ? "ONLINE" : "OFFLINE"}
+                        </span>
+                      </td>
+
+                      <td>
+                        <StatusBadge value={device.access_decision || "quarantine"} />
+                      </td>
+
+                      <td>
+                        <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
+                          {isAdmin ? (
+                            <>
+                              {device.approval_status === "pending" && (
+                                <button
+                                  type="button"
+                                  className="approve-button"
+                                  style={{ padding: "3px 8px", fontSize: "11px" }}
+                                  onClick={() => deviceAction(device.id, "approve")}
+                                  disabled={actionLoading === `approve-${device.id}`}
+                                >
+                                  {actionLoading === `approve-${device.id}` ? "..." : "✓ Approve"}
+                                </button>
+                              )}
+
+                              {device.enforcement_status === "quarantined" && (
+                                <button
+                                  type="button"
+                                  className="secondary-button small"
+                                  style={{ padding: "3px 8px", fontSize: "11px", color: "#059669", borderColor: "#10b981" }}
+                                  onClick={() => deviceAction(device.id, "allow")}
+                                  disabled={actionLoading === `allow-${device.id}`}
+                                  title="Authorize Internet Access"
+                                >
+                                  {actionLoading === `allow-${device.id}` ? "..." : "Allow"}
+                                </button>
+                              )}
+
+                              {device.enforcement_status === "allowed" && (
+                                <button
+                                  type="button"
+                                  className="secondary-button small"
+                                  style={{ padding: "3px 8px", fontSize: "11px", color: "#dc2626", borderColor: "#f87171" }}
+                                  onClick={() => deviceAction(device.id, "quarantine")}
+                                  disabled={actionLoading === `quarantine-${device.id}`}
+                                  title="Block Internet Access"
+                                >
+                                  {actionLoading === `quarantine-${device.id}` ? "..." : "Block"}
+                                </button>
+                              )}
+
+                              <button
+                                type="button"
+                                className="secondary-button small"
+                                style={{ padding: "3px 7px", fontSize: "11px" }}
+                                onClick={() => {
+                                  setHighlightedDeviceId(device.id);
+                                  setDeviceFilter("all");
+                                  setActivePage("devices");
+                                }}
+                                title="Inspect device in full inventory view"
+                              >
+                                View →
+                              </button>
+                            </>
+                          ) : (
+                            <span
+                              className="status-badge"
+                              style={{ background: "#f8fafc", color: "#64748b", fontSize: "11px", border: "1px solid #cbd5e1" }}
+                            >
+                              👁️ Monitored
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {isAdmin && (
@@ -11690,6 +11966,9 @@ const EndpointUpdatesPage = () => {
 
   const renderPage = () => {
     if (!isAdmin) {
+      if (activePage === "devices") {
+        return DevicesPage();
+      }
       return Dashboard();
     }
     switch (activePage) {
@@ -14983,7 +15262,7 @@ const EndpointUpdatesPage = () => {
               icon="D"
               label="Dashboard"
               active={
-                !isAdmin || activePage === "dashboard"
+                activePage === "dashboard"
               }
               onClick={() =>
                 setActivePage("dashboard")
@@ -14991,23 +15270,17 @@ const EndpointUpdatesPage = () => {
             />
 
             {!isAdmin && (
-              <div
-                style={{
-                  margin: "12px 8px",
-                  padding: "10px 12px",
-                  borderRadius: "8px",
-                  background: "#f8fafc",
-                  border: "1px solid #cbd5e1",
-                  fontSize: "11px",
-                  color: "#475569",
-                  lineHeight: 1.45,
+              <NavItem
+                icon="▣"
+                label="Devices (Read-Only)"
+                active={
+                  activePage === "devices"
+                }
+                onClick={() => {
+                  setDeviceFilter("all");
+                  setActivePage("devices");
                 }}
-              >
-                <div style={{ color: "#334155", fontWeight: "700", marginBottom: "4px" }}>
-                  🔒 Restricted View
-                </div>
-                Standard users have read-only access to the Dashboard only.
-              </div>
+              />
             )}
 
             {isAdmin && (
@@ -16281,14 +16554,22 @@ function AccessSummary({
   value,
   text,
   onClick,
+  active,
 }) {
   return (
     <div
-      className="access-summary-card"
+      className={`access-summary-card ${active ? "active" : ""}`}
       role={onClick ? "button" : undefined}
       tabIndex={onClick ? 0 : undefined}
       onClick={onClick}
-      style={!onClick ? { cursor: "default" } : undefined}
+      style={{
+        cursor: onClick ? "pointer" : "default",
+        border: active ? "2px solid #2563eb" : undefined,
+        background: active ? "rgba(37, 99, 235, 0.08)" : undefined,
+        transform: active ? "translateY(-2px)" : undefined,
+        boxShadow: active ? "0 4px 12px rgba(37, 99, 235, 0.15)" : undefined,
+        transition: "all 0.15s ease",
+      }}
       onKeyDown={(event) => {
         if (
           onClick &&
