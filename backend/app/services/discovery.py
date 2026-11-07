@@ -561,14 +561,24 @@ def discover_devices(network: str, interface: str | None = None):
     The Linux neighbour table acts as a fallback for devices
     that Nmap misses during a subnet-wide scan.
     """
-    if not isinstance(network, str) or "/" not in network:
+    if not isinstance(network, str):
         raise ValueError(
             "A network range in CIDR notation is required."
         )
 
+    clean_net = network.strip()
+    if "/" not in clean_net:
+        parts = clean_net.split(".")
+        if len(parts) == 4:
+            clean_net = f"{parts[0]}.{parts[1]}.{parts[2]}.0/24"
+        elif len(parts) == 3:
+            clean_net = f"{clean_net}.0/24"
+        else:
+            clean_net = f"{clean_net}/24"
+
     try:
         parsed_network = ipaddress.ip_network(
-            network,
+            clean_net,
             strict=False,
         )
     except ValueError as exc:
