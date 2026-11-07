@@ -303,7 +303,7 @@ async def endpoint_health_monitor_loop():
                                             active_fw.allow_device(old_ip)
                                         elif is_sophos_configured() and old_ip:
                                             sophos_allow_device(old_ip)
-                                        restore_device_l2(old_ip)
+                                        restore_device_l2(old_ip, d.mac_address)
                                     except Exception as exc:
                                         print(f"[MONITOR] Error releasing old IP {old_ip}: {exc}")
 

@@ -1039,7 +1039,7 @@ def save_discovered_devices(
                         )
                 if old_ip:
                     try:
-                        restore_device_l2(old_ip)
+                        restore_device_l2(old_ip, existing_device.mac_address)
                     except Exception:
                         pass
 
