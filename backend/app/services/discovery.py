@@ -621,6 +621,23 @@ def discover_devices(network: str, interface: str | None = None):
         else None
     )
 
+    if not _is_test_env():
+        if specific_iface and not os.path.exists(f"/sys/class/net/{specific_iface}"):
+            return []
+        if not specific_iface and os.path.exists("/sys/class/net"):
+            host_has_network = False
+            for if_name in os.listdir("/sys/class/net"):
+                if_ip = get_local_ip(if_name)
+                if if_ip:
+                    try:
+                        if ipaddress.ip_address(if_ip) in parsed_network:
+                            host_has_network = True
+                            break
+                    except Exception:
+                        pass
+            if not host_has_network:
+                return []
+
     if specific_iface:
         local_ip = get_local_ip(specific_iface)
         local_mac = get_local_mac(specific_iface)
