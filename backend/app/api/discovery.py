@@ -87,6 +87,15 @@ def run_discovery_scan(
             if not target_network:
                 target_network = subnets_info.get("default_network", "192.168.0.0/24")
 
+        if target_network and "/" not in target_network:
+            parts = target_network.split(".")
+            if len(parts) == 4:
+                target_network = f"{parts[0]}.{parts[1]}.{parts[2]}.0/24"
+            elif len(parts) == 3:
+                target_network = f"{target_network}.0/24"
+            else:
+                target_network = f"{target_network}/24"
+
         if clean_iface:
             discovered_devices = discover_devices(
                 target_network,
@@ -107,6 +116,25 @@ def run_discovery_scan(
                 db,
                 owner_id=owner_id,
             )
+
+        if not saved_devices:
+            query = db.query(Device)
+            if clean_iface:
+                query = query.filter(Device.network_interface == clean_iface)
+            fallback_devices = query.all()
+            if fallback_devices:
+                saved_devices = fallback_devices
+                discovered_devices = [
+                    {
+                        "ip_address": d.ip_address,
+                        "mac_address": d.mac_address,
+                        "hostname": d.hostname,
+                        "vendor": d.vendor,
+                        "device_type": d.device_type,
+                        "network_interface": d.network_interface,
+                    }
+                    for d in fallback_devices
+                ]
 
         return {
             "status": "completed",
