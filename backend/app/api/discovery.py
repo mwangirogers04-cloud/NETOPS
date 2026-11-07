@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models.user import User
+from ..models.device import Device
 from ..services.auth_service import get_optional_current_user
 from ..services.discovery import (
     detect_local_subnets,
