@@ -128,6 +128,7 @@ def generate_cloud_subnet_devices(target_network: str, clean_iface: str | None, 
             "vendor": t["vendor"],
             "device_type": t["device_type"],
             "network_interface": t["interface"],
+            "status": "online",
         })
 
     return devices

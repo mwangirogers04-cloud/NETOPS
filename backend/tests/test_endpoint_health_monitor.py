@@ -414,8 +414,8 @@ def test_endpoint_health_monitor_quarantined_device_remains_offline(monkeypatch)
         except RuntimeError as err:
             assert str(err) == "stop test loop"
 
-    # Even though seen via arp scan, device is quarantined/not internet authorized, so status must remain offline
-    assert dev.status == "offline"
+    # An active quarantined machine detected on the LAN is physically online
+    assert dev.status == "online"
 
 
 

@@ -1313,6 +1313,7 @@ def save_discovered_devices(
                         f"[DISCOVERY] Error re-enforcing device access for "
                         f"{existing_device.ip_address}: {exc}"
                     )
+                existing_device.status = "online"
 
         # -----------------------------------------------------
         # New device
@@ -1367,6 +1368,7 @@ def save_discovered_devices(
                 enforce_device_access(new_device, db, force=True)
             except Exception:
                 pass
+            new_device.status = "online"
 
             create_event(
                 db,

@@ -247,20 +247,13 @@ def enforce_device_access(
                     message += f" [Sophos Warning: {exc}]"
 
     # ---------------------------------------------------------
-    # Store current enforcement state and connection status.
-    # Quarantined / isolated devices read offline until internet access is allowed.
+    # Store current enforcement state.
+    # Physical connection status (online/offline) is preserved.
     # ---------------------------------------------------------
 
     device.enforcement_status = enforcement_status
-    if enforcement_status in ("quarantined", "isolated") or not device.internet_access_authorized:
-        device.status = "offline"
-    else:
-        # If transitioning from quarantine/isolation into allowed access, set online
-        if old_enforcement_status in ("quarantined", "isolated"):
-            device.status = "online"
-        # Otherwise, preserve existing online/offline status determined by physical reachability
-        elif not device.status:
-            device.status = "online"
+    if not device.status:
+        device.status = "online"
 
     # ---------------------------------------------------------
     # Audit event.

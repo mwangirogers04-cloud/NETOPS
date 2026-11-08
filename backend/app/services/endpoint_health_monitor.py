@@ -315,12 +315,7 @@ async def endpoint_health_monitor_loop():
                             if live_info.get("interface"):
                                 d.network_interface = live_info["interface"]
 
-                        # Quarantined or isolated devices must read offline until authorized for internet
-                        is_quarantined_or_isolated = (
-                            d.enforcement_status in ("quarantined", "isolated")
-                            or not getattr(d, "internet_access_authorized", True)
-                        )
-                        expected_status = "offline" if is_quarantined_or_isolated else "online"
+                        expected_status = "online"
 
                         if d.status != expected_status:
                             d.status = expected_status
