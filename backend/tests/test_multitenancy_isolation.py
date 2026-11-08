@@ -137,9 +137,14 @@ def test_admin_device_visibility():
             db.refresh(admin_user)
 
         token = create_access_token({"sub": admin_user.username, "role": admin_user.role, "id": admin_user.id})
-        res = client.get("/devices/", headers={"Authorization": f"Bearer {token}"})
-        assert res.status_code == 200
-        devices = res.json()
+        # By default, dashboard starts clean with isolated devices
+        res_default = client.get("/devices/", headers={"Authorization": f"Bearer {token}"})
+        assert res_default.status_code == 200
+
+        # Admin can explicitly query all devices with scope=all
+        res_all = client.get("/devices/?scope=all", headers={"Authorization": f"Bearer {token}"})
+        assert res_all.status_code == 200
+        devices = res_all.json()
         assert len(devices) > 0
     finally:
         db.close()

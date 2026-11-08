@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -28,8 +28,14 @@ def get_events(
     if event_type is not None:
         query = query.where(Event.event_type == event_type)
 
-    if current_user and current_user.username.lower() != "developer":
-        query = query.join(Device, Event.device_id == Device.id).where(Device.owner_id == current_user.id)
+    if current_user and current_user.role != "super_admin":
+        user_dev_ids = select(Device.id).where(Device.owner_id == current_user.id)
+        query = query.where(
+            or_(
+                Event.device_id.in_(user_dev_ids),
+                Event.actor == current_user.username,
+            )
+        )
 
     query = (
         query

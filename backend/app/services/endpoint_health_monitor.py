@@ -193,41 +193,9 @@ async def endpoint_health_monitor_loop():
                     if isinstance(d, Device) and d.mac_address:
                         existing_macs.add(d.mac_address.replace(":", "").replace("-", "").upper())
 
-                # Auto-register any brand-new machine that just connected to eth0 or wlan0
-                for mac_norm, info in live_by_mac.items():
-                    if mac_norm in _suppressed_deleted_macs:
-                        continue
-                    if mac_norm not in existing_macs:
-                        new_dev = Device(
-                            mac_address=info["mac_address"],
-                            ip_address=info["ip_address"],
-                            hostname=f"LAN-HOST-{info['ip_address'].replace('.', '-')}",
-                            vendor=info["vendor"],
-                            device_type="computer",
-                            network_interface=info["interface"],
-                            status="online",
-                            approval_status="pending",
-                            ip_assignment="dhcp",
-                            classification_status="normal",
-                            vlan_id=90,
-                            enforcement_status="quarantined",
-                            internet_access_authorized=False,
-                        )
-                        db.add(new_dev)
-                        db.flush()
-                        existing_macs.add(mac_norm)
-                        device_query.append(new_dev)
-                        create_event(
-                            db=db,
-                            event_type="new_device",
-                            message=(
-                                f"New machine connected to LAN ({info['interface']}): "
-                                f"{info['ip_address']} ({info['mac_address']}) "
-                                f"[{info['vendor'] or 'Unknown Vendor'}] — "
-                                f"Placed in VLAN 90 Quarantine. Awaiting administrator review & approval."
-                            ),
-                            device_id=new_dev.id,
-                        )
+                # Auto-registration disabled: Devices are discovered strictly on-demand
+                # when a user initiates a discovery scan or connects a client agent probe.
+                # Background monitor only updates reachability/health of existing devices.
 
                 for d in device_query:
                     if not isinstance(d, Device):

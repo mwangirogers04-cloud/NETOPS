@@ -135,50 +135,9 @@ def process_sniffed_packet(data: bytes, iface: str) -> None:
         try:
             existing = db.query(Device).filter(Device.mac_address == src_mac).first()
             if not existing:
-                dev_type = classify_device(
-                    hostname=None,
-                    vendor=None,
-                    mac_address=src_mac,
-                )
-                new_dev = Device(
-                    mac_address=src_mac,
-                    ip_address=src_ip,
-                    hostname=f"Device-{src_ip.replace('.', '-')}" if src_ip else None,
-                    vendor=None,
-                    device_type=dev_type or "unknown",
-                    network_interface=iface,
-                    classification_status="normal",
-                    status="offline",
-                    approval_status="pending",
-                    ip_assignment="dhcp",
-                    vlan_id=90,
-                    enforcement_status="quarantined",
-                    internet_access_authorized=False,
-                )
-                db.add(new_dev)
-                db.commit()
-                db.refresh(new_dev)
-
-                create_event(
-                    db,
-                    "new_device",
-                    (
-                        f"Real-time passive sniffer detected new machine on {iface}: "
-                        f"{src_ip or 'Awaiting DHCP'} ({src_mac}). "
-                        f"Zero-Trust Policy: Automatically placed in VLAN 90 Quarantine. "
-                        f"Internet access blocked until approved."
-                    ),
-                    new_dev.id,
-                )
-                db.commit()
-
-                # Immediately enforce Layer 2 and firewall isolation
-                if src_ip and src_ip not in PROTECTED_IPS:
-                    try:
-                        quarantine_device_l2(src_ip, src_mac, interface=iface)
-                    except Exception as q_err:
-                        logger.debug(f"[PASSIVE-SNIFFER] Quarantine error: {q_err}")
-
+                # Auto-registration disabled: Devices are discovered strictly on-demand
+                # when a user initiates a discovery scan or connects an agent probe.
+                return
             elif src_ip and not existing.ip_address:
                 existing.ip_address = src_ip
                 db.commit()

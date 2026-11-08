@@ -7,6 +7,10 @@ from .config import settings
 engine = create_engine(
     settings.database_url,
     pool_pre_ping=True,
+    pool_size=25,
+    max_overflow=35,
+    pool_recycle=1800,
+    pool_timeout=45,
 )
 
 SessionLocal = sessionmaker(

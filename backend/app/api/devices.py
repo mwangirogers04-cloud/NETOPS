@@ -211,16 +211,19 @@ def get_devices(
         current_user.role in ("admin", "super_admin")
         or current_user.username.lower() in ("developer", "admin")
     )
-    if is_admin:
-        if scope and scope.startswith("user_"):
-            try:
-                uid = int(scope.replace("user_", ""))
-                query = query.where(Device.owner_id == uid)
-            except ValueError:
-                pass
-        # Super admin / Admin / Developer sees all network infrastructure devices
+    if is_admin and scope == "all":
+        # Super admin / Admin explicitly requesting fleet-wide device inventory across all users
+        pass
+    elif is_admin and scope and scope.startswith("user_"):
+        try:
+            uid = int(scope.replace("user_", ""))
+            query = query.where(Device.owner_id == uid)
+        except ValueError:
+            query = query.where(Device.owner_id == current_user.id)
     else:
-        # Strict per-user network isolation for regular tenant accounts
+        # Strict per-user network isolation by default:
+        # Every user (including admins, developers, and tenant accounts) starts with
+        # 0 devices until they run a discovery scan on their local network.
         query = query.where(Device.owner_id == current_user.id)
 
     devices = db.scalars(query).all()
@@ -847,7 +850,10 @@ def automate_all_devices_vlan(
     Automatically detect and assign the optimal VLAN to all registered devices
     based on their vendor OUI, hostname, and MAC address.
     """
-    devices = db.scalars(select(Device)).all()
+    query = select(Device)
+    if current_user and current_user.role != "super_admin":
+        query = query.where(Device.owner_id == current_user.id)
+    devices = db.scalars(query).all()
     updated = []
     for device in devices:
         res = automate_vlan_assignment(device, db)
@@ -1265,6 +1271,16 @@ def _quarantine_and_block_device_on_network(device: Device):
     if ip_address:
         try:
             add_iptables_quarantine_ip(ip_address)
+        except Exception:
+            pass
+        try:
+            quarantine_device_l2(ip_address, mac_address, burst=3, interface=getattr(device, "network_interface", None))
+        except Exception:
+            pass
+        try:
+            active_fw = get_active_firewall_driver()
+            if active_fw and active_fw.is_configured():
+                active_fw.block_device(ip_address, hostname, mac_address)
         except Exception:
             pass
 

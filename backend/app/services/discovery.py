@@ -1026,7 +1026,7 @@ def save_discovered_devices(
         if existing_device:
             if existing_device.mac_address != mac_address:
                 existing_device.mac_address = mac_address
-            if existing_device.owner_id is None and owner_id is not None:
+            if owner_id is not None:
                 existing_device.owner_id = owner_id
 
         hostname = discovered.get("hostname")

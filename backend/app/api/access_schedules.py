@@ -10,7 +10,7 @@ from ..models.device import Device
 from ..models.user import User
 from ..services.access_policy import normalize_device_type
 from ..services.access_schedule import is_access_allowed
-from ..services.auth_service import require_super_admin
+from ..services.auth_service import require_super_admin, get_optional_current_user
 from ..services.device_classifier import classify_device
 from ..services.event_service import create_event
 from ..services.network_enforcement import enforce_device_access
@@ -84,12 +84,12 @@ def create_access_schedule(
 @router.get("/", response_model=list[AccessScheduleResponse])
 def get_access_schedules(
     db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
 ):
-    schedules = (
-        db.query(AccessSchedule)
-        .order_by(AccessSchedule.id.desc())
-        .all()
-    )
+    query = db.query(AccessSchedule).order_by(AccessSchedule.id.desc())
+    if current_user and current_user.role != "super_admin":
+        query = query.join(Device, AccessSchedule.device_id == Device.id).filter(Device.owner_id == current_user.id)
+    schedules = query.all()
 
     return schedules
 

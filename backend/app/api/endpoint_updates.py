@@ -9,7 +9,7 @@ from ..models.endpoint_update import EndpointUpdate
 from ..models.device import Device
 from ..models.patch_job import PatchJob
 from ..models.user import User
-from ..services.auth_service import require_super_admin
+from ..services.auth_service import require_super_admin, get_optional_current_user
 from ..schemas.patch_job import (
     CreatePatchJobRequest,
     UpdateJobStatusRequest,
@@ -218,8 +218,18 @@ def report_endpoint_update(
 
 @router.get("/")
 def get_endpoint_updates(
+    current_user: User | None = Depends(get_optional_current_user),
     db: Session = Depends(get_db),
 ):
+    if not current_user:
+        return []
+
+    # Scope device inventory to current user's isolated account
+    device_query = select(Device)
+    if current_user.role != "super_admin":
+        device_query = device_query.where(Device.owner_id == current_user.id)
+    devices = db.scalars(device_query).all()
+
     endpoint_updates = (
         db.query(EndpointUpdate)
         .order_by(
@@ -268,14 +278,6 @@ def get_endpoint_updates(
 
         results.append(endpoint)
 
-    # ---------------------------------------------------------
-    # Match endpoint reports to discovered LAN devices
-    # ---------------------------------------------------------
-
-    devices = db.scalars(
-        select(Device)
-    ).all()
-
     devices_by_mac = {
         device.mac_address.replace(":", "").replace("-", "").upper():
         device
@@ -312,6 +314,9 @@ def get_endpoint_updates(
             device = devices_by_ip[endpoint.ip_address]
         elif endpoint.hostname and endpoint.hostname.strip().lower() in devices_by_host:
             device = devices_by_host[endpoint.hostname.strip().lower()]
+
+        if current_user.role != "super_admin" and device is None:
+            continue
 
         is_online = (device.status == "online") if device else False
         update_status = endpoint.update_status
@@ -585,10 +590,14 @@ def trigger_patch_job(
 def get_patch_jobs(
     limit: int = 50,
     offset: int = 0,
+    current_user: User | None = Depends(get_optional_current_user),
     db: Session = Depends(get_db),
 ):
     """List recent update deployment jobs and their status."""
     jobs = list_patch_jobs(db, limit=limit, offset=offset)
+    if current_user and current_user.role != "super_admin":
+        user_dev_ids = set(db.scalars(select(Device.id).where(Device.owner_id == current_user.id)).all())
+        jobs = [j for j in jobs if (j.device_id in user_dev_ids or j.initiated_by == current_user.username)]
     results = []
     for j in jobs:
         resp = PatchJobResponse.model_validate(j)

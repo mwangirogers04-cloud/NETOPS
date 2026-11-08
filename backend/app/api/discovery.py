@@ -69,7 +69,7 @@ def run_discovery_scan(
     as infrastructure devices.
     """
     # Physical scan devices are isolated to the active user who initiated the scan
-    owner_id = getattr(current_user, "id", 1)
+    owner_id = getattr(current_user, "id", None)
 
     try:
         clean_iface = (
@@ -118,27 +118,6 @@ def run_discovery_scan(
                 db,
                 owner_id=owner_id,
             )
-
-        if not saved_devices:
-            query = db.query(Device)
-            if owner_id is not None:
-                query = query.filter(Device.owner_id == owner_id)
-            if clean_iface:
-                query = query.filter(Device.network_interface == clean_iface)
-            fallback_devices = query.all()
-            if fallback_devices:
-                saved_devices = fallback_devices
-                discovered_devices = [
-                    {
-                        "ip_address": d.ip_address,
-                        "mac_address": d.mac_address,
-                        "hostname": d.hostname,
-                        "vendor": d.vendor,
-                        "device_type": d.device_type,
-                        "network_interface": d.network_interface,
-                    }
-                    for d in fallback_devices
-                ]
 
         return {
             "status": "completed",
@@ -208,7 +187,12 @@ def sync_agent_devices(
     Receives scan results from a remote user's client-side scan probe,
     storing and scoping them under the user's isolated account.
     """
-    owner_id = current_user.id if current_user else 1
+    if not current_user:
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication required to sync network devices to your account.",
+        )
+    owner_id = current_user.id
     raw_devices = [d.model_dump() for d in request.devices]
     clean_iface = request.interface.strip() if request.interface and request.interface.strip() else None
     saved = save_discovered_devices(
