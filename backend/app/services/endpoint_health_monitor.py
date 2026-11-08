@@ -1,4 +1,5 @@
 import asyncio
+import os
 import subprocess
 from datetime import datetime, timedelta, timezone
 
@@ -106,7 +107,7 @@ async def endpoint_health_monitor_loop():
 
 
             # Check reachability of all inventory devices (both online and offline)
-            is_mock_env = str(type(db)).startswith("<class 'unittest.mock") or _is_test_env()
+            is_mock_env = str(type(db)).startswith("<class 'unittest.mock")
             is_cloud_host = (
                 not is_mock_env
                 and not os.path.exists("/sys/class/net/wlan0")
@@ -346,9 +347,12 @@ async def endpoint_health_monitor_loop():
                             if live_info.get("interface"):
                                 d.network_interface = live_info["interface"]
 
-                        # A physically detected device is online on the local network.
-                        # (Quarantine and authorization policies are maintained via enforcement_status)
-                        expected_status = "online"
+                        # Quarantined or isolated devices must read offline until authorized for internet
+                        is_quarantined_or_isolated = (
+                            d.enforcement_status in ("quarantined", "isolated")
+                            or not getattr(d, "internet_access_authorized", True)
+                        )
+                        expected_status = "offline" if is_quarantined_or_isolated else "online"
 
                         if d.status != expected_status:
                             d.status = expected_status

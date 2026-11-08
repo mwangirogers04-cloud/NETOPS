@@ -26,6 +26,14 @@ class SophosDriver(BaseFirewallDriver):
     auth_type = "credentials"
 
     def is_configured(self) -> bool:
+        from ..sophos_enforcement import _is_cloud_host
+        if _is_cloud_host():
+            url = self.management_url or settings.sophos_base_url
+            if url:
+                parsed = urlparse(url)
+                host = parsed.hostname or ""
+                if host.startswith("192.168.") or host.startswith("10.") or host.startswith("172."):
+                    return False
         if self.management_url and self.username and self.password:
             return True
         return is_sophos_configured()

@@ -26,6 +26,15 @@ def _is_test_env() -> bool:
     return bool(os.environ.get("PYTEST_CURRENT_TEST"))
 
 
+def _is_cloud_host() -> bool:
+    if _is_test_env():
+        return False
+    return (
+        not os.path.exists("/sys/class/net/wlan0")
+        and not any(os.path.exists(f"/sys/class/net/{i}") for i in ("eth0", "lan0"))
+    )
+
+
 def _mac_to_bytes(mac_str: str) -> bytes:
     parts = mac_str.strip().replace("-", ":").split(":")
     return bytes(int(b, 16) for b in parts)
@@ -167,6 +176,8 @@ def _get_active_gateways() -> list[dict]:
 
 
 def _run_iptables(args: list[str]) -> bool:
+    if _is_cloud_host():
+        return True
     for prefix in (["sudo", "-n", "/usr/sbin/iptables"], ["/usr/sbin/iptables"]):
         try:
             res = subprocess.run(
@@ -248,7 +259,7 @@ def quarantine_device_l2(
     2. Sending targeted ARP quarantine frames between the device and the active
        gateways (192.168.0.1 on wlan0 and 192.168.0.10 on eth0).
     """
-    if _is_test_env() or not ip_address or not mac_address:
+    if _is_test_env() or _is_cloud_host() or not ip_address or not mac_address:
         return False
 
     clean_ip = ip_address.strip()
@@ -316,7 +327,7 @@ def restore_device_l2(
     Wi-Fi (wlan0) or LAN (eth0) by removing the iptables block and broadcasting
     the true gateway MAC address back to the device and gateway.
     """
-    if _is_test_env() or not ip_address or not mac_address:
+    if _is_test_env() or _is_cloud_host() or not ip_address or not mac_address:
         return False
 
     clean_ip = ip_address.strip()

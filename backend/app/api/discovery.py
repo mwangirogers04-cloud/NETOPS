@@ -49,6 +49,7 @@ class AgentDeviceItem(BaseModel):
     vendor: str | None = None
     device_type: str | None = None
     network_interface: str | None = None
+    interface: str | None = None
 
 
 class AgentSyncRequest(BaseModel):
@@ -120,6 +121,8 @@ def run_discovery_scan(
 
         if not saved_devices:
             query = db.query(Device)
+            if owner_id is not None:
+                query = query.filter(Device.owner_id == owner_id)
             if clean_iface:
                 query = query.filter(Device.network_interface == clean_iface)
             fallback_devices = query.all()

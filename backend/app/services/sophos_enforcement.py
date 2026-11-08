@@ -1,4 +1,5 @@
 import logging
+import os
 import ssl
 import urllib.parse
 import urllib.request
@@ -24,15 +25,34 @@ DUMMY_HOST = "NETOPS_DUMMY_HOST"
 RULE_NAME = "NETOPS_Quarantine_Block"
 
 
+def _is_cloud_host() -> bool:
+    is_mock_env = bool(os.environ.get("PYTEST_CURRENT_TEST"))
+    return (
+        not is_mock_env
+        and not os.path.exists("/sys/class/net/wlan0")
+        and not any(os.path.exists(f"/sys/class/net/{i}") for i in ("eth0", "lan0"))
+    )
+
+
 def is_sophos_configured() -> bool:
     """Check if Sophos firewall credentials and URL are configured."""
     url = settings.sophos_base_url.strip()
     user = settings.sophos_username.strip()
     pwd = settings.sophos_password.strip()
-    return bool(url and user and pwd)
+    if not (url and user and pwd):
+        return False
+    if _is_cloud_host():
+        try:
+            parsed = urllib.parse.urlparse(url)
+            host = parsed.hostname or ""
+            if host.startswith("192.168.") or host.startswith("10.") or host.startswith("172."):
+                return False
+        except Exception:
+            return False
+    return True
 
 
-def _send_sophos_xml(req_xml: str, timeout: float = 8.0) -> str:
+def _send_sophos_xml(req_xml: str, timeout: float = 3.0) -> str:
     """Send an authenticated XML request to the Sophos WebConsole APIController."""
     base_url = settings.sophos_base_url.strip().rstrip("/")
     api_url = f"{base_url}/webconsole/APIController"
