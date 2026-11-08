@@ -170,7 +170,7 @@ def get_server_url():
             url += "/endpoint-updates/"
         return url
 
-    return "http://127.0.0.1:8000/endpoint-updates/"
+    return "https://api.netops.co.ke/endpoint-updates/"
 
 
 def send_update_status(information, server_url=None):
@@ -184,6 +184,7 @@ def send_update_status(information, server_url=None):
         data=data,
         headers={
             "Content-Type": "application/json",
+            "User-Agent": "NETOPS-Agent/1.0",
         },
         method="POST",
     )
@@ -235,7 +236,10 @@ def report_job_status(job_id, status, progress_percent=None, log_output=None, er
     req = urllib.request.Request(
         status_url,
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": "NETOPS-Agent/1.0",
+        },
         method="POST",
     )
     try:

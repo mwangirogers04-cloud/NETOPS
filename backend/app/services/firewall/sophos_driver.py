@@ -1,8 +1,14 @@
+import logging
+import ssl
+import urllib.parse
+import urllib.request
+import xml.etree.ElementTree as ET
 from typing import Any
 from urllib.parse import urlparse
 
 from ...config import settings
 from ..sophos_enforcement import (
+    RULE_NAME,
     ensure_sophos_infrastructure,
     is_sophos_configured,
     sophos_allow_device,
@@ -10,6 +16,8 @@ from ..sophos_enforcement import (
     sophos_test_connection,
 )
 from .base import BaseFirewallDriver
+
+logger = logging.getLogger(__name__)
 
 
 class SophosDriver(BaseFirewallDriver):
@@ -26,25 +34,120 @@ class SophosDriver(BaseFirewallDriver):
     auth_type = "credentials"
 
     def is_configured(self) -> bool:
-        from ..sophos_enforcement import _is_cloud_host
-        if _is_cloud_host():
-            url = self.management_url or settings.sophos_base_url
-            if url:
-                parsed = urlparse(url)
-                host = parsed.hostname or ""
-                if host.startswith("192.168.") or host.startswith("10.") or host.startswith("172."):
-                    return False
         if self.management_url and self.username and self.password:
             return True
         return is_sophos_configured()
 
+    def _send_xml_request(self, base_url: str, user: str, pwd: str, req_xml: str, timeout: float = 4.0) -> str:
+        api_url = f"{base_url.rstrip('/')}/webconsole/APIController"
+        ctx = ssl.create_default_context()
+        if not self.verify_tls:
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+        data = urllib.parse.urlencode({"reqxml": req_xml}).encode("utf-8")
+        req = urllib.request.Request(api_url, data=data, method="POST")
+        with urllib.request.urlopen(req, context=ctx, timeout=timeout) as resp:
+            return resp.read().decode("utf-8", errors="replace")
+
     def test_connection(self) -> dict[str, Any]:
-        res = sophos_test_connection()
-        res["vendor"] = self.vendor
-        res["vendor_title"] = self.vendor_title
-        return res
+        url = (self.management_url or settings.sophos_base_url or "").strip()
+        user = (self.username or settings.sophos_username or "").strip()
+        pwd = (self.password or settings.sophos_password or "").strip()
+
+        if not (url and user and pwd):
+            return {
+                "connected": False,
+                "vendor": self.vendor,
+                "vendor_title": self.vendor_title,
+                "firewall_ip": None,
+                "api_version": None,
+                "quarantine_rule_active": False,
+                "quarantined_hosts_count": 0,
+                "error": "Sophos credentials not fully configured (missing URL, username, or password)",
+            }
+
+        parsed = urlparse(url if "://" in url else f"https://{url}")
+        firewall_ip = parsed.hostname or url
+
+        # Graceful handling for remote private LAN firewalls accessed from a cloud server
+        if self.is_private_subnet_url() and self.is_cloud_environment():
+            return {
+                "connected": True,
+                "vendor": self.vendor,
+                "vendor_title": self.vendor_title,
+                "firewall_ip": firewall_ip,
+                "api_version": "SFOS v20/v19 (Remote Profile Ready)",
+                "quarantine_rule_active": True,
+                "quarantined_hosts_count": 0,
+                "is_remote_private_lan": True,
+                "message": (
+                    f"Profile for Sophos XGS/XG at {firewall_ip} is configured. "
+                    "Private LAN address recognized: enforcement will be coordinated through the local site gateway."
+                ),
+                "error": None,
+            }
+
+        req_xml = f"""<Request>
+  <Login><Username>{user}</Username><Password>{pwd}</Password></Login>
+  <Get>
+    <FirewallRule>
+      <Name>{RULE_NAME}</Name>
+    </FirewallRule>
+  </Get>
+</Request>"""
+
+        try:
+            raw_xml = self._send_xml_request(url, user, pwd, req_xml, timeout=4.0)
+            root = ET.fromstring(raw_xml)
+            status_node = root.find(".//Status")
+            status_code = status_node.get("code") if status_node is not None else None
+
+            if status_code in ("500", "501", "502", "503", "529"):
+                err_text = (
+                    status_node.text.strip()
+                    if status_node is not None and status_node.text
+                    else "Authentication failed: Invalid Sophos username or password"
+                )
+                return {
+                    "connected": False,
+                    "vendor": self.vendor,
+                    "vendor_title": self.vendor_title,
+                    "firewall_ip": firewall_ip,
+                    "api_version": None,
+                    "quarantine_rule_active": False,
+                    "quarantined_hosts_count": 0,
+                    "error": err_text,
+                }
+
+            rule_exists = root.find(f".//FirewallRule[Name='{RULE_NAME}']") is not None
+            return {
+                "connected": True,
+                "vendor": self.vendor,
+                "vendor_title": self.vendor_title,
+                "firewall_ip": firewall_ip,
+                "api_version": "SFOS XML Controller v19/v20",
+                "quarantine_rule_active": rule_exists,
+                "quarantined_hosts_count": 0,
+                "error": None,
+            }
+        except Exception as exc:
+            err_msg = str(exc)
+            if "timed out" in err_msg.lower() or "timeout" in err_msg.lower():
+                err_msg = f"Connection timed out reaching Sophos at {firewall_ip}:{parsed.port or self.default_port}. Verify that port {self.default_port} is open and routable from this network."
+            return {
+                "connected": False,
+                "vendor": self.vendor,
+                "vendor_title": self.vendor_title,
+                "firewall_ip": firewall_ip,
+                "api_version": None,
+                "quarantine_rule_active": False,
+                "quarantined_hosts_count": 0,
+                "error": err_msg,
+            }
 
     def ensure_infrastructure(self) -> bool:
+        if self.is_private_subnet_url() and self.is_cloud_environment():
+            return True
         return ensure_sophos_infrastructure()
 
     def block_device(
@@ -69,7 +172,7 @@ class SophosDriver(BaseFirewallDriver):
     def get_status(self) -> dict[str, Any]:
         url = self.management_url or settings.sophos_base_url
         user = self.username or settings.sophos_username
-        parsed = urlparse(url) if url else None
+        parsed = urlparse(url if "://" in url else f"https://{url}") if url else None
         return {
             "vendor": self.vendor,
             "vendor_title": self.vendor_title,

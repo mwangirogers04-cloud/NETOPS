@@ -99,7 +99,7 @@ def save_firewall_configuration(
     current_user: User = Depends(require_super_admin),
     db: Session = Depends(get_db),
 ):
-    """Create or update a firewall profile and optionally set it as active (Super Admin only)."""
+    """Create or update a firewall profile and optionally set it as active (Admins & Super Admins)."""
     if req.is_active:
         # Deactivate all other configs
         existing_active = db.scalars(select(FirewallConfig).where(FirewallConfig.is_active == True)).all()
@@ -194,7 +194,7 @@ def test_firewall_connection(
     current_user: User = Depends(require_super_admin),
     db: Session = Depends(get_db),
 ):
-    """Test connection to a firewall appliance using supplied credentials (Super Admin only)."""
+    """Test connection to a firewall appliance using supplied credentials (Admins & Super Admins)."""
     password = req.password
     # If password is placeholder, look up from DB
     if password == "••••••••":

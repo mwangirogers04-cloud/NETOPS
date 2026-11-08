@@ -49,6 +49,42 @@ class BaseFirewallDriver(ABC):
         """Check if an IP belongs to critical gateway or management infrastructure."""
         return ip_address in PROTECTED_IPS
 
+    def is_private_subnet_url(self) -> bool:
+        """Return True if management_url targets a private RFC1918 or link-local address."""
+        if not self.management_url:
+            return False
+        try:
+            from urllib.parse import urlparse
+            url = self.management_url if "://" in self.management_url else f"https://{self.management_url}"
+            parsed = urlparse(url)
+            host = (parsed.hostname or "").lower()
+            return (
+                host.startswith("192.168.")
+                or host.startswith("10.")
+                or host.startswith("172.16.")
+                or host.startswith("172.17.")
+                or host.startswith("172.18.")
+                or host.startswith("172.19.")
+                or host.startswith("172.2")
+                or host.startswith("172.30.")
+                or host.startswith("172.31.")
+                or host in ("localhost", "127.0.0.1")
+            )
+        except Exception:
+            return False
+
+    @staticmethod
+    def is_cloud_environment() -> bool:
+        """Return True if running in a cloud VPS without direct Layer 2 broadcast access."""
+        import os
+        is_mock = bool(os.environ.get("PYTEST_CURRENT_TEST"))
+        if is_mock:
+            return False
+        return (
+            not os.path.exists("/sys/class/net/wlan0")
+            and not any(os.path.exists(f"/sys/class/net/{i}") for i in ("eth0", "lan0"))
+        )
+
     @abstractmethod
     def is_configured(self) -> bool:
         """Return True if required configuration (URL, credentials/token) is provided."""

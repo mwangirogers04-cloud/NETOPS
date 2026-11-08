@@ -558,7 +558,7 @@ function App() {
     try {
       const response = await fetch(`${API_URL}/endpoint-updates/scan-lan`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
         body: JSON.stringify({}),
       });
       if (!response.ok) {
@@ -600,7 +600,9 @@ function App() {
 
   const loadUpdatePolicy = async () => {
     try {
-      const response = await fetch(`${API_URL}/endpoint-updates/policy`);
+      const response = await fetch(`${API_URL}/endpoint-updates/policy`, {
+        headers: { ...getAuthHeaders() },
+      });
       if (response.ok) {
         const data = await response.json();
         setUpdatePolicy(data);
@@ -681,7 +683,7 @@ function App() {
       };
       const response = await fetch(`${API_URL}/endpoint-updates/working-hours-check`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
         body: JSON.stringify(payload),
       });
       if (response.ok) {
@@ -698,7 +700,9 @@ function App() {
 
   const loadPatchJobs = async () => {
     try {
-      const response = await fetch(`${API_URL}/endpoint-updates/jobs?limit=100`);
+      const response = await fetch(`${API_URL}/endpoint-updates/jobs?limit=100`, {
+        headers: { ...getAuthHeaders() },
+      });
       if (response.ok) {
         const data = await response.json();
         const jobs = Array.isArray(data) ? data : [];
@@ -8864,13 +8868,13 @@ return (
         {/* TAB 2: CONFIGURE / CHANGE FIREWALL */}
         {activeTab === "configure" && (
           <div>
-            {!isSuperAdmin && (
+            {!isAdmin && !isSuperAdmin && (
               <div className="panel" style={{ background: "#fff1f2", border: "1px solid #fecdd3", padding: "18px 20px", borderRadius: "10px", marginBottom: "20px" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "10px", color: "#9f1239", fontWeight: "800", fontSize: "16px" }}>
-                  <span>🔒</span> Firewall Secrets &amp; Credentials Locked (Developer Only)
+                  <span>🔒</span> Firewall Secrets &amp; Credentials Locked (Admin Access Required)
                 </div>
                 <div style={{ fontSize: "13px", color: "#881337", marginTop: "8px", lineHeight: "1.5" }}>
-                  Modifying Sophos / Cisco ASA / Enterprise Firewall credentials, API tokens, and management URLs is strictly restricted to the <strong>Developer / Super Administrator</strong>. Administrators can monitor active firewall status and enforce device quarantine, but cannot alter core firewall connection secrets.
+                  Modifying firewall credentials, API tokens, and management URLs requires <strong>Administrator or Super Administrator</strong> privileges. Standard users can monitor active firewall status and enforce device quarantine, but cannot alter core firewall connection secrets.
                 </div>
               </div>
             )}
@@ -9103,7 +9107,10 @@ return (
                     </div>
                     <div style={{ fontSize: "12px", marginTop: "4px", color: "#334155" }}>
                       {testResult.connected ? (
-                        <>Connected to <strong>{testResult.vendor_title}</strong> at <code>{testResult.firewall_ip || form.management_url}</code>. Firmware: <code>{testResult.api_version || "OK"}</code>. Quarantine Rule Active: {testResult.quarantine_rule_active ? "Yes" : "No"}.</>
+                        <>
+                          Connected to <strong>{testResult.vendor_title}</strong> at <code>{testResult.firewall_ip || form.management_url}</code>. Firmware: <code>{testResult.api_version || "OK"}</code>. Quarantine Rule Active: {testResult.quarantine_rule_active ? "Yes" : "No"}.
+                          {testResult.message && <div style={{ marginTop: "4px", color: "#047857", fontWeight: "600" }}>ℹ️ {testResult.message}</div>}
+                        </>
                       ) : (
                         <>Error: {testResult.error || "Appliance refused connection or credentials invalid."}</>
                       )}
@@ -9117,8 +9124,8 @@ return (
                     type="button"
                     className="secondary-button"
                     onClick={handleTestConnection}
-                    disabled={testingConnection || !isSuperAdmin}
-                    title={!isSuperAdmin ? "Only Super Admin can test firewall credentials" : "Test connection"}
+                    disabled={testingConnection || (!isAdmin && !isSuperAdmin)}
+                    title={(!isAdmin && !isSuperAdmin) ? "Administrator privileges required to test firewall credentials" : "Test connection"}
                     style={{ fontWeight: "600", display: "inline-flex", alignItems: "center", gap: "6px" }}
                   >
                     <span>⚡</span> {testingConnection ? "Testing Connection..." : "Test Connection"}
@@ -9127,11 +9134,11 @@ return (
                   <button
                     type="submit"
                     className="primary-button"
-                    disabled={savingConfig || !isSuperAdmin}
-                    title={!isSuperAdmin ? "Only Super Admin can save firewall credentials" : "Save & Activate Firewall"}
-                    style={{ fontWeight: "700", display: "inline-flex", alignItems: "center", gap: "6px", opacity: !isSuperAdmin ? 0.6 : 1 }}
+                    disabled={savingConfig || (!isAdmin && !isSuperAdmin)}
+                    title={(!isAdmin && !isSuperAdmin) ? "Administrator privileges required to save firewall credentials" : "Save & Activate Firewall"}
+                    style={{ fontWeight: "700", display: "inline-flex", alignItems: "center", gap: "6px", opacity: (!isAdmin && !isSuperAdmin) ? 0.6 : 1 }}
                   >
-                    <span>{isSuperAdmin ? "💾" : "🔒"}</span> {savingConfig ? "Saving & Enforcing..." : isSuperAdmin ? "Save & Activate Firewall" : "Firewall Secrets Locked (Developer Only)"}
+                    <span>{(isAdmin || isSuperAdmin) ? "💾" : "🔒"}</span> {savingConfig ? "Saving & Enforcing..." : (isAdmin || isSuperAdmin) ? "Save & Activate Firewall" : "Firewall Secrets Locked (Admin Only)"}
                   </button>
                 </div>
               </form>
@@ -10082,7 +10089,8 @@ return (
     const loadDashboardEndpointUpdates = async () => {
       try {
         const response = await fetch(
-          `${API_URL}/endpoint-updates/`
+          `${API_URL}/endpoint-updates/`,
+          { headers: { ...getAuthHeaders() } }
         );
 
         if (!response.ok) {
@@ -11234,7 +11242,8 @@ const Dashboard = () => {
 
     try {
       const response = await fetch(
-        `${API_URL}/endpoint-updates/`
+        `${API_URL}/endpoint-updates/`,
+        { headers: { ...getAuthHeaders() } }
       );
 
       if (!response.ok) {

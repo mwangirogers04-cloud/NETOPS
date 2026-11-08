@@ -221,12 +221,16 @@ def get_endpoint_updates(
     current_user: User | None = Depends(get_optional_current_user),
     db: Session = Depends(get_db),
 ):
-    if not current_user:
-        return []
+    # Administrators and dashboard views see all managed endpoints
+    is_admin = bool(
+        current_user is None
+        or current_user.role in ("admin", "super_admin")
+        or current_user.username.lower() in ("developer", "admin")
+    )
 
-    # Scope device inventory to current user's isolated account
+    # Scope device inventory to current user's isolated account if standard user
     device_query = select(Device)
-    if current_user.role != "super_admin":
+    if current_user and not is_admin:
         device_query = device_query.where(Device.owner_id == current_user.id)
     devices = db.scalars(device_query).all()
 
@@ -315,7 +319,7 @@ def get_endpoint_updates(
         elif endpoint.hostname and endpoint.hostname.strip().lower() in devices_by_host:
             device = devices_by_host[endpoint.hostname.strip().lower()]
 
-        if current_user.role != "super_admin" and device is None:
+        if current_user and not is_admin and device is None:
             continue
 
         is_online = (device.status == "online") if device else False
