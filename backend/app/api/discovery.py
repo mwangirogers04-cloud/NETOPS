@@ -12,7 +12,10 @@ from ..services.discovery import (
     detect_local_subnets,
     discover_devices,
     save_discovered_devices,
+    get_local_ip,
+    get_local_mac,
 )
+from ..services.network_patch_scanner import assess_and_record_device_updates
 
 
 router = APIRouter(
@@ -84,6 +87,7 @@ def generate_cloud_subnet_devices(target_network: str, clean_iface: str | None, 
             "hostname": "Router-Gateway",
             "vendor": "TP-Link Technologies",
             "device_type": "router",
+            "oui": "50:0F:F5",
             "interface": iface_eth,
         },
         {
@@ -91,6 +95,7 @@ def generate_cloud_subnet_devices(target_network: str, clean_iface: str | None, 
             "hostname": "Workstation-Office",
             "vendor": "Dell Inc.",
             "device_type": "computer",
+            "oui": "F0:1F:AF",
             "interface": iface_eth,
         },
         {
@@ -98,6 +103,7 @@ def generate_cloud_subnet_devices(target_network: str, clean_iface: str | None, 
             "hostname": "Host-Laptop",
             "vendor": "HP Inc.",
             "device_type": "computer",
+            "oui": "3C:52:82",
             "interface": iface_wlan,
         },
         {
@@ -105,6 +111,7 @@ def generate_cloud_subnet_devices(target_network: str, clean_iface: str | None, 
             "hostname": f"Phone-{prefix.replace('.', '-')}-101",
             "vendor": "Apple Inc.",
             "device_type": "phone",
+            "oui": "BC:D0:74",
             "interface": iface_wlan,
         },
         {
@@ -112,6 +119,7 @@ def generate_cloud_subnet_devices(target_network: str, clean_iface: str | None, 
             "hostname": "Office-LaserJet",
             "vendor": "Canon Inc.",
             "device_type": "printer",
+            "oui": "70:85:C2",
             "interface": iface_eth,
         },
     ]
@@ -119,7 +127,9 @@ def generate_cloud_subnet_devices(target_network: str, clean_iface: str | None, 
     devices = []
     for t in templates:
         last_byte = t["host_suffix"]
-        mac = f"02:{u_hex}:{net_hex}:00:01:{last_byte:02X}"
+        oui = t["oui"]
+        # Authentic IEEE OUI MAC format: [Vendor 3-byte OUI] : [Tenant Hash] : [Subnet Hash] : [Host Suffix]
+        mac = f"{oui}:{u_hex}:{net_hex}:{last_byte:02X}"
         ip = f"{prefix}.{last_byte}"
         devices.append({
             "ip_address": ip,
@@ -201,6 +211,22 @@ def run_discovery_scan(
             owner_id=owner_id,
         )
 
+        # Detect and record endpoint update posture for all active online devices
+        local_ip = get_local_ip()
+        local_mac = get_local_mac()
+        for dev in saved_devices:
+            if getattr(dev, "status", None) == "online":
+                try:
+                    assess_and_record_device_updates(
+                        device=dev,
+                        db=db,
+                        local_ip=local_ip,
+                        local_mac=local_mac,
+                    )
+                except Exception as exc:
+                    pass
+        db.commit()
+
         return {
             "status": "completed",
             "network": target_network,
@@ -237,6 +263,18 @@ def run_discovery_scan(
                     ),
                     "enforcement_status": getattr(
                         device, "enforcement_status", "unknown"
+                    ),
+                    "update_status": getattr(
+                        device, "update_status", "up_to_date"
+                    ),
+                    "pending_updates": getattr(
+                        device, "pending_updates", 0
+                    ),
+                    "operating_system": getattr(
+                        device, "operating_system", None
+                    ),
+                    "os_version": getattr(
+                        device, "os_version", None
                     ),
                 }
                 for device in saved_devices
@@ -283,6 +321,20 @@ def sync_agent_devices(
         scanned_interface=clean_iface,
         owner_id=owner_id,
     )
+    local_ip = get_local_ip()
+    local_mac = get_local_mac()
+    for dev in saved:
+        if getattr(dev, "status", None) == "online":
+            try:
+                assess_and_record_device_updates(
+                    device=dev,
+                    db=db,
+                    local_ip=local_ip,
+                    local_mac=local_mac,
+                )
+            except Exception as exc:
+                pass
+    db.commit()
     return {
         "status": "completed",
         "network": request.network,

@@ -39,6 +39,109 @@ def is_valid_ip_address(ip_address: str | None) -> bool:
 DISCOVERY_INTERFACE = "eth0"
 
 
+COMMON_OUI_MAP = {
+    # Sophos Security Gateways
+    "7C:5A:1C": "Sophos",
+    "00:1A:8C": "Sophos",
+    # MikroTik / Routerboard
+    "2C:C8:1B": "Routerboard.com",
+    "48:8F:5A": "Routerboard.com",
+    "6C:3B:6B": "Routerboard.com",
+    "B8:69:F4": "Routerboard.com",
+    "DC:2C:6E": "Routerboard.com",
+    # Dell
+    "F0:1F:AF": "Dell Inc.",
+    "18:66:DA": "Dell Inc.",
+    "B4:B5:2F": "Dell Inc.",
+    "00:14:22": "Dell Inc.",
+    "44:A8:42": "Dell Inc.",
+    "5C:F9:DD": "Dell Inc.",
+    "D4:BE:D9": "Dell Inc.",
+    "E4:54:E8": "Dell Inc.",
+    # HP / Hewlett Packard
+    "3C:52:82": "HP Inc.",
+    "70:5A:0F": "HP Inc.",
+    "00:1E:0B": "HP Inc.",
+    "9C:B6:54": "HP Inc.",
+    "10:60:4B": "HP Inc.",
+    "B4:99:BA": "HP Inc.",
+    "C8:D3:FF": "HP Inc.",
+    # Apple
+    "BC:D0:74": "Apple Inc.",
+    "A4:83:E7": "Apple Inc.",
+    "86:39:DD": "Apple Inc.",
+    "38:F9:D3": "Apple Inc.",
+    "00:17:F2": "Apple Inc.",
+    "AC:DE:48": "Apple Inc.",
+    "F4:34:F0": "Apple Inc.",
+    "7C:04:D0": "Apple Inc.",
+    # TP-Link
+    "50:0F:F5": "TP-Link Technologies",
+    "E8:48:B8": "TP-Link Technologies",
+    "D8:0D:17": "TP-Link Technologies",
+    "00:0A:EB": "TP-Link Technologies",
+    "A0:F3:C1": "TP-Link Technologies",
+    "60:32:B1": "TP-Link Technologies",
+    "98:DA:C4": "TP-Link Technologies",
+    # Tenda
+    "04:95:E6": "Tenda Technology",
+    "C8:3A:35": "Tenda Technology",
+    "00:1E:58": "Tenda Technology",
+    # Cisco Systems
+    "00:08:E3": "Cisco Systems",
+    "00:1B:54": "Cisco Systems",
+    "00:26:99": "Cisco Systems",
+    "F4:CF:E2": "Cisco Systems",
+    # Canon
+    "70:85:C2": "Canon Inc.",
+    "00:00:85": "Canon Inc.",
+    "00:1E:8F": "Canon Inc.",
+    # Intel Corporate
+    "B4:B6:86": "Intel Corporate",
+    "00:24:D7": "Intel Corporate",
+    "00:26:55": "Intel Corporate",
+    "00:19:D1": "Intel Corporate",
+    # Realtek Semiconductor
+    "D4:6D:6D": "Realtek Semiconductor",
+    "00:E0:4C": "Realtek Semiconductor",
+    "52:54:00": "QEMU Virtual NIC",
+    # Samsung Electronics
+    "58:20:B1": "Samsung Electronics",
+    "B0:BE:76": "Samsung Electronics",
+    "AC:5F:3E": "Samsung Electronics",
+    # Raspberry Pi Foundation
+    "EC:FA:BC": "Raspberry Pi Foundation",
+    "DC:A6:32": "Raspberry Pi Foundation",
+    "B8:27:EB": "Raspberry Pi Foundation",
+    # Microsoft
+    "00:15:5D": "Microsoft Corporation",
+    "00:1A:11": "Microsoft Corporation",
+    # VMware
+    "00:0C:29": "VMware Inc.",
+    "00:50:56": "VMware Inc.",
+}
+
+
+def resolve_mac_vendor(mac_address: str | None) -> str | None:
+    """
+    Resolve hardware vendor organization from IEEE OUI MAC prefix.
+    Detects smartphone randomized MACs and authentic manufacturer OUIs.
+    """
+    if not mac_address or len(mac_address) < 8:
+        return None
+    mac_clean = mac_address.strip().upper()
+    oui = mac_clean[:8]
+    if oui in COMMON_OUI_MAP:
+        return COMMON_OUI_MAP[oui]
+    try:
+        first_byte = int(mac_clean.split(":")[0], 16)
+        if first_byte & 0x02:
+            return "Mobile Phone (Private Wi-Fi MAC)"
+    except Exception:
+        pass
+    return None
+
+
 def find_binary(name: str) -> str:
     found = shutil.which(name)
     if found:
@@ -353,6 +456,8 @@ def _run_arp_scan_on_interface(network: str | None, target_iface: str | None) ->
 
                 if is_valid_ip_address(ip_cand) and len(mac_cand) == 17 and ":" in mac_cand:
                     clean_vendor = vendor_cand if vendor_cand and "unknown" not in vendor_cand.lower() else None
+                    if not clean_vendor:
+                        clean_vendor = resolve_mac_vendor(mac_cand)
                     dev_type = classify_device(
                         hostname=None,
                         vendor=clean_vendor,
@@ -567,6 +672,12 @@ def get_neighbor_devices():
             if state in ("FAILED", "INCOMPLETE"):
                 continue
 
+            n_vendor = resolve_mac_vendor(mac_address)
+            n_type = classify_device(
+                hostname=None,
+                vendor=n_vendor,
+                mac_address=mac_address,
+            )
             devices.append(
                 {
                     "ip_address": ip_address,
@@ -574,8 +685,8 @@ def get_neighbor_devices():
                     "state": state,
                     "interface": dev_iface,
                     "hostname": None,
-                    "vendor": None,
-                    "device_type": "unknown",
+                    "vendor": n_vendor,
+                    "device_type": n_type,
                 }
             )
     except Exception as exc:
@@ -1050,8 +1161,11 @@ def save_discovered_devices(
                 else:
                     hostname = existing_device.hostname
 
-            if not vendor:
-                vendor = existing_device.vendor
+            if not vendor or vendor.lower() in ("unknown", "lan device"):
+                vendor = resolve_mac_vendor(mac_address) or existing_device.vendor if existing_device else resolve_mac_vendor(mac_address)
+
+        if not vendor or vendor.lower() in ("unknown", "lan device"):
+            vendor = resolve_mac_vendor(mac_address) or vendor
 
         # -----------------------------------------------------
         # Classify device

@@ -273,20 +273,31 @@ def assess_and_record_device_updates(
             pending_updates = 0
 
     # Record / update EndpointUpdate
-    new_report = EndpointUpdate(
-        hostname=hostname,
-        mac_address=device.mac_address,
-        ip_address=device.ip_address,
-        machine_id=norm_mac or f"lan-{device.id}",
-        operating_system=operating_system,
-        os_version=os_version or "Detected",
-        architecture=architecture,
-        update_status=update_status,
-        pending_updates=pending_updates,
-        security_updates=None,
-        last_checked=now,
-    )
-    db.add(new_report)
+    if existing_update is not None:
+        existing_update.hostname = hostname
+        existing_update.mac_address = device.mac_address
+        existing_update.ip_address = device.ip_address
+        existing_update.operating_system = operating_system
+        existing_update.os_version = os_version or "Detected"
+        existing_update.architecture = architecture
+        existing_update.update_status = update_status
+        existing_update.pending_updates = pending_updates
+        existing_update.last_checked = now
+    else:
+        new_report = EndpointUpdate(
+            hostname=hostname,
+            mac_address=device.mac_address,
+            ip_address=device.ip_address,
+            machine_id=norm_mac or f"lan-{device.id}",
+            operating_system=operating_system,
+            os_version=os_version or "Detected",
+            architecture=architecture,
+            update_status=update_status,
+            pending_updates=pending_updates,
+            security_updates=None,
+            last_checked=now,
+        )
+        db.add(new_report)
 
     # Update device hostname if resolved
     if hostname and not device.hostname:

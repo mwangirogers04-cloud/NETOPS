@@ -486,8 +486,19 @@ def _sync_records_after_update(db: Session, job: PatchJob):
                 break
 
     if matched_device:
-        # Notes or status synchronization
-        pass
+        matched_device.update_status = "up_to_date"
+        matched_device.pending_updates = 0
+        matched_device.last_update_check = now
+        if job.installed_updates:
+            try:
+                updates_data = json.loads(job.installed_updates) if isinstance(job.installed_updates, str) else job.installed_updates
+                if isinstance(updates_data, list):
+                    pkgs = [u.get("package_name") for u in updates_data if isinstance(u, dict) and u.get("package_name")]
+                    if pkgs:
+                        pkg_summary = f"Remotely deployed {len(pkgs)} update(s): {', '.join(pkgs[:3])}" + ("..." if len(pkgs) > 3 else "")
+                        matched_device.notes = f"{matched_device.notes or ''}\n[{now.strftime('%Y-%m-%d %H:%M')}] {pkg_summary}".strip()
+            except Exception:
+                pass
 
     # 2. Synchronize all existing EndpointUpdate records for this machine
     norm_job_mac = (
