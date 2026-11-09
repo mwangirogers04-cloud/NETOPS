@@ -2967,7 +2967,7 @@ const DevicesPage = () => {
             style={deviceFilter === "online" ? { background: "var(--accent-color, #3b82f6)", color: "#fff" } : {}}
             onClick={() => setDeviceFilter("online")}
           >
-            🟢 Online ({devices.filter(d => d.status === "online").length})
+            🟢 Online ({devices.filter(d => isDeviceActuallyOnline(d)).length})
           </button>
           <button
             type="button"
@@ -2975,7 +2975,7 @@ const DevicesPage = () => {
             style={deviceFilter === "offline" ? { background: "#dc2626", color: "#fff" } : { borderColor: "#ef4444", color: "#dc2626" }}
             onClick={() => setDeviceFilter("offline")}
           >
-            🔴 Offline ({devices.filter(d => d.status === "offline").length})
+            🔴 Offline ({devices.filter(d => !isDeviceActuallyOnline(d)).length})
           </button>
           <button
             type="button"
@@ -3135,8 +3135,8 @@ const DevicesPage = () => {
         )}
         {(() => {
           const inventoryFilteredDevices = scopedDevices.filter((device) => {
-            if (deviceFilter === "online" && device.status !== "online") return false;
-            if (deviceFilter === "offline" && device.status !== "offline") return false;
+            if (deviceFilter === "online" && !isDeviceActuallyOnline(device)) return false;
+            if (deviceFilter === "offline" && isDeviceActuallyOnline(device)) return false;
             if (deviceFilter === "needs_updates" && (device.update_status !== "updates_available" || device.pending_updates === 0)) return false;
             if (deviceFilter === "queued" && !Boolean(getActiveJobForDevice(device))) return false;
             if (deviceFilter === "up_to_date" && device.update_status !== "up_to_date" && device.pending_updates !== 0) return false;
@@ -4132,8 +4132,8 @@ const LanScannerPage = () => {
     ? interfaceDevices
     : interfaceDevices.filter((d) => (d.network_interface || "").toLowerCase() === selectedInterface.toLowerCase());
 
-  const onlineDevices = displayedInterfaceDevices.filter((d) => d.status === "online");
-  const offlineDevices = displayedInterfaceDevices.filter((d) => d.status === "offline");
+  const onlineDevices = displayedInterfaceDevices.filter((d) => isDeviceActuallyOnline(d));
+  const offlineDevices = displayedInterfaceDevices.filter((d) => !isDeviceActuallyOnline(d));
   const ipChangedEvents = events.filter((e) => e.event_type === "ip_address_changed");
   const ipChangedDeviceIds = new Set(ipChangedEvents.map((e) => e.device_id));
 
@@ -4143,11 +4143,11 @@ const LanScannerPage = () => {
   // Filter devices scoped to the selected interface (eth0 LAN vs wlan0 Wi-Fi vs all)
   const filteredDevices = displayedInterfaceDevices.filter((device) => {
     // Status filter
-    if (lanFilterStatus === "all" && device.status !== "online") return false;
-    if (lanFilterStatus === "offline" && device.status !== "offline") return false;
+    if (lanFilterStatus === "all" && !isDeviceActuallyOnline(device)) return false;
+    if (lanFilterStatus === "offline" && isDeviceActuallyOnline(device)) return false;
     if (lanFilterStatus === "ip-changed" && !ipChangedDeviceIds.has(device.id)) return false;
-    if (lanFilterStatus === "allowed" && (device.enforcement_status !== "allowed" || device.status !== "online")) return false;
-    if (lanFilterStatus === "quarantined" && (device.enforcement_status === "allowed" || device.status !== "online")) return false;
+    if (lanFilterStatus === "allowed" && !isDeviceActuallyOnline(device)) return false;
+    if (lanFilterStatus === "quarantined" && (device.enforcement_status === "allowed" && device.internet_access_authorized)) return false;
     if (lanFilterStatus === "scheduled" && !isDeviceScheduled(device)) return false;
     if (lanFilterStatus === "pending" && device.approval_status !== "pending") return false;
 
@@ -4175,8 +4175,8 @@ const LanScannerPage = () => {
     }
   };
 
-  const allowedCount = onlineDevices.filter((d) => d.enforcement_status === "allowed").length;
-  const quarantinedCount = onlineDevices.filter((d) => d.enforcement_status !== "allowed").length;
+  const allowedCount = displayedInterfaceDevices.filter((d) => isDeviceActuallyOnline(d)).length;
+  const quarantinedCount = displayedInterfaceDevices.filter((d) => !isDeviceActuallyOnline(d)).length;
 
   return (
     <div className="page">
