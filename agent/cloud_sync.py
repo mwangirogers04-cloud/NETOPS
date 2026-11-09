@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -132,34 +133,50 @@ def sync_to_cloud(server_url: str, devices: list, token: str | None = None) -> b
                 f"quarantined={len(quarantined)} | allowed={len(allowed)}"
             )
 
-            sophos_active = is_sophos_configured()
+            # 1. Enforce local Layer-2 ARP quarantine immediately
             for dev in quarantined:
                 ip = dev.get("ip_address")
                 mac = dev.get("mac_address")
                 if ip and mac:
                     try:
-                        quarantine_device_l2(ip, mac, burst=2)
-                    except Exception:
-                        pass
-                if ip and sophos_active:
-                    try:
-                        sophos_block_device(ip)
-                    except Exception:
-                        pass
+                        quarantine_device_l2(ip, mac, burst=3)
+                    except Exception as q_exc:
+                        logger.debug(f"L2 quarantine call for {ip} note: {q_exc}")
 
             for dev in allowed:
                 ip = dev.get("ip_address")
                 mac = dev.get("mac_address")
                 if ip and mac:
                     try:
-                        restore_device_l2(ip, mac)
-                    except Exception:
-                        pass
-                if ip and sophos_active:
-                    try:
-                        sophos_allow_device(ip)
-                    except Exception:
-                        pass
+                        restore_device_l2(ip, mac, burst=3)
+                    except Exception as r_exc:
+                        logger.debug(f"L2 restore call for {ip} note: {r_exc}")
+
+            # 2. Synchronize external hardware firewall (Sophos) asynchronously
+            def _sync_sophos_async(q_list, a_list):
+                if not is_sophos_configured():
+                    return
+                for d in q_list:
+                    ip_d = d.get("ip_address")
+                    if ip_d:
+                        try:
+                            sophos_block_device(ip_d)
+                        except Exception:
+                            pass
+                for d in a_list:
+                    ip_d = d.get("ip_address")
+                    if ip_d:
+                        try:
+                            sophos_allow_device(ip_d)
+                        except Exception:
+                            pass
+
+            threading.Thread(
+                target=_sync_sophos_async,
+                args=(quarantined, allowed),
+                daemon=True,
+                name="SophosSyncWorker",
+            ).start()
 
             return True
     except urllib.error.HTTPError as err:

@@ -25,17 +25,30 @@ DUMMY_HOST = "NETOPS_DUMMY_HOST"
 RULE_NAME = "NETOPS_Quarantine_Block"
 
 
+_sophos_last_failure_time: float = 0.0
+_SOPHOS_FAILURE_COOLDOWN: float = 45.0
+
+
+def _is_test_env() -> bool:
+    return bool(os.environ.get("PYTEST_CURRENT_TEST"))
+
+
 def _is_cloud_host() -> bool:
-    is_mock_env = bool(os.environ.get("PYTEST_CURRENT_TEST"))
+    if _is_test_env():
+        return False
     return (
-        not is_mock_env
-        and not os.path.exists("/sys/class/net/wlan0")
+        not os.path.exists("/sys/class/net/wlan0")
         and not any(os.path.exists(f"/sys/class/net/{i}") for i in ("eth0", "lan0"))
     )
 
 
-def is_sophos_configured() -> bool:
-    """Check if Sophos firewall credentials and URL are configured."""
+def is_sophos_configured(bypass_cooldown: bool = False) -> bool:
+    """Check if Sophos firewall credentials and URL are configured and circuit is closed."""
+    global _sophos_last_failure_time
+    if not bypass_cooldown and not _is_test_env():
+        if time.time() - _sophos_last_failure_time < _SOPHOS_FAILURE_COOLDOWN:
+            return False
+
     url = settings.sophos_base_url.strip()
     user = settings.sophos_username.strip()
     pwd = settings.sophos_password.strip()
@@ -52,8 +65,9 @@ def is_sophos_configured() -> bool:
     return True
 
 
-def _send_sophos_xml(req_xml: str, timeout: float = 3.0) -> str:
+def _send_sophos_xml(req_xml: str, timeout: float = 2.5) -> str:
     """Send an authenticated XML request to the Sophos WebConsole APIController."""
+    global _sophos_last_failure_time
     base_url = settings.sophos_base_url.strip().rstrip("/")
     api_url = f"{base_url}/webconsole/APIController"
 
@@ -67,9 +81,11 @@ def _send_sophos_xml(req_xml: str, timeout: float = 3.0) -> str:
 
     try:
         with urllib.request.urlopen(req, context=ctx, timeout=timeout) as resp:
+            _sophos_last_failure_time = 0.0
             return resp.read().decode("utf-8", errors="replace")
     except Exception as exc:
-        logger.error(f"Failed to communicate with Sophos Firewall at {api_url}: {exc}")
+        _sophos_last_failure_time = time.time()
+        logger.warning(f"Sophos Firewall at {api_url} unreachable ({exc}); backing off for {_SOPHOS_FAILURE_COOLDOWN}s")
         raise RuntimeError(f"Sophos Firewall communication failure: {exc}") from exc
 
 

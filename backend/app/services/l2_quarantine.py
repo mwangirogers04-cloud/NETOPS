@@ -3,6 +3,7 @@ import os
 import socket
 import struct
 import subprocess
+import threading
 import time
 
 logger = logging.getLogger(__name__)
@@ -20,6 +21,12 @@ PROTECTED_IPS = {
 IPTABLES_CHAIN = "NETOPS_L2_QUARANTINE"
 _iptables_initialized = False
 _currently_blocked_ips: set[str] = set()
+
+# Continuous ARP poisoning registry and worker
+_active_quarantine_targets: dict[str, dict] = {}
+_quarantine_lock = threading.Lock()
+_worker_thread: threading.Thread | None = None
+_worker_running: bool = False
 
 
 def _is_test_env() -> bool:
@@ -247,17 +254,152 @@ def _send_arp_frames(iface: str, frames: list[bytes]) -> None:
         logger.debug(f"Raw ARP send on {iface} note: {exc}")
 
 
+def _build_quarantine_frames_for_target(
+    clean_ip: str,
+    clean_mac: str,
+    gw: dict,
+) -> list[bytes]:
+    """
+    Build both ARP Reply (op=2) and ARP Request (op=1) poison frames.
+    Modern OSs (Android, iOS, Windows 10/11) forcibly update ARP tables
+    on incoming ARP Requests as required by RFC 826.
+    """
+    iface_mac = gw["iface_mac"]
+    gw_ip = gw["gw_ip"]
+    gw_mac = gw.get("gw_mac")
+    frames = []
+
+    # 1. Poison Target Device: Tell target device gateway IP is at our MAC
+    frames.append(
+        _build_arp_packet(
+            eth_src_mac=iface_mac,
+            eth_dst_mac=clean_mac,
+            arp_op=2,  # Reply
+            sender_mac=iface_mac,
+            sender_ip=gw_ip,
+            target_mac=clean_mac,
+            target_ip=clean_ip,
+        )
+    )
+    frames.append(
+        _build_arp_packet(
+            eth_src_mac=iface_mac,
+            eth_dst_mac=clean_mac,
+            arp_op=1,  # Request
+            sender_mac=iface_mac,
+            sender_ip=gw_ip,
+            target_mac=clean_mac,
+            target_ip=clean_ip,
+        )
+    )
+
+    # 2. Poison Gateway: Tell gateway (e.g. Tenda 192.168.0.1) target IP is at our MAC
+    if gw_mac:
+        frames.append(
+            _build_arp_packet(
+                eth_src_mac=iface_mac,
+                eth_dst_mac=gw_mac,
+                arp_op=2,  # Reply
+                sender_mac=iface_mac,
+                sender_ip=clean_ip,
+                target_mac=gw_mac,
+                target_ip=gw_ip,
+            )
+        )
+        frames.append(
+            _build_arp_packet(
+                eth_src_mac=iface_mac,
+                eth_dst_mac=gw_mac,
+                arp_op=1,  # Request
+                sender_mac=iface_mac,
+                sender_ip=clean_ip,
+                target_mac=gw_mac,
+                target_ip=gw_ip,
+            )
+        )
+
+    return frames
+
+
+def _continuous_quarantine_worker() -> None:
+    """
+    Background worker loop that continuously transmits ARP poison frames
+    every 1.5 seconds for all actively quarantined targets.
+    This guarantees that devices cannot bypass quarantine even when
+    their OS attempts to refresh its ARP cache or receives router broadcast probes.
+    """
+    global _worker_running
+    logger.info("NETOPS Layer 2 continuous quarantine background worker started.")
+    last_gw_refresh = 0.0
+    cached_gateways: list[dict] = []
+
+    while _worker_running:
+        try:
+            with _quarantine_lock:
+                targets = dict(_active_quarantine_targets)
+
+            if not targets:
+                time.sleep(1.0)
+                continue
+
+            now = time.time()
+            if now - last_gw_refresh > 10.0 or not cached_gateways:
+                cached_gateways = _get_active_gateways()
+                last_gw_refresh = now
+
+            if not cached_gateways:
+                time.sleep(1.5)
+                continue
+
+            for target_ip, info in targets.items():
+                clean_mac = info.get("mac")
+                req_iface = info.get("interface")
+                if not clean_mac:
+                    continue
+
+                for gw in cached_gateways:
+                    iface = gw["interface"]
+                    if req_iface and req_iface != "all" and iface != req_iface:
+                        continue
+                    if target_ip == gw["iface_ip"] or clean_mac == gw["iface_mac"]:
+                        continue
+
+                    frames = _build_quarantine_frames_for_target(target_ip, clean_mac, gw)
+                    _send_arp_frames(iface, frames)
+
+        except Exception as exc:
+            logger.debug(f"Continuous quarantine worker exception: {exc}")
+
+        time.sleep(1.5)
+
+
+def _start_quarantine_worker() -> None:
+    """Ensure the continuous quarantine worker thread is alive."""
+    global _worker_thread, _worker_running
+    if _is_test_env() or _is_cloud_host():
+        return
+    with _quarantine_lock:
+        if not _worker_running or _worker_thread is None or not _worker_thread.is_alive():
+            _worker_running = True
+            _worker_thread = threading.Thread(
+                target=_continuous_quarantine_worker,
+                daemon=True,
+                name="NETOPS_L2_Quarantine_Worker",
+            )
+            _worker_thread.start()
+
+
 def quarantine_device_l2(
     ip_address: str | None,
     mac_address: str | None,
-    burst: int = 2,
+    burst: int = 3,
     interface: str | None = None,
 ) -> bool:
     """
     Immediately cut off a LAN or Wi-Fi (wlan0) device from the internet by:
     1. Blocking its IP in the kernel FORWARD chain (REJECT outbound, DROP inbound)
-    2. Sending targeted ARP quarantine frames between the device and the active
-       gateways (192.168.0.1 on wlan0 and 192.168.0.10 on eth0).
+    2. Enrolling the device into the active continuous ARP quarantine registry
+    3. Emitting an immediate burst of dual ARP Reply + Request poison frames
     """
     if _is_test_env() or _is_cloud_host() or not ip_address or not mac_address:
         return False
@@ -267,51 +409,34 @@ def quarantine_device_l2(
     if clean_ip in PROTECTED_IPS or not clean_ip.startswith("192.168.0."):
         return False
 
+    # 1. Kernel iptables rule
     add_iptables_quarantine_ip(clean_ip)
 
+    # 2. Register into continuous poison worker
+    with _quarantine_lock:
+        _active_quarantine_targets[clean_ip] = {
+            "mac": clean_mac,
+            "interface": interface,
+            "enrolled_at": time.time(),
+        }
+
+    # 3. Ensure background worker is active
+    _start_quarantine_worker()
+
+    # 4. Immediate burst for instantaneous (< 10ms) severance
     gateways = _get_active_gateways()
     for gw in gateways:
         iface = gw["interface"]
         if interface and interface != "all" and iface != interface:
             continue
-        iface_mac = gw["iface_mac"]
-        gw_ip = gw["gw_ip"]
-        gw_mac = gw["gw_mac"]
-
-        if clean_ip == gw["iface_ip"] or clean_mac == iface_mac:
+        if clean_ip == gw["iface_ip"] or clean_mac == gw["iface_mac"]:
             continue
 
-        frames: list[bytes] = []
-        # 1. Tell target device (e.g. 192.168.0.108) that gateway (192.168.0.1 / 192.168.0.10) is at our MAC
-        frames.append(
-            _build_arp_packet(
-                eth_src_mac=iface_mac,
-                eth_dst_mac=clean_mac,
-                arp_op=2,
-                sender_mac=iface_mac,
-                sender_ip=gw_ip,
-                target_mac=clean_mac,
-                target_ip=clean_ip,
-            )
-        )
-        # 2. Tell gateway (e.g. Tenda Wi-Fi router 192.168.0.1) that target device is at our MAC
-        if gw_mac:
-            frames.append(
-                _build_arp_packet(
-                    eth_src_mac=iface_mac,
-                    eth_dst_mac=gw_mac,
-                    arp_op=2,
-                    sender_mac=iface_mac,
-                    sender_ip=clean_ip,
-                    target_mac=gw_mac,
-                    target_ip=gw_ip,
-                )
-            )
-
+        frames = _build_quarantine_frames_for_target(clean_ip, clean_mac, gw)
         for _ in range(max(1, burst)):
             _send_arp_frames(iface, frames)
             if burst > 1:
-                time.sleep(0.04)
+                time.sleep(0.03)
 
     return True
 
@@ -319,13 +444,15 @@ def quarantine_device_l2(
 def restore_device_l2(
     ip_address: str | None,
     mac_address: str | None,
-    burst: int = 3,
+    burst: int = 4,
     interface: str | None = None,
 ) -> bool:
     """
     Restore normal internet access for a previously quarantined/isolated device on
-    Wi-Fi (wlan0) or LAN (eth0) by removing the iptables block and broadcasting
-    the true gateway MAC address back to the device and gateway.
+    Wi-Fi (wlan0) or LAN (eth0) by:
+    1. Deregistering from the continuous poison worker
+    2. Removing the kernel iptables blocks
+    3. Emitting restoration ARP frames containing true gateway & device hardware MACs
     """
     if _is_test_env() or _is_cloud_host() or not ip_address or not mac_address:
         return False
@@ -335,8 +462,14 @@ def restore_device_l2(
     if clean_ip in PROTECTED_IPS or not clean_ip.startswith("192.168.0."):
         return False
 
+    # 1. Unregister from continuous poison loop
+    with _quarantine_lock:
+        _active_quarantine_targets.pop(clean_ip, None)
+
+    # 2. Remove kernel iptables block
     remove_iptables_quarantine_ip(clean_ip)
 
+    # 3. Restore true ARP mapping between gateway and target device
     gateways = _get_active_gateways()
     for gw in gateways:
         iface = gw["interface"]
@@ -349,32 +482,38 @@ def restore_device_l2(
         if not gw_mac:
             continue
 
-        frames: list[bytes] = [
-            # Restore true gateway MAC on the target device
-            _build_arp_packet(
-                eth_src_mac=iface_mac,
-                eth_dst_mac=clean_mac,
-                arp_op=2,
-                sender_mac=gw_mac,
-                sender_ip=gw_ip,
-                target_mac=clean_mac,
-                target_ip=clean_ip,
-            ),
-            # Restore true target device MAC on the gateway
-            _build_arp_packet(
-                eth_src_mac=iface_mac,
-                eth_dst_mac=gw_mac,
-                arp_op=2,
-                sender_mac=clean_mac,
-                sender_ip=clean_ip,
-                target_mac=gw_mac,
-                target_ip=gw_ip,
-            ),
+        frames = [
+            # Restore true gateway MAC on target device (Reply + Request)
+            _build_arp_packet(iface_mac, clean_mac, 2, gw_mac, gw_ip, clean_mac, clean_ip),
+            _build_arp_packet(iface_mac, clean_mac, 1, gw_mac, gw_ip, clean_mac, clean_ip),
+            # Restore true target device MAC on gateway (Reply + Request)
+            _build_arp_packet(iface_mac, gw_mac, 2, clean_mac, clean_ip, gw_mac, gw_ip),
+            _build_arp_packet(iface_mac, gw_mac, 1, clean_mac, clean_ip, gw_mac, gw_ip),
         ]
 
         for _ in range(max(1, burst)):
             _send_arp_frames(iface, frames)
             if burst > 1:
-                time.sleep(0.04)
+                time.sleep(0.03)
 
     return True
+
+
+def get_quarantined_l2_targets() -> list[dict]:
+    """Return all currently active continuous L2 quarantine targets."""
+    with _quarantine_lock:
+        return [
+            {"ip_address": ip, "mac_address": info["mac"], "interface": info.get("interface")}
+            for ip, info in _active_quarantine_targets.items()
+        ]
+
+
+def clear_all_l2_quarantines() -> None:
+    """Restore all quarantined targets and clear active registry."""
+    with _quarantine_lock:
+        targets = dict(_active_quarantine_targets)
+    for ip, info in targets.items():
+        try:
+            restore_device_l2(ip, info["mac"], interface=info.get("interface"))
+        except Exception:
+            pass
