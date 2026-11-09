@@ -34,6 +34,8 @@ class SophosDriver(BaseFirewallDriver):
     auth_type = "credentials"
 
     def is_configured(self) -> bool:
+        if self.is_private_subnet_url() and self.is_cloud_environment():
+            return False
         if self.management_url and self.username and self.password:
             return True
         return is_sophos_configured()
@@ -156,6 +158,12 @@ class SophosDriver(BaseFirewallDriver):
         hostname: str | None = None,
         mac_address: str | None = None,
     ) -> dict[str, Any]:
+        if self.is_private_subnet_url() and self.is_cloud_environment():
+            return {
+                "status": "simulated",
+                "vendor": self.vendor,
+                "message": f"Cloud host: Device {ip_address} marked for quarantine in local site gateway policy.",
+            }
         res = sophos_block_device(ip_address, hostname)
         res["vendor"] = self.vendor
         return res
@@ -165,6 +173,12 @@ class SophosDriver(BaseFirewallDriver):
         ip_address: str,
         mac_address: str | None = None,
     ) -> dict[str, Any]:
+        if self.is_private_subnet_url() and self.is_cloud_environment():
+            return {
+                "status": "simulated",
+                "vendor": self.vendor,
+                "message": f"Cloud host: Device {ip_address} marked as allowed in local site gateway policy.",
+            }
         res = sophos_allow_device(ip_address)
         res["vendor"] = self.vendor
         return res

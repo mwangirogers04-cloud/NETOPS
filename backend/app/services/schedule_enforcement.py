@@ -73,6 +73,11 @@ async def schedule_enforcement_loop():
             )
 
         finally:
+            try:
+                if db.is_active:
+                    db.rollback()
+            except Exception:
+                pass
             db.close()
 
         for _ in range(SCHEDULE_CHECK_INTERVAL):

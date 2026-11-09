@@ -169,32 +169,52 @@ def test_firewall_api_get_vendors():
 
 
 def test_firewall_api_config_and_test():
+    from sqlalchemy import select
+    from backend.app.database import SessionLocal
+    from backend.app.models.user import User
+    from backend.app.services.auth_service import hash_password
+    with SessionLocal() as db:
+        viewer = db.scalar(select(User).where(User.username == "test_viewer"))
+        if not viewer:
+            viewer = User(
+                username="test_viewer",
+                email="viewer@test.local",
+                hashed_password=hash_password("Pass123!"),
+                role="viewer",
+                is_active=True,
+                is_verified=True,
+            )
+            db.add(viewer)
+            db.commit()
+
+    viewer_token = create_access_token({"sub": "test_viewer", "role": "viewer"})
+    viewer_headers = {"Authorization": f"Bearer {viewer_token}"}
     admin_token = create_access_token({"sub": "admin", "role": "admin"})
     admin_headers = {"Authorization": f"Bearer {admin_token}"}
     dev_token = create_access_token({"sub": "developer", "role": "super_admin"})
     dev_headers = {"Authorization": f"Bearer {dev_token}"}
 
-    # 1. Administrator is DENIED testing firewall credentials (403 Forbidden)
-    res_admin_test = client.post("/firewall/test", headers=admin_headers, json={"vendor": "simulation"})
-    assert res_admin_test.status_code == 403
+    # 1. Standard viewer user is DENIED testing firewall credentials (403 Forbidden)
+    res_viewer_test = client.post("/firewall/test", headers=viewer_headers, json={"vendor": "simulation"})
+    assert res_viewer_test.status_code == 403
 
-    # 2. Super Administrator is ALLOWED testing firewall credentials (200 OK)
-    res_test = client.post("/firewall/test", headers=dev_headers, json={"vendor": "simulation"})
+    # 2. Administrator is ALLOWED testing firewall credentials (200 OK)
+    res_test = client.post("/firewall/test", headers=admin_headers, json={"vendor": "simulation"})
     assert res_test.status_code == 200
     assert res_test.json()["connected"] is True
 
-    # 3. Administrator is DENIED saving firewall configuration/secrets (403 Forbidden)
+    # 3. Standard viewer is DENIED saving firewall configuration/secrets (403 Forbidden)
     payload = {
         "vendor": "simulation",
         "name": "Test Simulation Profile",
         "management_url": "simulation://internal",
         "is_active": True,
     }
-    res_admin_save = client.post("/firewall/config", headers=admin_headers, json=payload)
-    assert res_admin_save.status_code == 403
+    res_viewer_save = client.post("/firewall/config", headers=viewer_headers, json=payload)
+    assert res_viewer_save.status_code == 403
 
-    # 4. Super Administrator is ALLOWED saving firewall configuration/secrets (200 OK)
-    res_save = client.post("/firewall/config", headers=dev_headers, json=payload)
+    # 4. Administrator is ALLOWED saving firewall configuration/secrets (200 OK)
+    res_save = client.post("/firewall/config", headers=admin_headers, json=payload)
     assert res_save.status_code == 200
     assert res_save.json()["status"] == "success"
     cfg_id = res_save.json()["config_id"]

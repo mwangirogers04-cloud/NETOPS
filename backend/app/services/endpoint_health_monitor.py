@@ -475,6 +475,11 @@ async def endpoint_health_monitor_loop():
             print(f"[ENDPOINT HEALTH] Monitor error: {error}")
 
         finally:
+            try:
+                if db.is_active:
+                    db.rollback()
+            except Exception:
+                pass
             db.close()
 
         await asyncio.sleep(CHECK_INTERVAL_SECONDS)

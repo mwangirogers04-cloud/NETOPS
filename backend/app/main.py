@@ -214,6 +214,11 @@ async def event_broadcaster():
                     last_event_id = event.id
 
             finally:
+                try:
+                    if db.is_active:
+                        db.rollback()
+                except Exception:
+                    pass
                 db.close()
 
         except Exception as error:
@@ -236,10 +241,16 @@ async def scheduled_patch_loop():
         try:
             evaluate_auto_off_hours_policy(db)
             dispatch_due_scheduled_jobs(db)
+            db.commit()
         except Exception as err:
             db.rollback()
             print(f"[PATCH-SCHEDULER] Error in patch scheduler loop: {err}")
         finally:
+            try:
+                if db.is_active:
+                    db.rollback()
+            except Exception:
+                pass
             db.close()
         await asyncio.sleep(3)
 
@@ -270,7 +281,16 @@ async def scheduled_switch_backup_loop():
                     db = SessionLocal()
                     try:
                         execute_automated_backup_cycle(db, triggered_by="auto_loop")
+                        db.commit()
+                    except Exception as b_err:
+                        db.rollback()
+                        print(f"[SWITCH-BACKUP] Auto backup error: {b_err}")
                     finally:
+                        try:
+                            if db.is_active:
+                                db.rollback()
+                        except Exception:
+                            pass
                         db.close()
         except Exception as err:
             print(f"[SWITCH-BACKUP-SCHEDULER] Error in auto backup loop: {err}")

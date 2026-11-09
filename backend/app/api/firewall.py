@@ -96,7 +96,7 @@ def get_firewall_configuration(db: Session = Depends(get_db)):
 @router.post("/config")
 def save_firewall_configuration(
     req: FirewallConfigRequest,
-    current_user: User = Depends(require_super_admin),
+    current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Create or update a firewall profile and optionally set it as active (Admins & Super Admins)."""
@@ -172,7 +172,7 @@ def save_firewall_configuration(
 @router.post("/activate/{config_id}")
 def activate_firewall_configuration(
     config_id: int,
-    current_user: User = Depends(require_super_admin),
+    current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Set a specific saved firewall profile as active (Super Admin only)."""
@@ -191,7 +191,7 @@ def activate_firewall_configuration(
 @router.post("/test")
 def test_firewall_connection(
     req: TestConnectionRequest,
-    current_user: User = Depends(require_super_admin),
+    current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Test connection to a firewall appliance using supplied credentials (Admins & Super Admins)."""

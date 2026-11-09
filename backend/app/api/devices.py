@@ -1295,15 +1295,15 @@ def _quarantine_and_block_device_on_network(device: Device):
             quarantine_device_l2(ip_address, mac_address, burst=3, interface=getattr(device, "network_interface", None))
         except Exception:
             pass
+
+    # 2. Asynchronous firewall block in background thread (strictly non-blocking)
+    def _async_firewall_block(target_ip, target_host, target_mac):
         try:
             active_fw = get_active_firewall_driver()
             if active_fw and active_fw.is_configured():
-                active_fw.block_device(ip_address, hostname, mac_address)
+                active_fw.block_device(target_ip, target_host, target_mac)
         except Exception:
             pass
-
-    # 2. Asynchronous firewall block in background thread (non-blocking)
-    def _async_firewall_block(target_ip, target_host):
         try:
             if is_sophos_configured() and target_ip:
                 sophos_block_device(target_ip, target_host)
@@ -1313,7 +1313,7 @@ def _quarantine_and_block_device_on_network(device: Device):
     if ip_address:
         threading.Thread(
             target=_async_firewall_block,
-            args=(ip_address, hostname),
+            args=(ip_address, hostname, mac_address),
             daemon=True,
         ).start()
 
@@ -1385,24 +1385,31 @@ def delete_device_permanently(
     hostname = device.hostname or "Unknown Host"
     ip_address = device.ip_address or "No IP"
 
-    _purge_device_records(db, device)
+    try:
+        _purge_device_records(db, device)
 
-    actor_username = current_user.username
-    actor_label = f"{str(current_user.role).title()} '{current_user.username}'"
+        actor_username = current_user.username
+        actor_label = f"{str(current_user.role).title()} '{current_user.username}'"
 
-    # Log permanent deletion event
-    create_event(
-        db,
-        "device_permanently_deleted",
-        (
-            f"Machine permanently deleted from inventory by {actor_label}: {hostname} ({ip_address} / {mac_address}). "
-            f"Internet access immediately denied and device quarantined across firewalls and switches. "
-            f"Future connections will be treated as new devices requiring full approval procedure."
-        ),
-        None,
-        actor=actor_username,
-    )
-    db.commit()
+        # Log permanent deletion event
+        create_event(
+            db,
+            "device_permanently_deleted",
+            (
+                f"Machine permanently deleted from inventory by {actor_label}: {hostname} ({ip_address} / {mac_address}). "
+                f"Internet access immediately denied and device quarantined across firewalls and switches. "
+                f"Future connections will be treated as new devices requiring full approval procedure."
+            ),
+            None,
+            actor=actor_username,
+        )
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to permanently delete device: {str(exc)}",
+        )
 
     return {
         "status": "deleted",
@@ -1433,27 +1440,34 @@ def bulk_delete_devices_permanently(
     deleted_count = 0
     deleted_names = []
 
-    for device in devices:
-        name = device.hostname or device.mac_address
-        deleted_names.append(name)
-        _purge_device_records(db, device)
-        deleted_count += 1
+    try:
+        for device in devices:
+            name = device.hostname or device.mac_address
+            deleted_names.append(name)
+            _purge_device_records(db, device)
+            deleted_count += 1
 
-    actor_username = current_user.username
-    actor_label = f"{str(current_user.role).title()} '{current_user.username}'"
+        actor_username = current_user.username
+        actor_label = f"{str(current_user.role).title()} '{current_user.username}'"
 
-    create_event(
-        db,
-        "devices_bulk_deleted",
-        (
-            f"Permanently deleted {deleted_count} machine(s) from inventory by {actor_label}: "
-            f"{', '.join(deleted_names[:8])}{'...' if len(deleted_names) > 8 else ''}. "
-            f"All state cleared. Future connections will be treated as new devices."
-        ),
-        None,
-        actor=actor_username,
-    )
-    db.commit()
+        create_event(
+            db,
+            "devices_bulk_deleted",
+            (
+                f"Permanently deleted {deleted_count} machine(s) from inventory by {actor_label}: "
+                f"{', '.join(deleted_names[:8])}{'...' if len(deleted_names) > 8 else ''}. "
+                f"All state cleared. Future connections will be treated as new devices."
+            ),
+            None,
+            actor=actor_username,
+        )
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to bulk delete devices: {str(exc)}",
+        )
 
     return {
         "status": "bulk_deleted",

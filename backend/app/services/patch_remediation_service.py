@@ -821,6 +821,11 @@ def _execute_local_patch_job(job_id: int):
             log_output=f"\n[{now_str}] Error during local update execution: {exc}",
         )
     finally:
+        try:
+            if db.is_active:
+                db.rollback()
+        except Exception:
+            pass
         db.close()
 
 
@@ -1471,6 +1476,11 @@ def _execute_remote_remediation_job(job_id: int):
             log_output=f"\n[{now_str}] Error during remote update deployment: {exc}",
         )
     finally:
+        try:
+            if db.is_active:
+                db.rollback()
+        except Exception:
+            pass
         db.close()
 
 

@@ -26,6 +26,8 @@ class FortinetDriver(BaseFirewallDriver):
     auth_type = "api_token"
 
     def is_configured(self) -> bool:
+        if self.is_private_subnet_url() and self.is_cloud_environment():
+            return False
         return bool(self.management_url and (self.api_key or (self.username and self.password)))
 
     def _get_headers(self) -> dict[str, str]:
