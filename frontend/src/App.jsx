@@ -931,7 +931,8 @@ function App() {
 
   const loadDevices = async () => {
     try {
-      const response = await fetch(`${API_URL}/devices/`, {
+      const scopeParam = (isAdmin || isSuperAdmin) ? "?scope=all" : "";
+      const response = await fetch(`${API_URL}/devices/${scopeParam}`, {
         headers: getAuthHeaders(),
       });
 
@@ -1323,7 +1324,8 @@ const loadEvents = async () => {
       // Only notify while the device is still awaiting approval.
       let stillPending = false;
       try {
-        const res = await fetch(`${API_URL}/devices/`, {
+        const scopeParam = (isAdmin || isSuperAdmin) ? "?scope=all" : "";
+        const res = await fetch(`${API_URL}/devices/${scopeParam}`, {
           headers: getAuthHeaders(),
         });
         if (res.ok) {

@@ -229,8 +229,8 @@ def get_devices(
         current_user.role in ("admin", "super_admin")
         or current_user.username.lower() in ("developer", "admin")
     )
-    if is_admin and scope == "all":
-        # Super admin / Admin explicitly requesting fleet-wide device inventory across all users
+    if current_user.role == "super_admin" or (is_admin and scope == "all"):
+        # Super admin / Fleet-wide management across all network devices
         pass
     elif is_admin and scope and scope.startswith("user_"):
         try:
@@ -239,9 +239,7 @@ def get_devices(
         except ValueError:
             query = query.where(Device.owner_id == current_user.id)
     else:
-        # Strict per-user network isolation by default:
-        # Every user (including admins, developers, and tenant accounts) starts with
-        # 0 devices until they run a discovery scan on their local network.
+        # Strict per-user network isolation for standard users
         query = query.where(Device.owner_id == current_user.id)
 
     devices = db.scalars(query).all()
