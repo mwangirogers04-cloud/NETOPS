@@ -581,27 +581,12 @@ def disallow_device(
     # --------------------------------------------------------
     # REMOVE INTERNET ACCESS WITHOUT REJECTING DEVICE
     # Disconnected device automatically moves to Quarantine VLAN 90
+    # Note: Configured access schedules remain intact unless explicitly reset
     # --------------------------------------------------------
 
     device.internet_access_authorized = False
     device.enforcement_status = "quarantined"
     device.vlan_id = 90
-
-    # When manually disconnected, disable active access schedules so the manual
-    # disconnect is respected
-    try:
-        active_schedules = (
-            db.query(AccessSchedule)
-            .filter(
-                AccessSchedule.device_id == device.id,
-                AccessSchedule.enabled.is_(True),
-            )
-            .all()
-        )
-        for sch in active_schedules:
-            sch.enabled = False
-    except Exception:
-        pass
 
     result = enforce_device_access(
         device,

@@ -30,7 +30,11 @@ async def schedule_enforcement_loop():
                 select(Device).order_by(Device.id)
             ).all()
 
-            current_datetime = datetime.now()
+            try:
+                import zoneinfo
+                current_datetime = datetime.now(zoneinfo.ZoneInfo("Africa/Nairobi"))
+            except Exception:
+                current_datetime = datetime.now()
             quarantined_online_targets: list[tuple[str, str, str | None]] = []
 
             for device in devices:

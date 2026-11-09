@@ -86,33 +86,29 @@ def enforce_device_access(
                 current_datetime=current_datetime,
             )
             if schedule_allows_access:
-                # Active schedule currently allows access.
-                # If device is rejected: it must still wait for the admin or developer
-                # to give it internet access since it is a new/rejected device.
-                # Zero-Trust Policy: Unapproved devices (pending or rejected) must remain strictly quarantined in VLAN 90.
-                # Access schedules only grant internet access to devices that have been explicitly approved by an administrator.
-                if getattr(device, "approval_status", None) != "approved":
+                recognized_type = normalize_device_type(device.device_type)
+                if not recognized_type:
+                    classified = classify_device(
+                        hostname=getattr(device, "hostname", None),
+                        vendor=getattr(device, "vendor", None),
+                        mac_address=getattr(device, "mac_address", None),
+                    )
+                    recognized_type = normalize_device_type(classified)
+                    if recognized_type:
+                        device.device_type = recognized_type
+
+                if device.approval_status == "rejected" or (device.approval_status != "approved" and not recognized_type):
                     decision = "quarantine"
                     device.internet_access_authorized = False
                     device.vlan_id = 90
                 else:
-                    recognized_type = normalize_device_type(device.device_type)
-                    if not recognized_type:
-                        classified = classify_device(
-                            hostname=getattr(device, "hostname", None),
-                            vendor=getattr(device, "vendor", None),
-                            mac_address=getattr(device, "mac_address", None),
-                        )
-                        recognized_type = normalize_device_type(classified)
-                        if recognized_type:
-                            device.device_type = recognized_type
-
+                    if device.approval_status != "approved":
+                        device.approval_status = "approved"
                     device.internet_access_authorized = True
                     target_vlan = get_vlan_for_device_type(recognized_type) if recognized_type else 20
                     if getattr(device, "vlan_id", None) == 90 or not getattr(device, "vlan_id", None):
                         device.vlan_id = target_vlan
-                    if getattr(device, "status", None) != "online" and (device.ip_address or device.mac_address):
-                        device.status = "online"
+                    device.status = "online"
                     decision = "allowed"
             else:
                 # Active schedule currently outside allowed hours -> quarantine on VLAN 90
@@ -240,7 +236,9 @@ def enforce_device_access(
     # ---------------------------------------------------------
 
     device.enforcement_status = enforcement_status
-    if not device.status:
+    if enforcement_status in ("quarantined", "isolated"):
+        device.status = "offline"
+    else:
         device.status = "online"
 
     # ---------------------------------------------------------

@@ -1,8 +1,11 @@
 from datetime import datetime, time
+import zoneinfo
 
 from sqlalchemy.orm import Session
 
 from ..models.access_schedule import AccessSchedule
+
+DEFAULT_TIMEZONE = zoneinfo.ZoneInfo("Africa/Nairobi")
 
 
 def is_access_allowed(
@@ -20,7 +23,15 @@ def is_access_allowed(
     """
 
     if current_datetime is None:
-        current_datetime = datetime.now()
+        try:
+            current_datetime = datetime.now(DEFAULT_TIMEZONE)
+        except Exception:
+            current_datetime = datetime.now()
+    elif current_datetime.tzinfo is not None:
+        try:
+            current_datetime = current_datetime.astimezone(DEFAULT_TIMEZONE)
+        except Exception:
+            pass
 
     if current_time is None:
         ct = current_datetime.time()

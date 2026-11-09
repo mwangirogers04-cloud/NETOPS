@@ -52,8 +52,7 @@ def get_combined_access_decision(
     # ---------------------------------------------------------
     if has_active_schedule:
         if schedule_allows_access:
-            # Zero-Trust Policy: Devices not approved by admin (pending or rejected) remain quarantined
-            if device.approval_status != "approved":
+            if device.approval_status == "rejected" or (device.approval_status != "approved" and not recognized_type):
                 return {
                     "device_id": device.id,
                     "ip_address": device.ip_address,

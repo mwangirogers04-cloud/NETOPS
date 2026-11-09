@@ -55,6 +55,10 @@ def create_access_schedule(
             detail="Device not found",
         )
 
+    # When an administrator schedules a device, it is approved for scheduled access
+    if device.approval_status == "pending":
+        device.approval_status = "approved"
+
     now = datetime.now()
     new_schedule = AccessSchedule(
         device_id=schedule.device_id,
@@ -131,6 +135,10 @@ def update_access_schedule(
             status_code=404,
             detail="Device not found",
         )
+
+    # When an administrator schedules a device, it is approved for scheduled access
+    if device.approval_status == "pending":
+        device.approval_status = "approved"
 
     schedule.device_id = schedule_data.device_id
     schedule.enabled = schedule_data.enabled
@@ -299,6 +307,10 @@ def get_device_access_decision(
             status_code=404,
             detail="Device not found",
         )
+
+    # When an administrator schedules a device, it is approved for scheduled access
+    if device.approval_status == "pending":
+        device.approval_status = "approved"
 
     allowed = is_access_allowed(db, device_id)
 
