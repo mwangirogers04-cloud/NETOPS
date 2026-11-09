@@ -13,16 +13,16 @@ if db_url.startswith("sqlite"):
     )
 else:
     # PostgreSQL with psycopg / psycopg2:
-    # pool_size=5, max_overflow=5 (max 10 connections) optimized for 512MB RAM cloud VMs to prevent swap thrashing.
-    # 1. idle_in_transaction_session_timeout=60000: Terminates any transaction idle > 60s to prevent lock-ups without prematurely killing slow requests.
+    # pool_size=10, max_overflow=10 (up to 20 connections max) with pool_timeout=30s
+    # 1. idle_in_transaction_session_timeout=60000: Terminates any transaction idle > 60s
     # 2. statement_timeout=30000: Terminates any hanging query > 30s.
     engine = create_engine(
         db_url,
         pool_pre_ping=True,
-        pool_size=5,
-        max_overflow=5,
+        pool_size=10,
+        max_overflow=10,
         pool_recycle=180,
-        pool_timeout=15,
+        pool_timeout=30,
         connect_args={
             "options": "-c idle_in_transaction_session_timeout=60000 -c statement_timeout=30000"
         },

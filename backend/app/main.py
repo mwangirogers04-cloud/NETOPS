@@ -226,7 +226,7 @@ async def event_broadcaster():
                 f"[WEBSOCKET] Event broadcaster error: {error}"
             )
 
-        await asyncio.sleep(1)
+        await asyncio.sleep(2)
 
 
 # ---------------------------------------------------------
@@ -235,7 +235,7 @@ async def event_broadcaster():
 
 
 async def scheduled_patch_loop():
-    """Evaluate scheduled patch remediation jobs and auto off-hours policy every 3 seconds."""
+    """Evaluate scheduled patch remediation jobs and auto off-hours policy every 10 seconds."""
     while True:
         db = SessionLocal()
         try:
@@ -252,7 +252,7 @@ async def scheduled_patch_loop():
             except Exception:
                 pass
             db.close()
-        await asyncio.sleep(3)
+        await asyncio.sleep(10)
 
 
 async def scheduled_switch_backup_loop():
