@@ -5140,92 +5140,190 @@ const LanScannerPage = () => {
                             justifyContent: "flex-end",
                           }}
                         >
-                          {/* TOGGLE INTERNET */}
-                          {isAllowed ? (
-                            <button
-                              className="danger-button small"
-                              type="button"
-                              onClick={() =>
-                                deviceAction(device.id, "disallow")
-                              }
-                              disabled={
-                                actionLoading === `disallow-${device.id}`
-                              }
-                              title="Instantly block Internet access on Firewall"
-                            >
-                              {actionLoading === `disallow-${device.id}`
-                                ? "Blocking..."
-                                : "🚫 Disconnect"}
-                            </button>
+                          {/* 1. IF PENDING: SHOW APPROVE (PRIMARY), SCHEDULE, REJECT */}
+                          {device.approval_status === "pending" ? (
+                            <>
+                              <button
+                                className="primary-button small"
+                                type="button"
+                                onClick={() =>
+                                  deviceAction(device.id, "approve")
+                                }
+                                disabled={
+                                  actionLoading === `approve-${device.id}`
+                                }
+                                style={{
+                                  background: "#2563eb",
+                                  borderColor: "#1d4ed8",
+                                  fontWeight: "700",
+                                }}
+                                title="Approve device into its functional VLAN (Internet remains blocked until explicitly allowed)"
+                              >
+                                {actionLoading === `approve-${device.id}`
+                                  ? "Approving..."
+                                  : "✓ Approve"}
+                              </button>
+
+                              <button
+                                className="secondary-button small"
+                                type="button"
+                                style={
+                                  scheduleForm.device_id === device.id
+                                    ? { background: "rgba(59, 130, 246, 0.25)", borderColor: "#3b82f6", color: "#2563eb", fontWeight: "700" }
+                                    : {}
+                                }
+                                onClick={() => openScheduleModal(device)}
+                                title="Schedule access instead of approving immediately"
+                              >
+                                {scheduleForm.device_id === device.id ? "✕ Close Schedule" : "⏱️ Schedule"}
+                              </button>
+
+                              <button
+                                className="secondary-button small"
+                                type="button"
+                                onClick={() =>
+                                  deviceAction(device.id, "reject")
+                                }
+                                disabled={
+                                  actionLoading === `reject-${device.id}`
+                                }
+                                style={{
+                                  color: "#dc2626",
+                                  borderColor: "rgba(239, 68, 68, 0.4)",
+                                }}
+                                title="Reject this device"
+                              >
+                                {actionLoading === `reject-${device.id}`
+                                  ? "Rejecting..."
+                                  : "✕ Reject"}
+                              </button>
+                            </>
                           ) : (
-                            <button
-                              className="primary-button small"
-                              type="button"
-                              onClick={() =>
-                                deviceAction(device.id, "allow")
-                              }
-                              disabled={
-                                actionLoading === `allow-${device.id}`
-                              }
-                              style={{
-                                background: "#10b981",
-                                borderColor: "#10b981",
-                              }}
-                              title="Allow Internet access on Firewall"
-                            >
-                              {actionLoading === `allow-${device.id}`
-                                ? "Allowing..."
-                                : "✓ Allow Internet"}
-                            </button>
-                          )}
+                            <>
+                              {/* 2. IF APPROVED / ACTIVE: INTERNET AUTHORIZATION & ISOLATION */}
+                              {device.enforcement_status === "isolated" ? (
+                                <button
+                                  className="primary-button small"
+                                  type="button"
+                                  style={{
+                                    backgroundColor: "#7e22ce",
+                                    borderColor: "#a855f7",
+                                    fontWeight: "600",
+                                  }}
+                                  onClick={() =>
+                                    deviceAction(device.id, "unisolate")
+                                  }
+                                  disabled={
+                                    actionLoading === `unisolate-${device.id}`
+                                  }
+                                  title="Release device from isolation and restore operational VLAN"
+                                >
+                                  {actionLoading === `unisolate-${device.id}`
+                                    ? "Releasing..."
+                                    : "🔓 Release"}
+                                </button>
+                              ) : isAllowed ? (
+                                <>
+                                  <button
+                                    className="danger-button small"
+                                    type="button"
+                                    onClick={() =>
+                                      deviceAction(device.id, "disallow")
+                                    }
+                                    disabled={
+                                      actionLoading === `disallow-${device.id}`
+                                    }
+                                    title="Block Internet access on Firewall"
+                                  >
+                                    {actionLoading === `disallow-${device.id}`
+                                      ? "Blocking..."
+                                      : "🚫 Block Internet"}
+                                  </button>
 
-                          {/* SET ACCESS SCHEDULE */}
-                          <button
-                            className="secondary-button small"
-                            type="button"
-                            style={
-                              scheduleForm.device_id === device.id
-                                ? { background: "rgba(59, 130, 246, 0.25)", borderColor: "#3b82f6", color: "#2563eb", fontWeight: "700" }
-                                : {}
-                            }
-                            onClick={() => openScheduleModal(device)}
-                            title="Set access schedule inline right below this device"
-                          >
-                            {scheduleForm.device_id === device.id ? "✕ Close Schedule" : "⏱️ Schedule"}
-                          </button>
+                                  <button
+                                    className="secondary-button small"
+                                    type="button"
+                                    style={{
+                                      borderColor: "#a855f7",
+                                      color: "#7e22ce",
+                                      background: "rgba(147, 51, 234, 0.15)",
+                                      fontWeight: "600",
+                                    }}
+                                    onClick={() =>
+                                      deviceAction(device.id, "isolate")
+                                    }
+                                    disabled={
+                                      actionLoading === `isolate-${device.id}`
+                                    }
+                                    title="Isolate device to Quarantine VLAN 90 and block network/Internet"
+                                  >
+                                    {actionLoading === `isolate-${device.id}`
+                                      ? "Isolating..."
+                                      : "🔒 Isolate"}
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  <button
+                                    className="primary-button small"
+                                    type="button"
+                                    onClick={() =>
+                                      deviceAction(device.id, "allow")
+                                    }
+                                    disabled={
+                                      actionLoading === `allow-${device.id}`
+                                    }
+                                    style={{
+                                      background: "#10b981",
+                                      borderColor: "#10b981",
+                                      fontWeight: "700",
+                                    }}
+                                    title="Device is approved. Click to authorize Internet access on Firewall"
+                                  >
+                                    {actionLoading === `allow-${device.id}`
+                                      ? "Allowing..."
+                                      : "✓ Allow Internet"}
+                                  </button>
 
-                          {/* MOVE TO QUARANTINE VLAN */}
-                          {device.vlan_id !== 90 && (
-                            <button
-                              className="secondary-button small"
-                              type="button"
-                              onClick={() =>
-                                deviceAction(device.id, "vlan", 90)
-                              }
-                              style={{
-                                color: "#dc2626",
-                                borderColor: "rgba(239, 68, 68, 0.4)",
-                              }}
-                              title="Move device to Quarantine VLAN 90"
-                            >
-                              🛡️ Quarantine
-                            </button>
-                          )}
+                                  <button
+                                    className="secondary-button small"
+                                    type="button"
+                                    style={{
+                                      borderColor: "#a855f7",
+                                      color: "#7e22ce",
+                                      background: "rgba(147, 51, 234, 0.15)",
+                                      fontWeight: "600",
+                                    }}
+                                    onClick={() =>
+                                      deviceAction(device.id, "isolate")
+                                    }
+                                    disabled={
+                                      actionLoading === `isolate-${device.id}`
+                                    }
+                                    title="Isolate device to Quarantine VLAN 90 and block network/Internet"
+                                  >
+                                    {actionLoading === `isolate-${device.id}`
+                                      ? "Isolating..."
+                                      : "🔒 Isolate"}
+                                  </button>
+                                </>
+                              )}
 
-                          {/* APPROVE IF PENDING */}
-                          {device.approval_status === "pending" && (
-                            <button
-                              className="primary-button small"
-                              type="button"
-                              onClick={() =>
-                                deviceAction(device.id, "approve")
-                              }
-                              disabled={
-                                actionLoading === `approve-${device.id}`
-                              }
-                            >
-                              Approve
-                            </button>
+                              {/* SET ACCESS SCHEDULE */}
+                              <button
+                                className="secondary-button small"
+                                type="button"
+                                style={
+                                  scheduleForm.device_id === device.id
+                                    ? { background: "rgba(59, 130, 246, 0.25)", borderColor: "#3b82f6", color: "#2563eb", fontWeight: "700" }
+                                    : {}
+                                }
+                                onClick={() => openScheduleModal(device)}
+                                title="Set access schedule inline right below this device"
+                              >
+                                {scheduleForm.device_id === device.id ? "✕ Close Schedule" : "⏱️ Schedule"}
+                              </button>
+                            </>
                           )}
 
                           {/* RESET FOR EXPERIMENT */}
@@ -5241,8 +5339,8 @@ const LanScannerPage = () => {
                             title="Reset this machine to unapproved Quarantine state and trigger the LAN Connection Notification to start the experiment from Step 1"
                           >
                             {actionLoading === `reset-experiment-${device.id}`
-                              ? "Resetting..."
-                              : "🧪 Reset Experiment"}
+                              ? "..."
+                              : "🧪 Reset"}
                           </button>
                         </div>
                       </td>
@@ -10534,16 +10632,16 @@ const Dashboard = () => {
                                 </button>
                               )}
 
-                              {device.enforcement_status === "quarantined" && (
+                              {device.approval_status === "approved" && device.enforcement_status !== "allowed" && (
                                 <button
                                   type="button"
                                   className="secondary-button small"
-                                  style={{ padding: "3px 8px", fontSize: "11px", color: "#059669", borderColor: "#10b981" }}
+                                  style={{ padding: "3px 8px", fontSize: "11px", color: "#059669", borderColor: "#10b981", fontWeight: "700" }}
                                   onClick={() => deviceAction(device.id, "allow")}
                                   disabled={actionLoading === `allow-${device.id}`}
                                   title="Authorize Internet Access"
                                 >
-                                  {actionLoading === `allow-${device.id}` ? "..." : "Allow"}
+                                  {actionLoading === `allow-${device.id}` ? "..." : "✓ Allow Internet"}
                                 </button>
                               )}
 
