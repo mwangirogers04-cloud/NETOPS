@@ -9,7 +9,7 @@ from ..models.endpoint_update import EndpointUpdate
 from ..models.device import Device
 from ..models.patch_job import PatchJob
 from ..models.user import User
-from ..services.auth_service import require_super_admin, get_optional_current_user
+from ..services.auth_service import require_admin, require_super_admin, get_optional_current_user
 from ..schemas.patch_job import (
     CreatePatchJobRequest,
     UpdateJobStatusRequest,

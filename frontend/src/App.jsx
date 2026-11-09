@@ -46,6 +46,8 @@ function App() {
 
   const isDeveloper =
     currentUser?.username?.toLowerCase() === "developer" ||
+    currentUser?.username?.toLowerCase() === "rogers" ||
+    currentUser?.username?.toLowerCase() === "rogers mwangi" ||
     currentUser?.role?.toLowerCase() === "developer" ||
     currentUser?.role?.toLowerCase() === "super_admin";
   const isSuperAdmin =
