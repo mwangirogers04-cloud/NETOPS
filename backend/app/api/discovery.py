@@ -123,6 +123,22 @@ def generate_cloud_subnet_devices(target_network: str, clean_iface: str | None, 
             "oui": "70:85:C2",
             "interface": iface_eth,
         },
+        {
+            "host_suffix": 150,
+            "hostname": "Conference-SmartTV",
+            "vendor": "Samsung Electronics",
+            "device_type": "iot",
+            "oui": "58:20:B1",
+            "interface": iface_wlan,
+        },
+        {
+            "host_suffix": 200,
+            "hostname": "Security-Camera-LAN",
+            "vendor": "Raspberry Pi Foundation",
+            "device_type": "iot",
+            "oui": "EC:FA:BC",
+            "interface": iface_eth,
+        },
     ]
 
     devices = []
@@ -197,13 +213,29 @@ def run_discovery_scan(
 
         # If physical ARP/ping discovery found no devices (e.g. running on a cloud host
         # or remote VPS unable to reach the private LAN directly), generate isolated endpoints
-        # for this user's custom subnet.
+        # for this user's custom subnet, preserving any existing endpoints registered to this user.
         if not discovered_devices:
             discovered_devices = generate_cloud_subnet_devices(
                 target_network=target_network,
                 clean_iface=clean_iface,
                 owner_id=owner_id,
             )
+            if owner_id is not None:
+                existing_user_devs = db.scalars(
+                    select(Device).where(Device.owner_id == owner_id)
+                ).all()
+                existing_macs = {d["mac_address"].upper() for d in discovered_devices if d.get("mac_address")}
+                for u_dev in existing_user_devs:
+                    if u_dev.mac_address and u_dev.mac_address.upper() not in existing_macs:
+                        discovered_devices.append({
+                            "ip_address": u_dev.ip_address,
+                            "mac_address": u_dev.mac_address.upper(),
+                            "hostname": u_dev.hostname,
+                            "vendor": u_dev.vendor,
+                            "device_type": u_dev.device_type,
+                            "network_interface": u_dev.network_interface or clean_iface,
+                            "status": "online",
+                        })
 
         saved_devices = save_discovered_devices(
             discovered_devices,

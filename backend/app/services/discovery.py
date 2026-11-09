@@ -119,6 +119,46 @@ COMMON_OUI_MAP = {
     # VMware
     "00:0C:29": "VMware Inc.",
     "00:50:56": "VMware Inc.",
+    # Espressif IoT (ESP32, ESP8266, smart plugs, sensors)
+    "24:0A:C4": "Espressif Inc.",
+    "30:AE:A4": "Espressif Inc.",
+    "84:F3:EB": "Espressif Inc.",
+    "A4:CF:12": "Espressif Inc.",
+    "D8:BF:C0": "Espressif Inc.",
+    # Amazon (Echo, Alexa, Fire TV, Ring)
+    "FC:65:DE": "Amazon Technologies",
+    "50:DC:E7": "Amazon Technologies",
+    "74:C2:46": "Amazon Technologies",
+    "68:37:E9": "Amazon Technologies",
+    "AC:63:BE": "Amazon Technologies",
+    # Google (Chromecast, Nest, Home)
+    "54:60:09": "Google LLC",
+    "F4:F5:D8": "Google LLC",
+    "D8:6C:63": "Google LLC",
+    "A4:77:33": "Google LLC",
+    # Ubiquiti Networks (UniFi APs, switches, routers)
+    "F0:9F:C2": "Ubiquiti Networks",
+    "B4:FB:E4": "Ubiquiti Networks",
+    "78:8A:20": "Ubiquiti Networks",
+    "24:A4:3C": "Ubiquiti Networks",
+    # Hikvision & Dahua (IP CCTV Cameras)
+    "C4:2F:90": "Hikvision Digital",
+    "44:19:B6": "Hikvision Digital",
+    "BC:BA:C2": "Dahua Technology",
+    # Brother / Epson Printers
+    "00:80:77": "Brother Industries",
+    "30:05:5C": "Brother Industries",
+    "00:26:AB": "Seiko Epson Corp.",
+    # Synology / QNAP NAS
+    "00:11:32": "Synology Inc.",
+    "00:08:9B": "QNAP Systems",
+    # Lenovo / Huawei / Xiaomi
+    "00:59:07": "Lenovo Mobile",
+    "70:72:3C": "Lenovo",
+    "00:E0:FC": "Huawei Technologies",
+    "48:46:FB": "Huawei Technologies",
+    "64:09:80": "Xiaomi Communications",
+    "78:11:DC": "Xiaomi Communications",
 }
 
 
@@ -334,52 +374,65 @@ def _is_test_env() -> bool:
 
 def awaken_silent_devices(network: str | None = None, interface: str | None = None) -> None:
     """
-    Broadcast multi-protocol awakening probes (NetBIOS UDP 137, mDNS UDP 5353)
-    and ICMP pre-sweep. Forces firewalled Windows laptops, smartphones in 802.11 PSM,
+    Broadcast multi-protocol awakening probes (NetBIOS UDP 137, mDNS UDP 5353,
+    SSDP UDP 1900, LLMNR UDP 5355, WS-Discovery UDP 3702, ICMP broadcast)
+    to force firewalled Windows laptops, smartphones in 802.11 PSM,
     and smart devices to wake up and reply, populating the local ARP cache.
     """
     if _is_test_env() or not network:
         return
+
+    bcast_ip = "255.255.255.255"
+    if "/" in network:
+        try:
+            bcast_ip = str(ipaddress.ip_network(network, strict=False).broadcast_address)
+        except Exception:
+            pass
 
     # 1. Paced fping pre-sweep if fping is available
     try:
         cmd = ["fping", "-a", "-g", network, "-r", "0", "-t", "50"]
         if interface and interface != "all":
             cmd.extend(["-I", interface])
-        subprocess.run(cmd, capture_output=True, check=False, timeout=3)
+        subprocess.run(cmd, capture_output=True, check=False, timeout=2.5)
     except Exception:
         pass
 
-    # 2. NetBIOS Name Query Broadcast (UDP 137)
+    # 2. Broadcast ICMP ping (wakes up multi-homed or legacy endpoints)
+    if bcast_ip != "255.255.255.255":
+        try:
+            b_cmd = ["ping", "-b", "-c", "1", "-W", "1"]
+            if interface and interface != "all":
+                b_cmd.extend(["-I", interface])
+            b_cmd.append(bcast_ip)
+            subprocess.run(b_cmd, capture_output=True, check=False, timeout=1.2)
+        except Exception:
+            pass
+
+    # 3. NetBIOS Name Query Broadcast (UDP 137) - forces Windows workstations to reply
     try:
         nb_query = (
             b'\x80\x01\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00'
             b'\x20CKAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\x00'
             b'\x00\x21\x00\x01'
         )
-        bcast_ip = "192.168.0.255"
-        if "/" in network:
-            try:
-                bcast_ip = str(ipaddress.ip_network(network, strict=False).broadcast_address)
-            except Exception:
-                pass
-
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        sock.settimeout(0.3)
+        sock_nb = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock_nb.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        sock_nb.settimeout(0.2)
         try:
-            sock.sendto(nb_query, (bcast_ip, 137))
+            sock_nb.sendto(nb_query, (bcast_ip, 137))
+            sock_nb.sendto(nb_query, ("255.255.255.255", 137))
         finally:
-            sock.close()
+            sock_nb.close()
     except Exception:
         pass
 
-    # 3. mDNS Multicast Probe (UDP 5353 to 224.0.0.251)
+    # 4. mDNS Multicast Probe (UDP 5353 to 224.0.0.251) - wakes up Apple (iOS/macOS) & smart speakers
     try:
         mdns_query = b'\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\t_services\x07_dns-sd\x04_udp\x05local\x00\x00\x0c\x00\x01'
         sock_m = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
         sock_m.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
-        sock_m.settimeout(0.3)
+        sock_m.settimeout(0.2)
         try:
             sock_m.sendto(mdns_query, ("224.0.0.251", 5353))
         finally:
@@ -387,12 +440,70 @@ def awaken_silent_devices(network: str | None = None, interface: str | None = No
     except Exception:
         pass
 
+    # 5. SSDP / UPnP Discovery (UDP 1900 to 239.255.255.250) - wakes up Smart TVs, printers, IoT
+    try:
+        ssdp_query = (
+            b'M-SEARCH * HTTP/1.1\r\n'
+            b'HOST: 239.255.255.250:1900\r\n'
+            b'MAN: "ssdp:discover"\r\n'
+            b'MX: 1\r\n'
+            b'ST: ssdp:all\r\n\r\n'
+        )
+        sock_s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+        sock_s.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
+        sock_s.settimeout(0.2)
+        try:
+            sock_s.sendto(ssdp_query, ("239.255.255.250", 1900))
+        finally:
+            sock_s.close()
+    except Exception:
+        pass
 
-def _fast_subnet_ping_sweep(network: str, interface: str | None = None, max_hosts: int = 254) -> None:
+    # 6. LLMNR Multicast (UDP 5355 to 224.0.0.252) - wakes up Windows 10/11 endpoints
+    try:
+        llmnr_query = (
+            b'\x12\x34\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00'
+            b'\x04wpad\x00\x00\x01\x00\x01'
+        )
+        sock_l = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+        sock_l.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
+        sock_l.settimeout(0.2)
+        try:
+            sock_l.sendto(llmnr_query, ("224.0.0.252", 5355))
+        finally:
+            sock_l.close()
+    except Exception:
+        pass
+
+    # 7. WS-Discovery Probe (UDP 3702 to 239.255.255.250) - wakes up network printers and IP cameras
+    try:
+        wsd_probe = (
+            b'<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" '
+            b'xmlns:wsa="http://schemas.xmlsoap.org/ws/2004/08/addressing">'
+            b'<soap:Header>'
+            b'<wsa:To>urn:schemas-xmlsoap-org:ws:2005/04/discovery</wsa:To>'
+            b'<wsa:Action>http://schemas.xmlsoap.org/ws/2005/04/discovery/Probe</wsa:Action>'
+            b'</soap:Header>'
+            b'<soap:Body><Probe xmlns="http://schemas.xmlsoap.org/ws/2005/04/discovery"/></soap:Body>'
+            b'</soap:Envelope>'
+        )
+        sock_w = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+        sock_w.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
+        sock_w.settimeout(0.2)
+        try:
+            sock_w.sendto(wsd_probe, ("239.255.255.250", 3702))
+        finally:
+            sock_w.close()
+    except Exception:
+        pass
+
+
+def _fast_subnet_probe_sweep(network: str, interface: str | None = None, max_hosts: int = 254) -> None:
     """
-    Rapidly ping hosts across the CIDR subnet using concurrent ping probes.
-    Populates the kernel ARP / neighbor table even if nmap or arp-scan
-    are not installed on the system.
+    Rapidly sweep hosts across the CIDR subnet using concurrent ICMP and TCP SYN probes.
+    Targeting common ports (80, 443, 445, 139, 22, 5357) forces the operating system kernel
+    to issue Layer 2 ARP requests even for endpoints that drop ICMP ping (e.g. Windows Firewall),
+    populating /proc/net/arp and the neighbor table.
     """
     if _is_test_env() or not network or "/" not in network:
         return
@@ -403,22 +514,145 @@ def _fast_subnet_ping_sweep(network: str, interface: str | None = None, max_host
     except Exception:
         return
 
-    def _ping_ip(ip_str: str) -> None:
+    def _probe_ip(ip_str: str) -> None:
         cmd = ["ping", "-c", "1", "-W", "1"]
         if interface and interface != "all":
             cmd.extend(["-I", interface])
         cmd.append(ip_str)
+        ping_responded = False
         try:
-            subprocess.run(cmd, capture_output=True, check=False, timeout=1.5)
+            res = subprocess.run(cmd, capture_output=True, check=False, timeout=1.2)
+            ping_responded = (res.returncode == 0)
         except Exception:
             pass
 
+        # If ping did not reply, trigger quick TCP socket connect to prime kernel ARP table
+        if not ping_responded:
+            for port in (80, 443, 445, 139, 22):
+                try:
+                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    s.settimeout(0.12)
+                    s.connect_ex((ip_str, port))
+                    s.close()
+                    break
+                except Exception:
+                    pass
+
     try:
-        workers = min(32, len(hosts) or 1)
+        workers = min(40, len(hosts) or 1)
         with ThreadPoolExecutor(max_workers=workers) as executor:
-            list(executor.map(_ping_ip, [str(h) for h in hosts]))
+            list(executor.map(_probe_ip, [str(h) for h in hosts]))
     except Exception as exc:
-        print(f"[DISCOVERY] Note during ping sweep: {exc}")
+        print(f"[DISCOVERY] Note during probe sweep: {exc}")
+
+
+_fast_subnet_ping_sweep = _fast_subnet_probe_sweep
+
+
+def _verify_device_liveness(ip: str, iface: str | None = None) -> bool:
+    """
+    Multi-mode liveness verification for a single IP address:
+    1. Kernel /proc/net/arp check
+    2. arping (Layer 2)
+    3. ICMP ping (Layer 3)
+    4. Fast TCP socket connection (Layer 4 - ports 80, 443, 445, 139, 22, 5357)
+    Returns True if any check confirms the device is reachable.
+    """
+    if not ip or not is_valid_ip_address(ip):
+        return False
+
+    # 1. Kernel ARP table check
+    if os.path.exists("/proc/net/arp"):
+        try:
+            with open("/proc/net/arp", "r") as f:
+                for line in f:
+                    parts = line.split()
+                    if len(parts) >= 4 and parts[0] == ip:
+                        flags = parts[2]
+                        mac = parts[3].upper()
+                        if flags in ("0x2", "0x6", "0x4") and mac != "00:00:00:00:00:00":
+                            return True
+        except Exception:
+            pass
+
+    # 2. arping Layer 2 probe
+    try:
+        probe_cmd = ["arping", "-c", "1", "-w", "1"]
+        if iface and iface != "all":
+            probe_cmd.extend(["-i", iface])
+        probe_cmd.append(ip)
+        res = subprocess.run(probe_cmd, capture_output=True, check=False, timeout=1.2)
+        if res.returncode == 0:
+            return True
+    except Exception:
+        pass
+
+    # 3. ICMP ping
+    try:
+        p_cmd = ["ping", "-c", "1", "-W", "1"]
+        if iface and iface != "all":
+            p_cmd.extend(["-I", iface])
+        p_cmd.append(ip)
+        res = subprocess.run(p_cmd, capture_output=True, check=False, timeout=1.0)
+        if res.returncode == 0:
+            return True
+    except Exception:
+        pass
+
+    # 4. Fast TCP connect probe
+    for port in (80, 443, 445, 139, 22, 5357):
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(0.15)
+            code = s.connect_ex((ip, port))
+            s.close()
+            # 0 = open, 111 (ECONNREFUSED) = host active and sent TCP RST
+            if code in (0, 111):
+                return True
+        except Exception:
+            pass
+
+    return False
+
+
+def get_proc_net_arp_devices() -> list[dict]:
+    """
+    Directly read Linux kernel ARP table from /proc/net/arp.
+    Captures active IP and MAC bindings observed by the network stack.
+    """
+    devices = []
+    if not os.path.exists("/proc/net/arp"):
+        return devices
+    try:
+        with open("/proc/net/arp", "r") as f:
+            lines = f.readlines()
+        for line in lines[1:]:
+            parts = line.split()
+            if len(parts) >= 6:
+                ip_addr = parts[0]
+                flags = parts[2]
+                mac_addr = parts[3].upper()
+                dev_iface = parts[5]
+                # Flags 0x2 is ATF_COM (completed), 0x4 is ATF_PERM (permanent)
+                if flags in ("0x2", "0x6", "0x4") and len(mac_addr) == 17 and mac_addr != "00:00:00:00:00:00":
+                    if is_valid_ip_address(ip_addr):
+                        vendor = resolve_mac_vendor(mac_addr)
+                        devices.append({
+                            "ip_address": ip_addr,
+                            "mac_address": mac_addr,
+                            "interface": dev_iface,
+                            "medium": "wireless" if is_wireless_interface(dev_iface) else "wired",
+                            "hostname": None,
+                            "vendor": vendor,
+                            "device_type": classify_device(
+                                hostname=None,
+                                vendor=vendor,
+                                mac_address=mac_addr,
+                            ),
+                        })
+    except Exception as exc:
+        print(f"[DISCOVERY] Error reading /proc/net/arp: {exc}")
+    return devices
 
 
 def _run_arp_scan_on_interface(network: str | None, target_iface: str | None) -> list[dict]:
@@ -438,11 +672,11 @@ def _run_arp_scan_on_interface(network: str | None, target_iface: str | None) ->
         awaken_silent_devices(network, target_iface)
 
     # Smartphones (Android/iOS) on Wi-Fi use power-saving sleep (802.11 PSM / DTIM)
-    # Using 2 retries and 800ms timeout ensures sleeping phones respond without lagging the HTTP scan
+    # Using 3 retries and generous timeout ensures sleeping phones respond without lagging the HTTP scan
     if is_wireless:
-        cmd.extend(["--retry=2", "--timeout=800"])
+        cmd.extend(["--retry=3", "--timeout=1000", "--backoff=1.5"])
     else:
-        cmd.extend(["--retry=2", "--timeout=500"])
+        cmd.extend(["--retry=3", "--timeout=600", "--backoff=1.2"])
 
     discovered = []
     try:
@@ -759,7 +993,17 @@ def discover_devices(network: str, interface: str | None = None):
     discovered_by_mac = {}
 
     # ---------------------------------------------------------
-    # Process Nmap results (if nmap is available)
+    # 1. Multi-Vector Awakening & Probing Pre-Sweep
+    # Forces sleep-mode Wi-Fi stations, firewalled Windows endpoints,
+    # and smart devices to wake up and populate the kernel ARP table.
+    # ---------------------------------------------------------
+    awaken_silent_devices(network, specific_iface)
+    _fast_subnet_probe_sweep(network, specific_iface)
+
+    # ---------------------------------------------------------
+    # 2. Process Nmap results (if nmap is available)
+    # Probes across Layer 2 (ARP), Layer 3 (ICMP Echo & Timestamp),
+    # and Layer 4 (TCP SYN & UDP) simultaneously.
     # ---------------------------------------------------------
     nmap_bin = shutil.which("nmap")
     if nmap_bin:
@@ -767,11 +1011,17 @@ def discover_devices(network: str, interface: str | None = None):
             nmap_bin,
             "-sn",
             "-PR",
+            "-PE",
+            "-PP",
+            "-PS80,443,445,22,8080,5357",
+            "-PU53,137,1900",
             "-n",
             "--max-retries",
-            "1",
+            "2",
             "--min-rate",
-            "300",
+            "350",
+            "--host-timeout",
+            "4s",
         ]
         if specific_iface and os.path.exists(f"/sys/class/net/{specific_iface}"):
             command.extend(["--privileged", "-e", specific_iface])
@@ -829,6 +1079,9 @@ def discover_devices(network: str, interface: str | None = None):
                         continue
 
                     mac_address = mac_address.upper()
+                    clean_vendor = vendor if vendor and "unknown" not in vendor.lower() else None
+                    if not clean_vendor:
+                        clean_vendor = resolve_mac_vendor(mac_address)
 
                     discovered_by_mac[mac_address] = {
                         "ip_address": ip_address,
@@ -840,10 +1093,10 @@ def discover_devices(network: str, interface: str | None = None):
                             else ("wired" if specific_iface else None)
                         ),
                         "hostname": hostname,
-                        "vendor": vendor,
+                        "vendor": clean_vendor,
                         "device_type": classify_device(
                             hostname=hostname,
-                            vendor=vendor,
+                            vendor=clean_vendor,
                             mac_address=mac_address,
                         ),
                     }
@@ -852,12 +1105,8 @@ def discover_devices(network: str, interface: str | None = None):
         except Exception as exc:
             print(f"[DISCOVERY] Note executing Nmap: {exc}")
 
-    # Fallback ping sweep if nmap was missing or returned no devices
-    if not discovered_by_mac:
-        _fast_subnet_ping_sweep(network, specific_iface)
-
     # ---------------------------------------------------------
-    # Process Layer 2 ARP discovery (arp-scan)
+    # 3. Process Layer 2 ARP discovery (arp-scan)
     # ---------------------------------------------------------
 
     try:
@@ -879,13 +1128,41 @@ def discover_devices(network: str, interface: str | None = None):
         print(f"[DISCOVERY] Multi-vector ARP scan note: {exc}")
 
     # ---------------------------------------------------------
-    # Process Linux neighbour-table fallback
+    # 4. Process Direct Linux Kernel ARP Table (/proc/net/arp)
+    # ---------------------------------------------------------
+
+    for k_dev in get_proc_net_arp_devices():
+        if specific_iface and k_dev.get("interface") != specific_iface:
+            continue
+        try:
+            if ipaddress.ip_address(k_dev["ip_address"]) not in parsed_network:
+                continue
+        except Exception:
+            continue
+
+        k_mac = k_dev["mac_address"]
+        if k_mac in discovered_by_mac:
+            existing = discovered_by_mac[k_mac]
+            if not existing.get("ip_address") and k_dev.get("ip_address"):
+                existing["ip_address"] = k_dev["ip_address"]
+            if not existing.get("vendor") and k_dev.get("vendor"):
+                existing["vendor"] = k_dev["vendor"]
+        else:
+            discovered_by_mac[k_mac] = k_dev
+
+    # ---------------------------------------------------------
+    # 5. Process Linux neighbour-table fallback (ip neigh)
     # ---------------------------------------------------------
 
     neighbor_devices = get_neighbor_devices()
 
     for neighbor in neighbor_devices:
         if specific_iface and neighbor.get("interface") != specific_iface:
+            continue
+        try:
+            if ipaddress.ip_address(neighbor["ip_address"]) not in parsed_network:
+                continue
+        except Exception:
             continue
 
         mac_address = neighbor["mac_address"]
@@ -902,7 +1179,6 @@ def discover_devices(network: str, interface: str | None = None):
             continue
 
         # If not discovered by nmap or arp-scan, verify reachability
-        # rather than blindly accepting a stale ARP cache entry
         state = neighbor.get("state")
         ip_addr = neighbor.get("ip_address")
         iface = specific_iface or neighbor.get("interface")
@@ -917,21 +1193,8 @@ def discover_devices(network: str, interface: str | None = None):
                 except Exception:
                     pass
             if not is_active and ip_addr:
-                try:
-                    probe_cmd = ["arping", "-c", "1", "-w", "1"]
-                    if iface:
-                        probe_cmd.extend(["-i", iface])
-                    probe_cmd.append(ip_addr)
-                    probe_res = subprocess.run(
-                        probe_cmd,
-                        capture_output=True,
-                        check=False,
-                        timeout=2,
-                    )
-                    if probe_res.returncode == 0:
-                        is_active = True
-                except Exception:
-                    pass
+                is_active = _verify_device_liveness(ip_addr, iface)
+
             if not is_active:
                 # Disconnected machine: do not add to discovered devices
                 continue
@@ -944,7 +1207,13 @@ def discover_devices(network: str, interface: str | None = None):
             neighbor["device_type"] = "computer"
 
         else:
-            neighbor["device_type"] = "unknown"
+            n_vendor = neighbor.get("vendor") or resolve_mac_vendor(mac_address)
+            neighbor["vendor"] = n_vendor
+            neighbor["device_type"] = classify_device(
+                hostname=neighbor.get("hostname"),
+                vendor=n_vendor,
+                mac_address=mac_address,
+            )
 
         neighbor["interface"] = iface
         neighbor["medium"] = "wireless" if is_wireless_interface(iface) else "wired"
@@ -957,17 +1226,21 @@ def discover_devices(network: str, interface: str | None = None):
             h_ip = get_local_ip(h_iface)
             h_mac = get_local_mac(h_iface)
             if h_ip and h_mac:
-                norm_h_mac = h_mac.upper()
-                if norm_h_mac not in discovered_by_mac:
-                    discovered_by_mac[norm_h_mac] = {
-                        "ip_address": h_ip,
-                        "mac_address": norm_h_mac,
-                        "interface": h_iface,
-                        "medium": "wireless" if is_wireless_interface(h_iface) else "wired",
-                        "hostname": socket.gethostname(),
-                        "vendor": "Local Machine",
-                        "device_type": "computer",
-                    }
+                try:
+                    if ipaddress.ip_address(h_ip) in parsed_network:
+                        norm_h_mac = h_mac.upper()
+                        if norm_h_mac not in discovered_by_mac:
+                            discovered_by_mac[norm_h_mac] = {
+                                "ip_address": h_ip,
+                                "mac_address": norm_h_mac,
+                                "interface": h_iface,
+                                "medium": "wireless" if is_wireless_interface(h_iface) else "wired",
+                                "hostname": socket.gethostname(),
+                                "vendor": "Local Machine",
+                                "device_type": "computer",
+                            }
+                except Exception:
+                    pass
 
     return list(discovered_by_mac.values())
 
@@ -1069,22 +1342,10 @@ def save_discovered_devices(
                     except Exception:
                         pass
                     if not is_still_reachable:
-                        target_ifaces = [existing_device.network_interface] if (existing_device.network_interface and existing_device.network_interface != "all") else ["eth0", "wlan0"]
-                        for t_if in target_ifaces:
-                            if not t_if or not os.path.exists(f"/sys/class/net/{t_if}"):
-                                continue
-                            try:
-                                res = subprocess.run(
-                                    ["arping", "-c", "1", "-w", "1", "-i", t_if, existing_device.ip_address],
-                                    capture_output=True,
-                                    timeout=1.5,
-                                )
-                                if res.returncode == 0:
-                                    is_still_reachable = True
-                                    existing_device.network_interface = t_if
-                                    break
-                            except Exception:
-                                pass
+                        is_still_reachable = _verify_device_liveness(
+                            existing_device.ip_address,
+                            existing_device.network_interface,
+                        )
 
                 if not is_still_reachable and existing_device.status == "online":
                     existing_device.status = "offline"
