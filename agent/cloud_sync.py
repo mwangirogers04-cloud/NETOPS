@@ -32,6 +32,15 @@ from backend.app.services.discovery import (
     detect_local_subnets,
     discover_devices,
 )
+from backend.app.services.l2_quarantine import (
+    quarantine_device_l2,
+    restore_device_l2,
+)
+from backend.app.services.sophos_enforcement import (
+    is_sophos_configured,
+    sophos_block_device,
+    sophos_allow_device,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -115,10 +124,43 @@ def sync_to_cloud(server_url: str, devices: list, token: str | None = None) -> b
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             body = json.loads(resp.read().decode())
+            quarantined = body.get("quarantined_devices", [])
+            allowed = body.get("allowed_devices", [])
             logger.info(
                 f"[✓] Synced {len(devices)} device(s) to cloud: "
-                f"saved={body.get('devices_saved')}"
+                f"saved={body.get('devices_saved')} | "
+                f"quarantined={len(quarantined)} | allowed={len(allowed)}"
             )
+
+            sophos_active = is_sophos_configured()
+            for dev in quarantined:
+                ip = dev.get("ip_address")
+                mac = dev.get("mac_address")
+                if ip and mac:
+                    try:
+                        quarantine_device_l2(ip, mac, burst=2)
+                    except Exception:
+                        pass
+                if ip and sophos_active:
+                    try:
+                        sophos_block_device(ip)
+                    except Exception:
+                        pass
+
+            for dev in allowed:
+                ip = dev.get("ip_address")
+                mac = dev.get("mac_address")
+                if ip and mac:
+                    try:
+                        restore_device_l2(ip, mac)
+                    except Exception:
+                        pass
+                if ip and sophos_active:
+                    try:
+                        sophos_allow_device(ip)
+                    except Exception:
+                        pass
+
             return True
     except urllib.error.HTTPError as err:
         logger.error(f"[!] Cloud sync HTTP {err.code}: {err.read().decode()}")

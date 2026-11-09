@@ -38,6 +38,49 @@ export const isTypeAndVlanMatching = (device) => {
 };
 
 /**
+ * Determines whether a device is truly online and connected.
+ * If a device is quarantined or isolated (or pending or VLAN 90 or internet blocked),
+ * it is considered OFFLINE with a red indicator.
+ */
+export const isDeviceActuallyOnline = (device) => {
+  if (!device) return false;
+  if (device.status === "offline" || device.status === "disconnected") return false;
+  if (
+    device.enforcement_status === "isolated" ||
+    device.access_decision === "isolated" ||
+    device.status === "isolated"
+  ) {
+    return false;
+  }
+  if (
+    device.enforcement_status === "quarantined" ||
+    device.vlan_id === 90 ||
+    device.access_decision === "quarantine"
+  ) {
+    return false;
+  }
+  if (
+    device.approval_status === "pending" ||
+    device.approval_status === "rejected" ||
+    (device.approval_status && device.approval_status !== "approved")
+  ) {
+    return false;
+  }
+  if (device.internet_access_authorized === false) {
+    return false;
+  }
+  const expectedVlan = getExpectedVlanForType(device.device_type);
+  if (
+    device.vlan_id !== undefined &&
+    device.vlan_id !== null &&
+    Number(device.vlan_id) !== expectedVlan
+  ) {
+    return false;
+  }
+  return device.status === "online";
+};
+
+/**
  * Computes network interface type and real-time internet connectivity status
  * for any LAN or WLAN (Wi-Fi) device.
  *

@@ -369,12 +369,36 @@ def sync_agent_devices(
             except Exception as exc:
                 pass
     db.commit()
+
+    quarantined_devices = [
+        {"ip_address": d.ip_address, "mac_address": d.mac_address, "hostname": d.hostname}
+        for d in db.scalars(
+            select(Device).where(
+                Device.owner_id == owner_id,
+                Device.enforcement_status.in_(["quarantined", "isolated"]),
+            )
+        ).all()
+        if d.ip_address
+    ]
+    allowed_devices = [
+        {"ip_address": d.ip_address, "mac_address": d.mac_address, "hostname": d.hostname}
+        for d in db.scalars(
+            select(Device).where(
+                Device.owner_id == owner_id,
+                Device.enforcement_status == "allowed",
+            )
+        ).all()
+        if d.ip_address
+    ]
+
     return {
         "status": "completed",
         "network": request.network,
         "owner_id": owner_id,
         "devices_discovered": len(raw_devices),
         "devices_saved": len(saved),
+        "quarantined_devices": quarantined_devices,
+        "allowed_devices": allowed_devices,
     }
 
 

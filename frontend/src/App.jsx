@@ -12,6 +12,7 @@ import {
   VLAN_TO_TYPE,
   isTypeAndVlanMatching,
   getExpectedVlanForType,
+  isDeviceActuallyOnline,
 } from "./utils/networkInterfaceStatus";
 import { playBellSound } from "./utils/bellAudio";
 
@@ -912,7 +913,7 @@ function App() {
     : devices.slice().sort((a, b) => ipToNum(a.ip_address) - ipToNum(b.ip_address));
 
   const totalDevices = devices.length;
-  const onlineDevices = devices.filter((device) => device.status === "online").length;
+  const onlineDevices = devices.filter((device) => isDeviceActuallyOnline(device)).length;
   const pendingDevices = devices.filter(
     (device) => device.approval_status === "pending"
   ).length;
@@ -2767,15 +2768,9 @@ const DevicesPage = () => {
                       </td>
 
                       <td>
-                        {device.status === "online" ? (
-                          <span className="status-badge allowed" style={{ fontSize: "11px" }}>
-                            ONLINE
-                          </span>
-                        ) : (
-                          <span className="status-badge blocked" style={{ fontSize: "11px" }}>
-                            OFFLINE
-                          </span>
-                        )}
+                        <span className="status-badge blocked" style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontSize: "11px" }}>
+                          <span className="status-dot offline" /> OFFLINE (Isolated)
+                        </span>
                       </td>
 
                       <td>
@@ -3454,7 +3449,7 @@ const DevicesPage = () => {
                             </button>
                           )}
                         </div>
-                      ) : device.status === "online" ? (
+                      ) : isDeviceActuallyOnline(device) ? (
                         <span
                           className="status-badge allowed"
                           style={{
@@ -3481,7 +3476,19 @@ const DevicesPage = () => {
                               padding: "2px 8px",
                             }}
                           >
-                            <span className="status-dot offline" /> OFFLINE ({getDeviceInternetStatus(device).isWireless ? "📶 Wi-Fi Disconnected" : "🔌 Cable Disconnected"})
+                            <span className="status-dot offline" /> OFFLINE ({
+                              device.enforcement_status === "isolated"
+                                ? "🔒 Isolated"
+                                : device.approval_status === "pending"
+                                ? "🛡️ Quarantined / Pending"
+                                : (device.enforcement_status === "quarantined" || device.vlan_id === 90)
+                                ? "🛡️ Quarantined"
+                                : !device.internet_access_authorized
+                                ? "🚫 Internet Blocked"
+                                : getDeviceInternetStatus(device).isWireless
+                                ? "📶 Wi-Fi Disconnected"
+                                : "🔌 Cable Disconnected"
+                            })
                           </span>
                           <button
                             type="button"
@@ -4875,7 +4882,7 @@ const LanScannerPage = () => {
                               </button>
                             )}
                           </div>
-                        ) : device.status === "online" ? (
+                        ) : isDeviceActuallyOnline(device) ? (
                           <span
                             className="status-badge allowed"
                             style={{
@@ -4902,7 +4909,19 @@ const LanScannerPage = () => {
                                 padding: "2px 8px",
                               }}
                             >
-                              <span className="status-dot offline" /> OFFLINE ({getDeviceInternetStatus(device).isWireless ? "📶 Wi-Fi Disconnected" : "🔌 Cable Disconnected"})
+                              <span className="status-dot offline" /> OFFLINE ({
+                                device.enforcement_status === "isolated"
+                                  ? "🔒 Isolated"
+                                  : device.approval_status === "pending"
+                                  ? "🛡️ Quarantined / Pending"
+                                  : (device.enforcement_status === "quarantined" || device.vlan_id === 90)
+                                  ? "🛡️ Quarantined"
+                                  : !device.internet_access_authorized
+                                  ? "🚫 Internet Blocked"
+                                  : getDeviceInternetStatus(device).isWireless
+                                  ? "📶 Wi-Fi Disconnected"
+                                  : "🔌 Cable Disconnected"
+                              })
                             </span>
                             <button
                               type="button"
@@ -10255,7 +10274,7 @@ const Dashboard = () => {
   const totalDevices = devices.length;
 
   const onlineDevices = devices.filter(
-    (device) => device.status === "online"
+    (device) => isDeviceActuallyOnline(device)
   ).length;
 
   const pendingDevices = devices.filter(
@@ -10303,7 +10322,7 @@ const Dashboard = () => {
   ).length;
 
   const filteredDashboardDevices = devices.filter((device) => {
-    if (dashboardDeviceFilter === "online") return device.status === "online";
+    if (dashboardDeviceFilter === "online") return isDeviceActuallyOnline(device);
     if (dashboardDeviceFilter === "pending") return device.approval_status === "pending";
     if (dashboardDeviceFilter === "quarantined") {
       return (
@@ -10565,7 +10584,7 @@ const Dashboard = () => {
                 </tr>
               ) : (
                 filteredDashboardDevices.map((device) => {
-                  const isOnline = device.status === "online";
+                  const isOnline = isDeviceActuallyOnline(device);
                   return (
                     <tr
                       key={`dash-dev-${device.id}`}
@@ -10607,8 +10626,18 @@ const Dashboard = () => {
                       </td>
 
                       <td>
-                        <span className={`status-badge ${isOnline ? "allowed" : "blocked"}`}>
-                          {isOnline ? "ONLINE" : "OFFLINE"}
+                        <span
+                          className={`status-badge ${isOnline ? "allowed" : "blocked"}`}
+                          style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}
+                        >
+                          <span className={`status-dot ${isOnline ? "online" : "offline"}`} />
+                          {isOnline
+                            ? "ONLINE"
+                            : device.enforcement_status === "isolated"
+                            ? "OFFLINE (Isolated)"
+                            : (device.enforcement_status === "quarantined" || device.vlan_id === 90 || device.approval_status === "pending")
+                            ? "OFFLINE (Quarantined)"
+                            : "OFFLINE"}
                         </span>
                       </td>
 
