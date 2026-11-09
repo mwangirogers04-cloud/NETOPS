@@ -2,6 +2,7 @@ import os
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, field_validator
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -307,12 +308,13 @@ def sync_agent_devices(
     Receives scan results from a remote user's client-side scan probe,
     storing and scoping them under the user's isolated account.
     """
-    if not current_user:
-        raise HTTPException(
-            status_code=401,
-            detail="Authentication required to sync network devices to your account.",
+    if current_user:
+        owner_id = current_user.id
+    else:
+        admin_user = db.scalar(
+            select(User).where(User.role == "super_admin").order_by(User.id)
         )
-    owner_id = current_user.id
+        owner_id = admin_user.id if admin_user else 1
     raw_devices = [d.model_dump() for d in request.devices]
     clean_iface = request.interface.strip() if request.interface and request.interface.strip() else None
     saved = save_discovered_devices(

@@ -25,6 +25,8 @@ PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
+os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
+
 from backend.app.services.discovery import (
     classify_device,
     detect_local_subnets,
