@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from .config import settings
@@ -26,6 +26,20 @@ else:
             "options": "-c idle_in_transaction_session_timeout=15000 -c statement_timeout=30000"
         },
     )
+
+
+@event.listens_for(engine, "reset")
+def on_pool_reset(dbapi_connection, connection_record, reset_state=None):
+    """
+    Ensure every connection returned to the pool is rolled back cleanly at the DBAPI level.
+    This guarantees psycopg/psycopg2 never enters an 'invalid transaction' state or holds
+    uncommitted locks across pool checkouts.
+    """
+    if dbapi_connection is not None:
+        try:
+            dbapi_connection.rollback()
+        except Exception:
+            pass
 
 SessionLocal = sessionmaker(
     bind=engine,
