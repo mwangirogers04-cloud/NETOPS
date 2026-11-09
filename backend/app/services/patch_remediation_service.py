@@ -124,20 +124,24 @@ def get_device_working_hours_info(
     mac_address: str | None = None,
     ip_address: str | None = None,
     reference_dt: datetime | None = None,
+    policy: UpdatePolicy | None = None,
+    dev: Device | None = None,
 ) -> dict:
     """
     Determine a machine's working hours using its active AccessSchedule(s) if configured,
     or falling back to the global UpdatePolicy default working hours.
     Also calculates whether the machine is currently in working hours and its next off-hours window.
     """
-    policy = get_or_create_update_policy(db)
-    dev = _resolve_device(
-        db,
-        device_id=device_id,
-        hostname=hostname,
-        mac_address=mac_address,
-        ip_address=ip_address,
-    )
+    if policy is None:
+        policy = get_or_create_update_policy(db)
+    if dev is None:
+        dev = _resolve_device(
+            db,
+            device_id=device_id,
+            hostname=hostname,
+            mac_address=mac_address,
+            ip_address=ip_address,
+        )
 
     schedules = []
     if dev:

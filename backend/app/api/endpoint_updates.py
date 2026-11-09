@@ -150,21 +150,52 @@ def report_endpoint_update(
                 effective_security = 0
                 break
 
-    endpoint_update = EndpointUpdate(
-        hostname=report.hostname,
-        mac_address=report.mac_address,
-        ip_address=report.ip_address,
-        machine_id=report.machine_id,
-        operating_system=report.operating_system,
-        os_version=report.os_version,
-        architecture=report.architecture,
-        update_status=effective_status,
-        pending_updates=effective_pending,
-        security_updates=effective_security,
-        last_checked=datetime.now(timezone.utc),
-    )
+    # Find existing endpoint record to update in-place, preventing runaway database row growth
+    existing_endpoint = None
+    if report.machine_id:
+        existing_endpoint = db.scalars(
+            select(EndpointUpdate).where(EndpointUpdate.machine_id == report.machine_id)
+        ).first()
+    if not existing_endpoint and report.mac_address:
+        existing_endpoint = db.scalars(
+            select(EndpointUpdate).where(EndpointUpdate.mac_address == report.mac_address)
+        ).first()
+    if not existing_endpoint and report.hostname:
+        existing_endpoint = db.scalars(
+            select(EndpointUpdate).where(EndpointUpdate.hostname == report.hostname)
+        ).first()
 
-    db.add(endpoint_update)
+    if existing_endpoint:
+        existing_endpoint.hostname = report.hostname
+        if report.mac_address:
+            existing_endpoint.mac_address = report.mac_address
+        if report.ip_address:
+            existing_endpoint.ip_address = report.ip_address
+        if report.machine_id:
+            existing_endpoint.machine_id = report.machine_id
+        existing_endpoint.operating_system = report.operating_system
+        existing_endpoint.os_version = report.os_version
+        existing_endpoint.architecture = report.architecture
+        existing_endpoint.update_status = effective_status
+        existing_endpoint.pending_updates = effective_pending
+        existing_endpoint.security_updates = effective_security
+        existing_endpoint.last_checked = datetime.now(timezone.utc)
+        endpoint_update = existing_endpoint
+    else:
+        endpoint_update = EndpointUpdate(
+            hostname=report.hostname,
+            mac_address=report.mac_address,
+            ip_address=report.ip_address,
+            machine_id=report.machine_id,
+            operating_system=report.operating_system,
+            os_version=report.os_version,
+            architecture=report.architecture,
+            update_status=effective_status,
+            pending_updates=effective_pending,
+            security_updates=effective_security,
+            last_checked=datetime.now(timezone.utc),
+        )
+        db.add(endpoint_update)
 
     if matched_device is None:
         create_event(
@@ -299,6 +330,7 @@ def get_endpoint_updates(
         if device.hostname
     }
 
+    policy = get_or_create_update_policy(db)
     enriched_results = []
 
     for endpoint in results:
@@ -336,6 +368,8 @@ def get_endpoint_updates(
             hostname=endpoint.hostname,
             mac_address=endpoint.mac_address,
             ip_address=endpoint.ip_address or (device.ip_address if device else None),
+            policy=policy,
+            dev=device,
         )
 
         enriched_results.append(
