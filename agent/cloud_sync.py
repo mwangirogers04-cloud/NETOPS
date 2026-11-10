@@ -14,6 +14,7 @@ import argparse
 import json
 import logging
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -105,8 +106,88 @@ def sweep_local_interfaces():
     return all_devices
 
 
+def _get_quick_kernel_devices() -> list[dict]:
+    """Fast extraction of active LAN devices from kernel neighbor table and ARP cache (< 5ms)."""
+    devices = []
+    seen = set()
+    # 1. ip neigh
+    try:
+        res = subprocess.run(
+            ["ip", "-4", "neigh", "show"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=1,
+        )
+        for line in res.stdout.splitlines():
+            parts = line.split()
+            if len(parts) >= 5 and "lladdr" in parts and "dev" in parts:
+                ip = parts[0]
+                mac = parts[parts.index("lladdr") + 1].upper()
+                iface = parts[parts.index("dev") + 1]
+                if mac and len(mac) == 17 and mac not in seen and ip.startswith("192.168.0."):
+                    seen.add(mac)
+                    devices.append({
+                        "ip_address": ip,
+                        "mac_address": mac,
+                        "hostname": f"HOST-{ip.replace('.', '-')}",
+                        "network_interface": iface,
+                        "interface": iface,
+                        "status": "online",
+                    })
+    except Exception:
+        pass
+
+    # 2. /proc/net/arp fallback
+    if not devices and os.path.exists("/proc/net/arp"):
+        try:
+            with open("/proc/net/arp", "r", encoding="utf-8") as f:
+                lines = f.readlines()[1:]
+            for line in lines:
+                parts = line.split()
+                if len(parts) >= 6:
+                    ip, mac, iface = parts[0], parts[3].upper(), parts[5]
+                    if len(mac) == 17 and mac != "00:00:00:00:00:00" and mac not in seen and ip.startswith("192.168.0."):
+                        seen.add(mac)
+                        devices.append({
+                            "ip_address": ip,
+                            "mac_address": mac,
+                            "hostname": f"HOST-{ip.replace('.', '-')}",
+                            "network_interface": iface,
+                            "interface": iface,
+                            "status": "online",
+                        })
+        except Exception:
+            pass
+
+    return devices
+
+
+_cached_devices: list[dict] = []
+_devices_lock = threading.Lock()
+_locally_quarantined_ips: set[str] = set()
+_enforcement_initialized: bool = False
+
+
+def _background_discovery_sweep(interval: float = 45.0):
+    """Background worker that executes deep subnet discovery without blocking enforcement polling."""
+    global _cached_devices
+    while True:
+        try:
+            devs = sweep_local_interfaces()
+            if devs:
+                with _devices_lock:
+                    _cached_devices = devs
+                logger.info(f"[Sweeper] Deep interface sweep refreshed {len(devs)} active device(s).")
+        except Exception as exc:
+            logger.warning(f"[Sweeper] Background sweep note: {exc}")
+
+        time.sleep(interval)
+
+
 def sync_to_cloud(server_url: str, devices: list, token: str | None = None) -> bool:
-    """Send live discovered devices to NETOPS cloud endpoint."""
+    """Send live discovered devices to NETOPS cloud endpoint and enforce Layer 2 states rapidly."""
+    global _locally_quarantined_ips, _enforcement_initialized
     endpoint = f"{server_url.rstrip('/')}/discovery/agent-sync"
     payload = {
         "network": "192.168.0.0/24",
@@ -123,36 +204,49 @@ def sync_to_cloud(server_url: str, devices: list, token: str | None = None) -> b
 
     req = urllib.request.Request(endpoint, data=data, headers=headers, method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=10) as resp:
             body = json.loads(resp.read().decode())
             quarantined = body.get("quarantined_devices", [])
             allowed = body.get("allowed_devices", [])
-            logger.info(
-                f"[✓] Synced {len(devices)} device(s) to cloud: "
-                f"saved={body.get('devices_saved')} | "
-                f"quarantined={len(quarantined)} | allowed={len(allowed)}"
-            )
 
-            # 1. Enforce local Layer-2 ARP quarantine immediately
-            for dev in quarantined:
-                ip = dev.get("ip_address")
-                mac = dev.get("mac_address")
-                if ip and mac:
-                    try:
-                        quarantine_device_l2(ip, mac, burst=3)
-                    except Exception as q_exc:
-                        logger.debug(f"L2 quarantine call for {ip} note: {q_exc}")
+            current_quarantined_map = {
+                d["ip_address"]: d for d in quarantined if d.get("ip_address") and d.get("mac_address")
+            }
+            current_allowed_map = {
+                d["ip_address"]: d for d in allowed if d.get("ip_address") and d.get("mac_address")
+            }
+            current_quarantined_ips = set(current_quarantined_map.keys())
 
-            for dev in allowed:
-                ip = dev.get("ip_address")
+            # 1. Immediate Layer-2 Restoration for allowed devices (unblock + authentic GARP restoration)
+            for ip, dev in current_allowed_map.items():
                 mac = dev.get("mac_address")
-                if ip and mac:
+                if ip in _locally_quarantined_ips or (not _enforcement_initialized and ip not in current_quarantined_ips):
                     try:
-                        restore_device_l2(ip, mac, burst=3)
+                        restore_device_l2(ip, mac, burst=5)
+                        _locally_quarantined_ips.discard(ip)
+                        logger.info(f"[⚡ RESTORED] Rapid ARP unpoisoning & unblocking for {ip} ({mac})")
                     except Exception as r_exc:
                         logger.debug(f"L2 restore call for {ip} note: {r_exc}")
 
-            # 2. Synchronize external hardware firewall (Sophos) asynchronously
+            # 2. Immediate Layer-2 Quarantine for quarantined devices (block + continuous poison)
+            for ip, dev in current_quarantined_map.items():
+                mac = dev.get("mac_address")
+                if ip not in _locally_quarantined_ips or not _enforcement_initialized:
+                    try:
+                        quarantine_device_l2(ip, mac, burst=5)
+                        _locally_quarantined_ips.add(ip)
+                        logger.info(f"[🔒 QUARANTINED] Rapid L2 ARP poison & blocking enforced for {ip} ({mac})")
+                    except Exception as q_exc:
+                        logger.debug(f"L2 quarantine call for {ip} note: {q_exc}")
+
+            if not _enforcement_initialized:
+                logger.info(
+                    f"[✓] Initial cloud sync complete: {len(devices)} device(s) reported | "
+                    f"quarantined={len(current_quarantined_map)} | allowed={len(current_allowed_map)}"
+                )
+                _enforcement_initialized = True
+
+            # 3. Synchronize external hardware firewall (Sophos) asynchronously
             def _sync_sophos_async(q_list, a_list):
                 if not is_sophos_configured():
                     return
@@ -187,16 +281,30 @@ def sync_to_cloud(server_url: str, devices: list, token: str | None = None) -> b
         return False
 
 
-def run_sync_loop(server_url: str, interval: int = 15, token: str | None = None):
-    """Main continuous daemon loop."""
-    logger.info(f"Starting NETOPS Cloud Sync Daemon targeting {server_url} (interval={interval}s)")
+def run_sync_loop(server_url: str, interval: float = 2.0, token: str | None = None):
+    """Main continuous daemon loop with high-frequency enforcement polling and background sweeping."""
+    logger.info(f"Starting NETOPS Cloud Sync Daemon targeting {server_url} (enforcement polling={interval}s)")
+
+    # 1. Quick initial neighbor read (< 5ms)
+    global _cached_devices
+    initial_devs = _get_quick_kernel_devices()
+    with _devices_lock:
+        _cached_devices = initial_devs
+
+    # 2. Start background interface sweeper thread (deep scanning every 45s)
+    sweeper_thread = threading.Thread(
+        target=_background_discovery_sweep,
+        daemon=True,
+        name="NetopsSweeperWorker",
+    )
+    sweeper_thread.start()
+
+    # 3. Fast high-frequency enforcement sync loop
     while True:
         try:
-            devices = sweep_local_interfaces()
-            if devices:
-                sync_to_cloud(server_url, devices, token)
-            else:
-                logger.info("Sweep returned 0 devices; skipping sync.")
+            with _devices_lock:
+                devs_to_send = list(_cached_devices)
+            sync_to_cloud(server_url, devs_to_send, token)
         except Exception as exc:
             logger.error(f"Unexpected error in sync loop: {exc}")
 
@@ -212,9 +320,9 @@ def main():
     )
     parser.add_argument(
         "--interval",
-        type=int,
-        default=int(os.environ.get("NETOPS_SYNC_INTERVAL", "20")),
-        help="Sync interval in seconds (default: 20)",
+        type=float,
+        default=float(os.environ.get("NETOPS_SYNC_INTERVAL", "2.0")),
+        help="Enforcement sync interval in seconds (default: 2.0)",
     )
     parser.add_argument(
         "--token",

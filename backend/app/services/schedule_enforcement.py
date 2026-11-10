@@ -9,7 +9,7 @@ from .l2_quarantine import quarantine_device_l2
 from .network_enforcement import enforce_device_access
 
 
-SCHEDULE_CHECK_INTERVAL = 10
+SCHEDULE_CHECK_INTERVAL = 2
 
 
 async def schedule_enforcement_loop():

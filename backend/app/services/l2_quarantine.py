@@ -202,7 +202,7 @@ def _run_iptables(args: list[str]) -> bool:
 
 
 def ensure_iptables_quarantine_chain() -> None:
-    global _iptables_initialized
+    global _iptables_initialized, _currently_blocked_ips
     if _is_test_env() or _iptables_initialized:
         return
 
@@ -212,6 +212,28 @@ def ensure_iptables_quarantine_chain() -> None:
         # Ensure jump from FORWARD to IPTABLES_CHAIN is at top
         if not _run_iptables(["-C", "FORWARD", "-j", IPTABLES_CHAIN]):
             _run_iptables(["-I", "FORWARD", "1", "-j", IPTABLES_CHAIN])
+
+        # Discover existing rules
+        for prefix in (["/usr/sbin/iptables"], ["sudo", "-n", "/usr/sbin/iptables"]):
+            try:
+                res = subprocess.run(
+                    prefix + ["-L", IPTABLES_CHAIN, "-n"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=2,
+                )
+                if res.returncode == 0:
+                    for line in res.stdout.splitlines():
+                        parts = line.split()
+                        if len(parts) >= 4 and parts[0] in ("REJECT", "DROP"):
+                            src = parts[3]
+                            if src.startswith("192.168.0."):
+                                _currently_blocked_ips.add(src)
+                    break
+            except Exception:
+                continue
+
         _iptables_initialized = True
     except Exception as exc:
         logger.debug(f"iptables chain init note: {exc}")
@@ -221,22 +243,24 @@ def add_iptables_quarantine_ip(ip_address: str) -> None:
     if _is_test_env() or not ip_address or ip_address in PROTECTED_IPS:
         return
     ensure_iptables_quarantine_chain()
-    if not _run_iptables(["-C", IPTABLES_CHAIN, "-s", ip_address, "-j", "REJECT"]):
-        _run_iptables(["-I", IPTABLES_CHAIN, "1", "-s", ip_address, "-j", "REJECT"])
-    if not _run_iptables(["-C", IPTABLES_CHAIN, "-d", ip_address, "-j", "DROP"]):
-        _run_iptables(["-I", IPTABLES_CHAIN, "1", "-d", ip_address, "-j", "DROP"])
-    _currently_blocked_ips.add(ip_address)
+    if ip_address not in _currently_blocked_ips:
+        if not _run_iptables(["-C", IPTABLES_CHAIN, "-s", ip_address, "-j", "REJECT"]):
+            _run_iptables(["-I", IPTABLES_CHAIN, "1", "-s", ip_address, "-j", "REJECT"])
+        if not _run_iptables(["-C", IPTABLES_CHAIN, "-d", ip_address, "-j", "DROP"]):
+            _run_iptables(["-I", IPTABLES_CHAIN, "1", "-d", ip_address, "-j", "DROP"])
+        _currently_blocked_ips.add(ip_address)
 
 
 def remove_iptables_quarantine_ip(ip_address: str) -> None:
     if _is_test_env() or not ip_address:
         return
     ensure_iptables_quarantine_chain()
-    while _run_iptables(["-D", IPTABLES_CHAIN, "-s", ip_address, "-j", "REJECT"]):
-        pass
-    while _run_iptables(["-D", IPTABLES_CHAIN, "-d", ip_address, "-j", "DROP"]):
-        pass
-    _currently_blocked_ips.discard(ip_address)
+    if ip_address in _currently_blocked_ips or not _currently_blocked_ips:
+        while _run_iptables(["-D", IPTABLES_CHAIN, "-s", ip_address, "-j", "REJECT"]):
+            pass
+        while _run_iptables(["-D", IPTABLES_CHAIN, "-d", ip_address, "-j", "DROP"]):
+            pass
+        _currently_blocked_ips.discard(ip_address)
 
 
 def _send_arp_frames(iface: str, frames: list[bytes]) -> None:
@@ -392,14 +416,15 @@ def _start_quarantine_worker() -> None:
 def quarantine_device_l2(
     ip_address: str | None,
     mac_address: str | None,
-    burst: int = 3,
+    burst: int = 5,
     interface: str | None = None,
 ) -> bool:
     """
     Immediately cut off a LAN or Wi-Fi (wlan0) device from the internet by:
     1. Blocking its IP in the kernel FORWARD chain (REJECT outbound, DROP inbound)
     2. Enrolling the device into the active continuous ARP quarantine registry
-    3. Emitting an immediate burst of dual ARP Reply + Request poison frames
+    3. Emitting an immediate rapid burst of dual ARP Reply + Request poison frames
+    4. Flushing local kernel neighbor cache
     """
     if _is_test_env() or _is_cloud_host() or not ip_address or not mac_address:
         return False
@@ -423,7 +448,18 @@ def quarantine_device_l2(
     # 3. Ensure background worker is active
     _start_quarantine_worker()
 
-    # 4. Immediate burst for instantaneous (< 10ms) severance
+    # 4. Flush local neighbor cache to drop existing cached routing immediately
+    try:
+        subprocess.run(
+            ["ip", "-4", "neigh", "flush", "to", clean_ip],
+            capture_output=True,
+            check=False,
+            timeout=1,
+        )
+    except Exception:
+        pass
+
+    # 5. Immediate rapid burst for instantaneous (< 20ms) severance
     gateways = _get_active_gateways()
     for gw in gateways:
         iface = gw["interface"]
@@ -436,7 +472,7 @@ def quarantine_device_l2(
         for _ in range(max(1, burst)):
             _send_arp_frames(iface, frames)
             if burst > 1:
-                time.sleep(0.03)
+                time.sleep(0.01)
 
     return True
 
@@ -444,7 +480,7 @@ def quarantine_device_l2(
 def restore_device_l2(
     ip_address: str | None,
     mac_address: str | None,
-    burst: int = 4,
+    burst: int = 5,
     interface: str | None = None,
 ) -> bool:
     """
@@ -452,7 +488,9 @@ def restore_device_l2(
     Wi-Fi (wlan0) or LAN (eth0) by:
     1. Deregistering from the continuous poison worker
     2. Removing the kernel iptables blocks
-    3. Emitting restoration ARP frames containing true gateway & device hardware MACs
+    3. Emitting authentic unicast & Gratuitous ARP (GARP) broadcast restoration frames
+       with true hardware Ethernet MACs for immediate recovery (< 50ms)
+    4. Flushing local kernel neighbor cache
     """
     if _is_test_env() or _is_cloud_host() or not ip_address or not mac_address:
         return False
@@ -469,32 +507,52 @@ def restore_device_l2(
     # 2. Remove kernel iptables block
     remove_iptables_quarantine_ip(clean_ip)
 
-    # 3. Restore true ARP mapping between gateway and target device
+    # 3. Flush local neighbor cache
+    try:
+        subprocess.run(
+            ["ip", "-4", "neigh", "flush", "to", clean_ip],
+            capture_output=True,
+            check=False,
+            timeout=1,
+        )
+    except Exception:
+        pass
+
+    # 4. Restore true ARP mapping between gateway and target device
     gateways = _get_active_gateways()
+    bcast_mac = "FF:FF:FF:FF:FF:FF"
+    zero_mac = "00:00:00:00:00:00"
+
     for gw in gateways:
         iface = gw["interface"]
         if interface and interface != "all" and iface != interface:
             continue
-        iface_mac = gw["iface_mac"]
         gw_ip = gw["gw_ip"]
-        gw_mac = gw["gw_mac"]
+        gw_mac = gw.get("gw_mac")
 
         if not gw_mac:
             continue
 
         frames = [
-            # Restore true gateway MAC on target device (Reply + Request)
-            _build_arp_packet(iface_mac, clean_mac, 2, gw_mac, gw_ip, clean_mac, clean_ip),
-            _build_arp_packet(iface_mac, clean_mac, 1, gw_mac, gw_ip, clean_mac, clean_ip),
-            # Restore true target device MAC on gateway (Reply + Request)
-            _build_arp_packet(iface_mac, gw_mac, 2, clean_mac, clean_ip, gw_mac, gw_ip),
-            _build_arp_packet(iface_mac, gw_mac, 1, clean_mac, clean_ip, gw_mac, gw_ip),
+            # 1. Authentic Unicast to Client: Router is at gw_mac (Reply + Request)
+            _build_arp_packet(gw_mac, clean_mac, 2, gw_mac, gw_ip, clean_mac, clean_ip),
+            _build_arp_packet(gw_mac, clean_mac, 1, gw_mac, gw_ip, clean_mac, clean_ip),
+
+            # 2. Authentic Unicast to Gateway: Client is at clean_mac (Reply + Request)
+            _build_arp_packet(clean_mac, gw_mac, 2, clean_mac, clean_ip, gw_mac, gw_ip),
+            _build_arp_packet(clean_mac, gw_mac, 1, clean_mac, clean_ip, gw_mac, gw_ip),
+
+            # 3. Gratuitous ARP (GARP) Broadcasts to update switches, APs, and endpoints
+            _build_arp_packet(gw_mac, bcast_mac, 2, gw_mac, gw_ip, bcast_mac, gw_ip),
+            _build_arp_packet(gw_mac, bcast_mac, 1, gw_mac, gw_ip, zero_mac, gw_ip),
+            _build_arp_packet(clean_mac, bcast_mac, 2, clean_mac, clean_ip, bcast_mac, clean_ip),
+            _build_arp_packet(clean_mac, bcast_mac, 1, clean_mac, clean_ip, zero_mac, clean_ip),
         ]
 
         for _ in range(max(1, burst)):
             _send_arp_frames(iface, frames)
             if burst > 1:
-                time.sleep(0.03)
+                time.sleep(0.01)
 
     return True
 
