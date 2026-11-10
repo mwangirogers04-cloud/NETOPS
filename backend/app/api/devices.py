@@ -3,7 +3,7 @@ import threading
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import delete, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -38,7 +38,7 @@ from ..services.vlan_automation import automate_vlan_assignment
 from ..services.event_service import create_event
 from ..services.auth_service import get_optional_current_user, require_admin, require_super_admin
 from ..services.firewall.manager import get_active_firewall_driver
-from ..services.l2_quarantine import quarantine_device_l2, add_iptables_quarantine_ip
+from ..services.l2_quarantine import quarantine_device_l2, add_iptables_quarantine_ip, is_protected
 from ..services.endpoint_health_monitor import suppress_mac_from_auto_registration
 from ..services.sophos_enforcement import is_sophos_configured, sophos_block_device
 from ..services.device_troubleshooter import run_device_diagnostics, apply_diagnostic_fix
@@ -1082,6 +1082,12 @@ def isolate_device(
         raise HTTPException(
             status_code=404,
             detail="Device not found",
+        )
+
+    if is_protected(device.ip_address, device.mac_address) or device.device_type in ("router", "firewall", "switch"):
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot isolate critical network infrastructure or NETOPS server.",
         )
 
     old_vlan = device.vlan_id

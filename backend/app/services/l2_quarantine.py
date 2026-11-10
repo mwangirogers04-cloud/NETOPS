@@ -1,3 +1,4 @@
+import glob
 import logging
 import os
 import socket
@@ -8,7 +9,7 @@ import time
 
 logger = logging.getLogger(__name__)
 
-PROTECTED_IPS = {
+STATIC_PROTECTED_IPS = {
     "127.0.0.1",
     "0.0.0.0",
     "192.168.0.1",    # Wi-Fi Router / Gateway (Tenda)
@@ -16,7 +17,108 @@ PROTECTED_IPS = {
     "192.168.0.11",   # MikroTik Router
     "192.168.0.13",   # NETOPS Server (eth0)
     "192.168.0.101",  # NETOPS Server (wlan0)
+    "192.168.0.102",  # NETOPS Server (wlan0)
 }
+
+STATIC_PROTECTED_MACS = {
+    "50:0F:F5:98:F0:10",  # Router Gateway
+    "7C:5A:1C:A4:0B:10",  # Sophos Firewall
+    "2C:C8:1B:EA:E5:E2",  # MikroTik Router
+    "B4:B6:86:8A:69:02",  # NETOPS Server eth0
+    "D4:6D:6D:E6:A2:67",  # NETOPS Server wlan0
+}
+
+_cached_protected_ips: set[str] = set(STATIC_PROTECTED_IPS)
+_cached_protected_macs: set[str] = set(STATIC_PROTECTED_MACS)
+_last_protected_refresh: float = 0.0
+
+
+def get_all_protected_ips() -> set[str]:
+    """Dynamically discover all local host interface IPs, gateways, and infrastructure IPs."""
+    global _cached_protected_ips, _cached_protected_macs, _last_protected_refresh
+    now = time.time()
+    if now - _last_protected_refresh < 10.0 and _cached_protected_ips:
+        return _cached_protected_ips
+
+    ips = set(STATIC_PROTECTED_IPS)
+    macs = set(STATIC_PROTECTED_MACS)
+
+    # 1. Local interface MACs from /sys/class/net/*/address
+    for iface_path in glob.glob("/sys/class/net/*"):
+        addr_file = os.path.join(iface_path, "address")
+        if os.path.exists(addr_file):
+            try:
+                with open(addr_file, "r", encoding="utf-8") as f:
+                    m = f.read().strip().upper()
+                    if len(m) == 17 and m != "00:00:00:00:00:00":
+                        macs.add(m)
+            except Exception:
+                pass
+
+    # 2. Local interface IPs from `ip -4 -o addr show`
+    try:
+        res = subprocess.run(
+            ["ip", "-4", "-o", "addr", "show"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=2,
+        )
+        for line in res.stdout.splitlines():
+            parts = line.split()
+            if len(parts) >= 4:
+                ip = parts[3].split("/")[0]
+                ips.add(ip)
+    except Exception:
+        pass
+
+    # 3. Default gateway IPs from `ip -4 route show default`
+    try:
+        res = subprocess.run(
+            ["ip", "-4", "route", "show", "default"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=2,
+        )
+        for line in res.stdout.splitlines():
+            parts = line.split()
+            if "via" in parts:
+                gw_ip = parts[parts.index("via") + 1]
+                ips.add(gw_ip)
+    except Exception:
+        pass
+
+    _cached_protected_ips = ips
+    _cached_protected_macs = macs
+    _last_protected_refresh = now
+    return _cached_protected_ips
+
+
+def get_all_protected_macs() -> set[str]:
+    """Dynamically discover all local host interface MACs and infrastructure MACs."""
+    get_all_protected_ips()
+    return _cached_protected_macs
+
+
+def is_protected(ip_address: str | None, mac_address: str | None = None) -> bool:
+    """Return True if an IP or MAC belongs to local server or critical network infrastructure."""
+    if not ip_address and not mac_address:
+        return False
+    protected_ips = get_all_protected_ips()
+    protected_macs = get_all_protected_macs()
+    if ip_address:
+        clean_ip = ip_address.strip()
+        if clean_ip in protected_ips or clean_ip.endswith(".1"):
+            return True
+    if mac_address:
+        clean_mac = mac_address.strip().upper()
+        if clean_mac in protected_macs:
+            return True
+    return False
+
+
+PROTECTED_IPS = STATIC_PROTECTED_IPS
 
 IPTABLES_CHAIN = "NETOPS_L2_QUARANTINE"
 _iptables_initialized = False
@@ -179,7 +281,18 @@ def _get_active_gateways() -> list[dict]:
     except Exception:
         pass
 
-    return gateways
+    # Deduplicate gateways by gw_ip to prevent cross-interface ARP storms
+    deduped: dict[str, dict] = {}
+    for gw in gateways:
+        gw_ip = gw["gw_ip"]
+        if gw_ip not in deduped:
+            deduped[gw_ip] = gw
+        else:
+            # If eth0 and wlan0 share the same gateway, prefer eth0 (wired connection)
+            if gw["interface"].startswith("eth") or gw["interface"].startswith("en"):
+                deduped[gw_ip] = gw
+
+    return list(deduped.values())
 
 
 def _run_iptables(args: list[str]) -> bool:
@@ -240,7 +353,7 @@ def ensure_iptables_quarantine_chain() -> None:
 
 
 def add_iptables_quarantine_ip(ip_address: str) -> None:
-    if _is_test_env() or not ip_address or ip_address in PROTECTED_IPS:
+    if _is_test_env() or not ip_address or is_protected(ip_address):
         return
     ensure_iptables_quarantine_chain()
     if ip_address not in _currently_blocked_ips:
@@ -378,7 +491,7 @@ def _continuous_quarantine_worker() -> None:
             for target_ip, info in targets.items():
                 clean_mac = info.get("mac")
                 req_iface = info.get("interface")
-                if not clean_mac:
+                if not clean_mac or is_protected(target_ip, clean_mac):
                     continue
 
                 for gw in cached_gateways:
@@ -431,7 +544,8 @@ def quarantine_device_l2(
 
     clean_ip = ip_address.strip()
     clean_mac = mac_address.strip().upper()
-    if clean_ip in PROTECTED_IPS or not clean_ip.startswith("192.168.0."):
+    if is_protected(clean_ip, clean_mac) or not clean_ip.startswith("192.168.0."):
+        logger.info(f"[IMMUNE] Skipping L2 quarantine for protected/external device: {clean_ip} ({clean_mac})")
         return False
 
     # 1. Kernel iptables rule
@@ -497,7 +611,8 @@ def restore_device_l2(
 
     clean_ip = ip_address.strip()
     clean_mac = mac_address.strip().upper()
-    if clean_ip in PROTECTED_IPS or not clean_ip.startswith("192.168.0."):
+    if is_protected(clean_ip, clean_mac) or not clean_ip.startswith("192.168.0."):
+        logger.info(f"[IMMUNE] Skipping L2 quarantine for protected/external device: {clean_ip} ({clean_mac})")
         return False
 
     # 1. Unregister from continuous poison loop
@@ -570,8 +685,11 @@ def clear_all_l2_quarantines() -> None:
     """Restore all quarantined targets and clear active registry."""
     with _quarantine_lock:
         targets = dict(_active_quarantine_targets)
+        _active_quarantine_targets.clear()
     for ip, info in targets.items():
         try:
             restore_device_l2(ip, info["mac"], interface=info.get("interface"))
         except Exception:
             pass
+    _run_iptables(["-F", IPTABLES_CHAIN])
+    _currently_blocked_ips.clear()

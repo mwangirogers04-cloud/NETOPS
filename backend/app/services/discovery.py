@@ -19,7 +19,7 @@ from .sophos_enforcement import (
     sophos_allow_device,
     sophos_block_device,
 )
-from .l2_quarantine import restore_device_l2
+from .l2_quarantine import restore_device_l2, is_protected
 from .network_enforcement import enforce_device_access
 
 from .device_classifier import classify_device
@@ -1511,22 +1511,34 @@ def save_discovered_devices(
                         existing_device.id,
                     )
                 else:
-                    # DHCP device: Treat as a brand new machine accessing internet
-                    existing_device.approval_status = "pending"
-                    existing_device.internet_access_authorized = False
-                    existing_device.vlan_id = 90
-                    existing_device.enforcement_status = "quarantined"
-                    create_event(
-                        db,
-                        "new_device",
-                        (
-                            f"Machine connected with new DHCP IP ({existing_device.network_interface or scanned_interface or 'eth0'}): "
-                            f"{existing_device.hostname or 'LAN Device'} ({new_ip} / {existing_device.mac_address}) "
-                            f"[{existing_device.vendor or 'LAN Endpoint'}] — "
-                            f"Previous IP was {old_ip}. Treated as new machine: Placed in VLAN 90 Quarantine. Awaiting administrator review & approval."
-                        ),
-                        existing_device.id,
+                    is_infra_or_host = (
+                        is_protected(new_ip, existing_device.mac_address)
+                        or getattr(existing_device, "device_type", None) in ("router", "firewall", "switch")
+                        or (new_ip and (new_ip.endswith(".1") or new_ip.endswith(".254")))
+                        or any(k in (existing_device.hostname or "").lower() for k in ("router", "gateway", "kali", "sophos", "mikrotik"))
                     )
+                    if is_infra_or_host:
+                        existing_device.approval_status = "approved"
+                        existing_device.enforcement_status = "allowed"
+                        existing_device.internet_access_authorized = True
+                        existing_device.vlan_id = 10
+                    else:
+                        # DHCP device: Treat as a brand new machine accessing internet
+                        existing_device.approval_status = "pending"
+                        existing_device.internet_access_authorized = False
+                        existing_device.vlan_id = 90
+                        existing_device.enforcement_status = "quarantined"
+                        create_event(
+                            db,
+                            "new_device",
+                            (
+                                f"Machine connected with new DHCP IP ({existing_device.network_interface or scanned_interface or 'eth0'}): "
+                                f"{existing_device.hostname or 'LAN Device'} ({new_ip} / {existing_device.mac_address}) "
+                                f"[{existing_device.vendor or 'LAN Endpoint'}] — "
+                                f"Previous IP was {old_ip}. Treated as new machine: Placed in VLAN 90 Quarantine. Awaiting administrator review & approval."
+                            ),
+                            existing_device.id,
+                        )
             elif new_ip and not old_ip:
                 existing_device.ip_address = new_ip
 
@@ -1712,12 +1724,21 @@ def save_discovered_devices(
                 else detected_type
             )
 
+            new_ip = discovered.get("ip_address")
+            clean_mac_u = mac_address.upper() if mac_address else ""
+            is_infra_or_host = (
+                is_protected(new_ip, clean_mac_u)
+                or device_type in ("router", "firewall", "switch")
+                or (new_ip and (new_ip.endswith(".1") or new_ip.endswith(".254")))
+                or any(k in (hostname or "").lower() for k in ("router", "gateway", "kali", "sophos", "mikrotik"))
+            )
+
             new_device = Device(
                 mac_address=mac_address,
-                ip_address=discovered.get("ip_address"),
+                ip_address=new_ip,
                 hostname=hostname,
                 vendor=vendor,
-                device_type=device_type,
+                device_type=device_type or ("router" if new_ip and new_ip.endswith(".1") else None),
                 network_interface=(
                     discovered.get("network_interface")
                     or discovered.get("interface")
@@ -1727,11 +1748,11 @@ def save_discovered_devices(
                 owner_id=owner_id,
                 classification_status="normal",
                 status="online",
-                approval_status="pending",
-                ip_assignment="dhcp",
-                vlan_id=90,
-                enforcement_status="quarantined",
-                internet_access_authorized=False,
+                approval_status="approved" if is_infra_or_host else "pending",
+                ip_assignment="static" if is_infra_or_host else "dhcp",
+                vlan_id=10 if is_infra_or_host else 90,
+                enforcement_status="allowed" if is_infra_or_host else "quarantined",
+                internet_access_authorized=True if is_infra_or_host else False,
             )
 
             db.add(new_device)

@@ -8,6 +8,7 @@ import xml.etree.ElementTree as ET
 from urllib.parse import urlparse
 
 from ..config import settings
+from .l2_quarantine import is_protected
 
 logger = logging.getLogger(__name__)
 
@@ -209,7 +210,7 @@ def sophos_block_device(ip_address: str, hostname: str | None = None) -> dict:
         return {"status": "skipped", "reason": "No IP address provided"}
 
     clean_ip = ip_address.strip()
-    if clean_ip in PROTECTED_IPS:
+    if clean_ip in PROTECTED_IPS or is_protected(clean_ip):
         logger.warning(f"Blocked attempt to quarantine protected IP {clean_ip}")
         return {"status": "protected", "reason": f"{clean_ip} is a protected infrastructure IP"}
 

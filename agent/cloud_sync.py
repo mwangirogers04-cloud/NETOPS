@@ -37,6 +37,7 @@ from backend.app.services.discovery import (
 from backend.app.services.l2_quarantine import (
     quarantine_device_l2,
     restore_device_l2,
+    is_protected,
 )
 from backend.app.services.sophos_enforcement import (
     is_sophos_configured,
@@ -210,7 +211,9 @@ def sync_to_cloud(server_url: str, devices: list, token: str | None = None) -> b
             allowed = body.get("allowed_devices", [])
 
             current_quarantined_map = {
-                d["ip_address"]: d for d in quarantined if d.get("ip_address") and d.get("mac_address")
+                d["ip_address"]: d
+                for d in quarantined
+                if d.get("ip_address") and d.get("mac_address") and not is_protected(d.get("ip_address"), d.get("mac_address"))
             }
             current_allowed_map = {
                 d["ip_address"]: d for d in allowed if d.get("ip_address") and d.get("mac_address")
