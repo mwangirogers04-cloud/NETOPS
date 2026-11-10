@@ -355,19 +355,6 @@ def sync_agent_devices(
         scanned_interface=clean_iface,
         owner_id=owner_id,
     )
-    local_ip = get_local_ip()
-    local_mac = get_local_mac()
-    for dev in saved:
-        if getattr(dev, "status", None) == "online":
-            try:
-                assess_and_record_device_updates(
-                    device=dev,
-                    db=db,
-                    local_ip=local_ip,
-                    local_mac=local_mac,
-                )
-            except Exception as exc:
-                pass
     db.commit()
 
     quarantined_devices = [
