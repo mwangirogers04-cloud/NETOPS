@@ -325,6 +325,9 @@ def ensure_iptables_quarantine_chain() -> None:
         # Ensure jump from FORWARD to IPTABLES_CHAIN is at top
         if not _run_iptables(["-C", "FORWARD", "-j", IPTABLES_CHAIN]):
             _run_iptables(["-I", "FORWARD", "1", "-j", IPTABLES_CHAIN])
+        # Ensure jump from INPUT to IPTABLES_CHAIN is at top
+        if not _run_iptables(["-C", "INPUT", "-j", IPTABLES_CHAIN]):
+            _run_iptables(["-I", "INPUT", "1", "-j", IPTABLES_CHAIN])
 
         # Discover existing rules
         for prefix in (["/usr/sbin/iptables"], ["sudo", "-n", "/usr/sbin/iptables"]):
@@ -352,28 +355,39 @@ def ensure_iptables_quarantine_chain() -> None:
         logger.debug(f"iptables chain init note: {exc}")
 
 
-def add_iptables_quarantine_ip(ip_address: str) -> None:
-    if _is_test_env() or not ip_address or is_protected(ip_address):
+def add_iptables_quarantine_ip(ip_address: str, mac_address: str | None = None) -> None:
+    if _is_test_env() or not ip_address or is_protected(ip_address, mac_address):
         return
     ensure_iptables_quarantine_chain()
     if ip_address not in _currently_blocked_ips:
-        if not _run_iptables(["-C", IPTABLES_CHAIN, "-s", ip_address, "-j", "REJECT"]):
-            _run_iptables(["-I", IPTABLES_CHAIN, "1", "-s", ip_address, "-j", "REJECT"])
+        if not _run_iptables(["-C", IPTABLES_CHAIN, "-s", ip_address, "-j", "DROP"]):
+            _run_iptables(["-I", IPTABLES_CHAIN, "1", "-s", ip_address, "-j", "DROP"])
         if not _run_iptables(["-C", IPTABLES_CHAIN, "-d", ip_address, "-j", "DROP"]):
             _run_iptables(["-I", IPTABLES_CHAIN, "1", "-d", ip_address, "-j", "DROP"])
         _currently_blocked_ips.add(ip_address)
+    if mac_address and not is_protected(None, mac_address):
+        clean_mac = mac_address.strip().upper()
+        if not _run_iptables(["-C", IPTABLES_CHAIN, "-m", "mac", "--mac-source", clean_mac, "-j", "DROP"]):
+            _run_iptables(["-I", IPTABLES_CHAIN, "1", "-m", "mac", "--mac-source", clean_mac, "-j", "DROP"])
 
 
-def remove_iptables_quarantine_ip(ip_address: str) -> None:
+def remove_iptables_quarantine_ip(ip_address: str, mac_address: str | None = None) -> None:
     if _is_test_env() or not ip_address:
         return
     ensure_iptables_quarantine_chain()
-    if ip_address in _currently_blocked_ips or not _currently_blocked_ips:
-        while _run_iptables(["-D", IPTABLES_CHAIN, "-s", ip_address, "-j", "REJECT"]):
+    while _run_iptables(["-D", IPTABLES_CHAIN, "-s", ip_address, "-j", "DROP"]):
+        pass
+    while _run_iptables(["-D", IPTABLES_CHAIN, "-d", ip_address, "-j", "DROP"]):
+        pass
+    while _run_iptables(["-D", IPTABLES_CHAIN, "-s", ip_address, "-j", "REJECT"]):
+        pass
+    while _run_iptables(["-D", IPTABLES_CHAIN, "-d", ip_address, "-j", "REJECT"]):
+        pass
+    if mac_address:
+        clean_mac = mac_address.strip().upper()
+        while _run_iptables(["-D", IPTABLES_CHAIN, "-m", "mac", "--mac-source", clean_mac, "-j", "DROP"]):
             pass
-        while _run_iptables(["-D", IPTABLES_CHAIN, "-d", ip_address, "-j", "DROP"]):
-            pass
-        _currently_blocked_ips.discard(ip_address)
+    _currently_blocked_ips.discard(ip_address)
 
 
 def _send_arp_frames(iface: str, frames: list[bytes]) -> None:
@@ -397,32 +411,23 @@ def _build_quarantine_frames_for_target(
     gw: dict,
 ) -> list[bytes]:
     """
-    Build both ARP Reply (op=2) and ARP Request (op=1) poison frames.
-    Modern OSs (Android, iOS, Windows 10/11) forcibly update ARP tables
-    on incoming ARP Requests as required by RFC 826.
+    Build pure ARP Reply (op=2) frames. Never emit ARP Requests (op=1),
+    because hosts receiving an ARP Request for their IP will reply with
+    their authentic hardware MAC, undoing the quarantine!
     """
     iface_mac = gw["iface_mac"]
     gw_ip = gw["gw_ip"]
     gw_mac = gw.get("gw_mac")
+    bcast_mac = "FF:FF:FF:FF:FF:FF"
+    zero_mac = "00:00:00:00:00:00"
     frames = []
 
-    # 1. Poison Target Device: Tell target device gateway IP is at our MAC
+    # 1. Unicast ARP Reply to Target Device: Tell target device gateway IP is at our MAC
     frames.append(
         _build_arp_packet(
             eth_src_mac=iface_mac,
             eth_dst_mac=clean_mac,
-            arp_op=2,  # Reply
-            sender_mac=iface_mac,
-            sender_ip=gw_ip,
-            target_mac=clean_mac,
-            target_ip=clean_ip,
-        )
-    )
-    frames.append(
-        _build_arp_packet(
-            eth_src_mac=iface_mac,
-            eth_dst_mac=clean_mac,
-            arp_op=1,  # Request
+            arp_op=2,  # Reply only
             sender_mac=iface_mac,
             sender_ip=gw_ip,
             target_mac=clean_mac,
@@ -430,24 +435,13 @@ def _build_quarantine_frames_for_target(
         )
     )
 
-    # 2. Poison Gateway: Tell gateway (e.g. Tenda 192.168.0.1) target IP is at our MAC
+    # 2. Unicast ARP Reply to Gateway: Tell gateway target IP is at our MAC
     if gw_mac:
         frames.append(
             _build_arp_packet(
                 eth_src_mac=iface_mac,
                 eth_dst_mac=gw_mac,
-                arp_op=2,  # Reply
-                sender_mac=iface_mac,
-                sender_ip=clean_ip,
-                target_mac=gw_mac,
-                target_ip=gw_ip,
-            )
-        )
-        frames.append(
-            _build_arp_packet(
-                eth_src_mac=iface_mac,
-                eth_dst_mac=gw_mac,
-                arp_op=1,  # Request
+                arp_op=2,  # Reply only
                 sender_mac=iface_mac,
                 sender_ip=clean_ip,
                 target_mac=gw_mac,
@@ -455,13 +449,45 @@ def _build_quarantine_frames_for_target(
             )
         )
 
+    # 3. Broadcast Gratuitous ARP (GARP) Reply: Force AP/switch bridge table to direct target IP to our port
+    frames.append(
+        _build_arp_packet(
+            eth_src_mac=iface_mac,
+            eth_dst_mac=bcast_mac,
+            arp_op=2,  # Reply only
+            sender_mac=iface_mac,
+            sender_ip=clean_ip,
+            target_mac=zero_mac,
+            target_ip=clean_ip,
+        )
+    )
+
     return frames
+
+
+def _get_target_interface(target_ip: str) -> str | None:
+    """Determine which physical interface (wlan0 or eth0) the target device is reachable on."""
+    try:
+        res = subprocess.run(
+            ["ip", "-4", "neigh", "show", target_ip],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=1,
+        )
+        for line in res.stdout.splitlines():
+            parts = line.split()
+            if "dev" in parts:
+                return parts[parts.index("dev") + 1]
+    except Exception:
+        pass
+    return None
 
 
 def _continuous_quarantine_worker() -> None:
     """
     Background worker loop that continuously transmits ARP poison frames
-    every 1.5 seconds for all actively quarantined targets.
+    every 0.5 seconds for all actively quarantined targets.
     This guarantees that devices cannot bypass quarantine even when
     their OS attempts to refresh its ARP cache or receives router broadcast probes.
     """
@@ -476,7 +502,7 @@ def _continuous_quarantine_worker() -> None:
                 targets = dict(_active_quarantine_targets)
 
             if not targets:
-                time.sleep(1.0)
+                time.sleep(0.5)
                 continue
 
             now = time.time()
@@ -485,12 +511,12 @@ def _continuous_quarantine_worker() -> None:
                 last_gw_refresh = now
 
             if not cached_gateways:
-                time.sleep(1.5)
+                time.sleep(0.5)
                 continue
 
             for target_ip, info in targets.items():
                 clean_mac = info.get("mac")
-                req_iface = info.get("interface")
+                req_iface = info.get("interface") or _get_target_interface(target_ip)
                 if not clean_mac or is_protected(target_ip, clean_mac):
                     continue
 
@@ -507,7 +533,7 @@ def _continuous_quarantine_worker() -> None:
         except Exception as exc:
             logger.debug(f"Continuous quarantine worker exception: {exc}")
 
-        time.sleep(1.5)
+        time.sleep(0.5)
 
 
 def _start_quarantine_worker() -> None:
@@ -549,7 +575,7 @@ def quarantine_device_l2(
         return False
 
     # 1. Kernel iptables rule
-    add_iptables_quarantine_ip(clean_ip)
+    add_iptables_quarantine_ip(clean_ip, clean_mac)
 
     # 2. Register into continuous poison worker
     with _quarantine_lock:
@@ -620,7 +646,7 @@ def restore_device_l2(
         _active_quarantine_targets.pop(clean_ip, None)
 
     # 2. Remove kernel iptables block
-    remove_iptables_quarantine_ip(clean_ip)
+    remove_iptables_quarantine_ip(clean_ip, clean_mac)
 
     # 3. Flush local neighbor cache
     try:
