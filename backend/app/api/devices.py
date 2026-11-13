@@ -269,13 +269,26 @@ def get_devices(
         else:
             query = query.where(func.lower(Device.network_name) == clean_net)
 
-    devices = db.scalars(query).all()
+    devices = list(db.scalars(query).all())
 
     attach_update_information(devices, db)
 
     for device in devices:
         add_access_information(device)
 
+    def _ip_sort_key(dev) -> tuple[int, ...]:
+        ip = getattr(dev, "ip_address", None)
+        if not ip or not isinstance(ip, str):
+            return (999, 999, 999, 999)
+        try:
+            parts = [int(p) for p in ip.strip().split(".") if p.isdigit()]
+            if len(parts) == 4:
+                return tuple(parts)
+        except Exception:
+            pass
+        return (999, 999, 999, 999)
+
+    devices.sort(key=_ip_sort_key)
     return devices
 
 
@@ -435,6 +448,7 @@ def approve_device(
 
     # Keep the device blocked until the administrator
     # explicitly clicks "Allow Internet".
+    device.internet_access_authorized = False
     device.enforcement_status = "quarantined"
     device.status = "offline"
 
@@ -466,6 +480,22 @@ def approve_device(
         device,
         db,
     )
+    # Ensure approval does NOT prematurely grant internet access
+    device.internet_access_authorized = False
+    device.enforcement_status = "quarantined"
+    device.status = "offline"
+
+    if device.ip_address:
+        try:
+            dev_iface = getattr(device, "network_interface", None)
+            quarantine_device_l2(
+                device.ip_address,
+                device.mac_address,
+                burst=5,
+                interface=dev_iface if isinstance(dev_iface, str) else None,
+            )
+        except Exception:
+            pass
     db.commit()
     db.refresh(device)
 
@@ -597,6 +627,18 @@ def allow_device(
         force=True,
     )
 
+    if device.ip_address:
+        try:
+            dev_iface = getattr(device, "network_interface", None)
+            quarantine_device_l2(
+                device.ip_address,
+                device.mac_address,
+                burst=5,
+                interface=dev_iface if isinstance(dev_iface, str) else None,
+            )
+        except Exception:
+            pass
+
     create_event(
         db,
         "internet_access_allowed",
@@ -667,6 +709,18 @@ def disallow_device(
         db,
         force=True,
     )
+
+    if device.ip_address:
+        try:
+            dev_iface = getattr(device, "network_interface", None)
+            quarantine_device_l2(
+                device.ip_address,
+                device.mac_address,
+                burst=5,
+                interface=dev_iface if isinstance(dev_iface, str) else None,
+            )
+        except Exception:
+            pass
 
     create_event(
         db,
@@ -1198,6 +1252,18 @@ def isolate_device(
         db,
         force=True,
     )
+
+    if device.ip_address:
+        try:
+            dev_iface = getattr(device, "network_interface", None)
+            quarantine_device_l2(
+                device.ip_address,
+                device.mac_address,
+                burst=5,
+                interface=dev_iface if isinstance(dev_iface, str) else None,
+            )
+        except Exception:
+            pass
 
     create_event(
         db,

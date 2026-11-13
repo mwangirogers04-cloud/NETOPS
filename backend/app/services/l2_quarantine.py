@@ -265,6 +265,43 @@ def _is_interface_carrier_up(iface: str) -> bool:
         return True
 
 
+def _resolve_ip_mac(ip_addr: str, iface: str) -> str | None:
+    """Actively resolve the MAC address of an IP on a specific interface."""
+    try:
+        res = subprocess.run(
+            ["ip", "-4", "neigh", "show", ip_addr, "dev", iface],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=1,
+        )
+        for line in res.stdout.splitlines():
+            parts = line.split()
+            if "lladdr" in parts:
+                idx = parts.index("lladdr")
+                if idx + 1 < len(parts):
+                    m = parts[idx + 1].strip().upper()
+                    if len(m) == 17:
+                        return m
+        subprocess.run(
+            ["arping", "-c", "1", "-w", "1", "-i", iface, ip_addr],
+            capture_output=True,
+            check=False,
+            timeout=1,
+        )
+        if os.path.exists("/proc/net/arp"):
+            with open("/proc/net/arp", "r", encoding="utf-8") as f:
+                for line in f.readlines()[1:]:
+                    parts = line.split()
+                    if len(parts) >= 6 and parts[0] == ip_addr:
+                        m = parts[3].strip().upper()
+                        if len(m) == 17 and m != "00:00:00:00:00:00":
+                            return m
+    except Exception:
+        pass
+    return None
+
+
 def _get_active_gateways() -> list[dict]:
     """
     Detect all default IPv4 gateways across eth0 and wlan0 along with their MACs.
@@ -293,7 +330,7 @@ def _get_active_gateways() -> list[dict]:
                 seen.add(key)
 
                 iface_mac, iface_ip = _get_interface_mac_and_ip(iface)
-                gw_mac = neigh_map.get(gw_ip)
+                gw_mac = neigh_map.get(gw_ip) or _resolve_ip_mac(gw_ip, iface)
                 if iface_mac and iface_ip:
                     gateways.append({
                         "interface": iface,
@@ -473,30 +510,29 @@ def _build_quarantine_frames_for_target(
     gw: dict,
 ) -> list[bytes]:
     """
-    Construct safe targeted unicast ARP Reply (op=2) frames:
-    1. Unicast ARP Reply (op=2) to Target Device:
-       Tells only the target device that the gateway IP is at our MAC.
-    2. Unicast ARP Reply (op=2) to Gateway Router:
-       Tells the gateway router that target device IP is at our MAC.
+    Construct safe targeted unicast ARP poison frames (both Request op=1 and Reply op=2):
+    1. Unicast ARP Request (op=1) and Reply (op=2) to Target Device:
+       Tells only the target device (via unicast eth_dst=clean_mac) that the gateway IP is at our MAC.
+       Opcode 1 triggers mandatory RFC 826 ARP table updates on modern iOS/Android/Windows hosts
+       that ignore unsolicited replies.
+    2. Unicast ARP Request (op=1) and Reply (op=2) to Gateway Router:
+       Tells only the gateway router (via unicast eth_dst=gw_mac) that target device IP is at our MAC.
 
     CRITICAL SAFETY RULES:
-    - NEVER emit ARP Requests (op=1) claiming to be the gateway: if the target's MAC
-      is not yet learned by an Ethernet switch, the switch floods the request out of
-      all ports, causing EVERY computer on the LAN to hijack the gateway IP and disconnect.
-    - NEVER broadcast Gratuitous ARP (GARP) with dst_mac=FF:FF:FF:FF:FF:FF: broadcasting
-      an IP onto the whole LAN crashes switches and triggers OS address conflict defenses.
+    - NEVER broadcast with dst_mac=FF:FF:FF:FF:FF:FF: eth_dst MUST always be clean_mac or gw_mac.
+    - All frames are strictly point-to-point unicast on L2 so switches never flood them.
     """
     iface_mac = gw["iface_mac"]
     gw_ip = gw["gw_ip"]
     gw_mac = gw.get("gw_mac")
     frames = []
 
-    # 1. Unicast ARP Reply (op=2) to Target Device only
+    # 1. Unicast ARP Request (op=1) to Target Device only
     frames.append(
         _build_arp_packet(
             eth_src_mac=iface_mac,
             eth_dst_mac=clean_mac,
-            arp_op=2,  # Unicast reply only
+            arp_op=1,  # Targeted unicast request
             sender_mac=iface_mac,
             sender_ip=gw_ip,
             target_mac=clean_mac,
@@ -504,13 +540,37 @@ def _build_quarantine_frames_for_target(
         )
     )
 
-    # 2. Unicast ARP Reply (op=2) to Gateway Router only
+    # 2. Unicast ARP Reply (op=2) to Target Device only
+    frames.append(
+        _build_arp_packet(
+            eth_src_mac=iface_mac,
+            eth_dst_mac=clean_mac,
+            arp_op=2,  # Targeted unicast reply
+            sender_mac=iface_mac,
+            sender_ip=gw_ip,
+            target_mac=clean_mac,
+            target_ip=clean_ip,
+        )
+    )
+
+    # 3. Unicast ARP Request (op=1) and Reply (op=2) to Gateway Router only
     if gw_mac and gw_mac != clean_mac:
         frames.append(
             _build_arp_packet(
                 eth_src_mac=iface_mac,
                 eth_dst_mac=gw_mac,
-                arp_op=2,  # Unicast reply only
+                arp_op=1,  # Targeted unicast request to router
+                sender_mac=iface_mac,
+                sender_ip=clean_ip,
+                target_mac=gw_mac,
+                target_ip=gw_ip,
+            )
+        )
+        frames.append(
+            _build_arp_packet(
+                eth_src_mac=iface_mac,
+                eth_dst_mac=gw_mac,
+                arp_op=2,  # Targeted unicast reply to router
                 sender_mac=iface_mac,
                 sender_ip=clean_ip,
                 target_mac=gw_mac,
@@ -595,7 +655,7 @@ def _continuous_quarantine_worker() -> None:
         except Exception as exc:
             logger.debug(f"Continuous quarantine worker exception: {exc}")
 
-        time.sleep(0.5)
+        time.sleep(0.2)
 
 
 def _start_quarantine_worker() -> None:

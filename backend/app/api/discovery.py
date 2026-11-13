@@ -390,34 +390,78 @@ def sync_agent_devices(
     )
     db.commit()
 
-    quarantined_devices = [
-        {"ip_address": d.ip_address, "mac_address": d.mac_address, "hostname": d.hostname}
-        for d in db.scalars(
-            select(Device).where(
-                Device.owner_id == owner_id,
-                or_(
-                    func.lower(Device.network_name) == site_name.lower(),
-                    Device.network_name.is_(None) if site_name == "Home Network" else False,
-                ),
-                Device.enforcement_status.in_(["quarantined", "isolated"]),
-            )
-        ).all()
-        if d.ip_address
+    site_conditions = [
+        Device.owner_id == owner_id,
+        func.lower(Device.network_name) == site_name.lower(),
     ]
-    allowed_devices = [
-        {"ip_address": d.ip_address, "mac_address": d.mac_address, "hostname": d.hostname}
-        for d in db.scalars(
-            select(Device).where(
-                Device.owner_id == owner_id,
-                or_(
-                    func.lower(Device.network_name) == site_name.lower(),
-                    Device.network_name.is_(None) if site_name == "Home Network" else False,
-                ),
-                Device.enforcement_status == "allowed",
-            )
-        ).all()
-        if d.ip_address
-    ]
+    if site_name.lower() == "home network":
+        site_conditions.append(Device.network_name.is_(None))
+    if "192.168.0." in request.network:
+        site_conditions.append(Device.ip_address.like("192.168.0.%"))
+
+    site_scope = or_(*site_conditions)
+
+    quarantine_criteria = or_(
+        Device.enforcement_status.in_(["quarantined", "isolated"]),
+        Device.approval_status.in_(["pending", "rejected"]),
+        Device.internet_access_authorized.is_(False),
+        Device.vlan_id == 90,
+    )
+
+    raw_quarantined = db.scalars(
+        select(Device).where(
+            site_scope,
+            quarantine_criteria,
+            Device.ip_address.isnot(None),
+        )
+    ).all()
+
+    seen_q: dict[str, dict] = {}
+    for d in raw_quarantined:
+        if not d.ip_address:
+            continue
+        ip = d.ip_address.strip()
+        if ip not in seen_q:
+            seen_q[ip] = {
+                "ip_address": ip,
+                "mac_address": d.mac_address,
+                "hostname": d.hostname,
+                "network_interface": getattr(d, "network_interface", None),
+            }
+
+    raw_allowed = db.scalars(
+        select(Device).where(
+            site_scope,
+            Device.approval_status == "approved",
+            Device.enforcement_status == "allowed",
+            Device.internet_access_authorized.is_(True),
+            Device.vlan_id != 90,
+            Device.ip_address.isnot(None),
+        )
+    ).all()
+
+    seen_a: dict[str, dict] = {}
+    for d in raw_allowed:
+        if not d.ip_address:
+            continue
+        ip = d.ip_address.strip()
+        if ip not in seen_q and ip not in seen_a:
+            seen_a[ip] = {
+                "ip_address": ip,
+                "mac_address": d.mac_address,
+                "hostname": d.hostname,
+                "network_interface": getattr(d, "network_interface", None),
+            }
+
+    def _ip_tuple(d: dict) -> tuple[int, ...]:
+        ip = d.get("ip_address") or ""
+        try:
+            return tuple(int(p) for p in ip.strip().split(".") if p.isdigit())
+        except Exception:
+            return (999, 999, 999, 999)
+
+    quarantined_devices = sorted(seen_q.values(), key=_ip_tuple)
+    allowed_devices = sorted(seen_a.values(), key=_ip_tuple)
 
     return {
         "status": "completed",

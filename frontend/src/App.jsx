@@ -889,11 +889,33 @@ function App() {
   // LOAD DEVICES
   // ------------------------------------------------------------
   
+  const compareIpAddresses = (ipA, ipB) => {
+    if (!ipA && !ipB) return 0;
+    if (!ipA) return 1;
+    if (!ipB) return -1;
+    const partsA = String(ipA).trim().split(".").map((n) => parseInt(n, 10));
+    const partsB = String(ipB).trim().split(".").map((n) => parseInt(n, 10));
+    if (
+      partsA.length === 4 &&
+      partsB.length === 4 &&
+      partsA.every((n) => !isNaN(n)) &&
+      partsB.every((n) => !isNaN(n))
+    ) {
+      for (let i = 0; i < 4; i++) {
+        if (partsA[i] !== partsB[i]) {
+          return partsA[i] - partsB[i];
+        }
+      }
+      return 0;
+    }
+    return String(ipA).localeCompare(String(ipB));
+  };
+
   const ipToNum = (ip) => {
-    if (!ip || typeof ip !== "string") return 999999999;
-    const parts = ip.trim().split(".");
-    if (parts.length !== 4) return 999999999;
-    return parts.reduce((acc, octet) => (acc << 8) + (parseInt(octet, 10) || 0), 0) >>> 0;
+    if (!ip || typeof ip !== "string") return 999999999999;
+    const parts = ip.trim().split(".").map((n) => parseInt(n, 10));
+    if (parts.length !== 4 || parts.some((n) => isNaN(n))) return 999999999999;
+    return parts[0] * 16777216 + parts[1] * 65536 + parts[2] * 256 + parts[3];
   };
 
   // Smart search: a complete IPv4 address or full MAC address is matched
@@ -942,8 +964,8 @@ function App() {
   const siteScopedDevices = devices.filter(matchesSelectedNetwork);
 
   const scopedDevices = (selectedInterface && selectedInterface !== "all")
-    ? siteScopedDevices.filter(matchesSelectedInterface).slice().sort((a, b) => ipToNum(a.ip_address) - ipToNum(b.ip_address))
-    : siteScopedDevices.slice().sort((a, b) => ipToNum(a.ip_address) - ipToNum(b.ip_address));
+    ? siteScopedDevices.filter(matchesSelectedInterface).slice().sort((a, b) => compareIpAddresses(a.ip_address, b.ip_address))
+    : siteScopedDevices.slice().sort((a, b) => compareIpAddresses(a.ip_address, b.ip_address));
 
   const totalDevices = siteScopedDevices.length;
   const onlineDevices = siteScopedDevices.filter((device) => isDeviceActuallyOnline(device)).length;
@@ -982,8 +1004,10 @@ function App() {
       }
 
       const data = await response.json();
-
-      setDevices(Array.isArray(data) ? data : []);
+      const sorted = Array.isArray(data)
+        ? [...data].sort((a, b) => compareIpAddresses(a.ip_address, b.ip_address))
+        : [];
+      setDevices(sorted);
     } catch (error) {
       console.error("Device loading error:", error);
     } finally {
@@ -4200,7 +4224,7 @@ const LanScannerPage = () => {
 
     // Search query
     return deviceMatchesSearch(device, lanSearchQuery);
-  });
+  }).slice().sort((a, b) => compareIpAddresses(a.ip_address, b.ip_address));
 
   const getDeviceIcon = (type) => {
     switch (type) {
@@ -10391,7 +10415,7 @@ const Dashboard = () => {
     }
     if (dashboardDeviceFilter === "rejected") return device.approval_status === "rejected";
     return true;
-  });
+  }).slice().sort((a, b) => compareIpAddresses(a.ip_address, b.ip_address));
 
   return (
     <div className="page">

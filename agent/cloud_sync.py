@@ -217,16 +217,20 @@ def sync_to_cloud(server_url: str, devices: list, token: str | None = None, netw
                 for d in quarantined
                 if d.get("ip_address") and d.get("mac_address") and not is_protected(d.get("ip_address"), d.get("mac_address"))
             }
-            current_allowed_map = {
-                d["ip_address"]: d for d in allowed if d.get("ip_address") and d.get("mac_address")
-            }
             current_quarantined_ips = set(current_quarantined_map.keys())
+            current_allowed_map = {
+                d["ip_address"]: d
+                for d in allowed
+                if d.get("ip_address") and d.get("mac_address") and d.get("ip_address") not in current_quarantined_ips
+            }
 
             # 1. Immediate Layer-2 Restoration for allowed devices (unblock + authentic GARP restoration)
             for ip, dev in current_allowed_map.items():
+                if ip in current_quarantined_ips:
+                    continue
                 mac = dev.get("mac_address")
                 dev_iface = dev.get("network_interface") or dev.get("interface")
-                if ip in _locally_quarantined_ips or is_target_quarantined(ip, mac) or (not _enforcement_initialized and ip not in current_quarantined_ips):
+                if ip in _locally_quarantined_ips or is_target_quarantined(ip, mac):
                     try:
                         restore_device_l2(ip, mac, burst=5, interface=dev_iface)
                         _locally_quarantined_ips.discard(ip)
@@ -240,7 +244,7 @@ def sync_to_cloud(server_url: str, devices: list, token: str | None = None, netw
                 if is_protected(ip, mac):
                     continue
                 dev_iface = dev.get("network_interface") or dev.get("interface")
-                if ip not in _locally_quarantined_ips or not _enforcement_initialized:
+                if ip not in _locally_quarantined_ips or not is_target_quarantined(ip, mac):
                     try:
                         quarantine_device_l2(ip, mac, burst=5, interface=dev_iface)
                         _locally_quarantined_ips.add(ip)
