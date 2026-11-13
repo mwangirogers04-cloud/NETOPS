@@ -23,12 +23,14 @@ services:
     region: frankfurt # Must match the database region for minimal latency
     plan: free # Change to 'starter' ($7/mo) for production SLA
     buildCommand: "pip install --upgrade pip && pip install -r backend/requirements.txt"
-    startCommand: "uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT --workers 2"
+    startCommand: "python -u -m uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT --workers 1"
     healthCheckPath: /health
     autoDeploy: true
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.3
+      - key: PYTHONUNBUFFERED
+        value: "1"
       - key: APP_NAME
         value: NETOPS
       - key: APP_ENV

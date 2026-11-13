@@ -49,13 +49,6 @@ from .services.patch_remediation_service import (
 
 
 # ---------------------------------------------------------
-# DATABASE INITIALIZATION
-# ---------------------------------------------------------
-
-Base.metadata.create_all(bind=engine)
-
-
-# ---------------------------------------------------------
 # FASTAPI APPLICATION
 # ---------------------------------------------------------
 
@@ -301,6 +294,12 @@ async def scheduled_switch_backup_loop():
 
 @app.on_event("startup")
 async def startup_event_broadcaster():
+    # Asynchronously initialize database tables without blocking worker imports
+    try:
+        Base.metadata.create_all(bind=engine)
+    except Exception as exc:
+        print(f"[DB] Table verification note: {exc}")
+
     # Seed default developer (super admin) and admin accounts
     db = SessionLocal()
     try:
