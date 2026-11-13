@@ -11,8 +11,9 @@ from ..models.event import Event
 from .event_service import create_event
 from .firewall.manager import get_active_firewall_driver
 from .sophos_enforcement import is_sophos_configured, sophos_allow_device
-from .l2_quarantine import restore_device_l2
+from .l2_quarantine import restore_device_l2, is_protected, get_all_protected_macs, _is_cloud_host
 from .network_enforcement import enforce_device_access
+from .vlan_policy import get_vlan_for_device_type
 
 
 STALE_AFTER_MINUTES = 15
@@ -23,6 +24,126 @@ _consecutive_misses: dict[str, int] = {}
 
 # MAC addresses explicitly deleted by administrators to suppress instant auto-resurrection
 _suppressed_deleted_macs: set[str] = set()
+
+
+def _get_sysfs_mac(iface: str) -> str:
+    path = f"/sys/class/net/{iface}/address"
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return f.read().strip().replace(":", "").replace("-", "").upper()
+        except Exception:
+            pass
+    return ""
+
+
+def get_local_active_connection() -> tuple[str | None, str | None]:
+    """
+    Check physical carriers and default route to identify active LAN vs WLAN.
+    Returns (active_iface, inactive_iface) e.g. ('eth0', 'wlan0') or ('wlan0', 'eth0').
+    """
+    eth0_carrier = False
+    try:
+        with open("/sys/class/net/eth0/carrier", "r", encoding="utf-8") as f:
+            eth0_carrier = (f.read().strip() == "1")
+    except Exception:
+        pass
+
+    wlan0_carrier = False
+    for path in ("/sys/class/net/wlan0/carrier", "/sys/class/net/wlan0/operstate"):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                val = f.read().strip()
+                if val in ("1", "up"):
+                    wlan0_carrier = True
+                    break
+        except Exception:
+            pass
+
+    if eth0_carrier:
+        return "eth0", "wlan0"
+    elif wlan0_carrier:
+        return "wlan0", "eth0"
+    return None, None
+
+
+def reconcile_dual_interface_devices(devices_list: list[Device], online_devices: list[Device] | None = None) -> None:
+    """
+    Enforce mutual exclusivity between LAN and WLAN connections:
+    If a machine has both LAN and WLAN adapters (e.g. laptop connected
+    to Ethernet while Wi-Fi is also configured, or same hostname/machine):
+    If current active connection is LAN, LAN indicates 'online' and
+    WLAN indicates 'offline'. If current active connection is WLAN,
+    WLAN indicates 'online' and LAN indicates 'offline'.
+    """
+    active_local, inactive_local = get_local_active_connection()
+
+    local_eth0_mac = _get_sysfs_mac("eth0")
+    local_wlan0_mac = _get_sysfs_mac("wlan0")
+    local_host_macs = {local_eth0_mac, local_wlan0_mac} - {""}
+
+    # 1. Local machine interfaces (kali / localhost)
+    for d in devices_list:
+        if not isinstance(d, Device):
+            continue
+        d_mac = (d.mac_address or "").replace(":", "").replace("-", "").upper()
+        if (d.hostname and d.hostname.lower() in ("kali", "localhost")) or (d_mac and d_mac in local_host_macs):
+            dev_iface = getattr(d, "network_interface", None) or ("eth0" if d_mac == local_eth0_mac else "wlan0")
+            expected_status = "online" if active_local == dev_iface else "offline"
+            if d.status != expected_status:
+                d.status = expected_status
+            if online_devices is not None:
+                if expected_status == "online" and d not in online_devices:
+                    online_devices.append(d)
+                elif expected_status == "offline" and d in online_devices:
+                    online_devices.remove(d)
+
+    # 2. Remote multi-homed devices by hostname
+    devices_by_host: dict[str, list[Device]] = {}
+    for d in devices_list:
+        if not isinstance(d, Device) or not d.hostname:
+            continue
+        h_clean = d.hostname.strip().lower()
+        if h_clean in ("unknown", "computer", "phone", "device", "kali", "localhost") or h_clean.startswith("lan-device-") or h_clean.startswith("host-"):
+            continue
+        devices_by_host.setdefault(h_clean, []).append(d)
+
+    for host_name, devs in devices_by_host.items():
+        if len(devs) < 2:
+            continue
+
+        lan_devs = [
+            x for x in devs 
+            if (x.network_interface or "").lower() in ("eth0", "lan0", "eth1") 
+            or (x.network_interface and (x.network_interface.startswith("eth") or x.network_interface.startswith("en")))
+        ]
+        wlan_devs = [
+            x for x in devs 
+            if (x.network_interface or "").lower() in ("wlan0", "wifi", "wlan1") 
+            or (x.network_interface and (x.network_interface.startswith("wl") or "wifi" in x.network_interface.lower()))
+        ]
+
+        if not lan_devs or not wlan_devs:
+            continue
+
+        # If ANY LAN interface is online/active, LAN is the active connection
+        lan_is_online = any(ld.status == "online" for ld in lan_devs)
+        wlan_is_online = any(wd.status == "online" for wd in wlan_devs)
+
+        if lan_is_online:
+            # Current connection is LAN: mark all WLAN adapters as offline
+            for wd in wlan_devs:
+                if wd.status != "offline":
+                    wd.status = "offline"
+                    if online_devices is not None and wd in online_devices:
+                        online_devices.remove(wd)
+        elif wlan_is_online:
+            # Current connection is WLAN: mark all LAN adapters as offline
+            for ld in lan_devs:
+                if ld.status != "offline":
+                    ld.status = "offline"
+                    if online_devices is not None and ld in online_devices:
+                        online_devices.remove(ld)
 
 
 def suppress_mac_from_auto_registration(mac: str | None) -> None:
@@ -108,11 +229,7 @@ async def endpoint_health_monitor_loop():
 
             # Check reachability of all inventory devices (both online and offline)
             is_mock_env = str(type(db)).startswith("<class 'unittest.mock")
-            is_cloud_host = (
-                not is_mock_env
-                and not os.path.exists("/sys/class/net/wlan0")
-                and not any(os.path.exists(f"/sys/class/net/{i}") for i in ("eth0", "lan0"))
-            )
+            is_cloud_env = is_mock_env or _is_cloud_host()
 
             try:
                 device_query = db.scalars(select(Device)).all()
@@ -121,7 +238,7 @@ async def endpoint_health_monitor_loop():
 
             online_devices = []
 
-            if is_mock_env:
+            if is_cloud_env:
                 for d in device_query:
                     if isinstance(d, Device) and d.status == "online":
                         online_devices.append(d)
@@ -205,43 +322,39 @@ async def endpoint_health_monitor_loop():
                             online_devices.append(d)
                         continue
                     if d.hostname and d.hostname.lower() in ("kali", "localhost"):
-                        if d.status == "online":
-                            online_devices.append(d)
+                        # Localhost interface states are reconciled based on physical link carrier
                         continue
 
                     d_mac = d.mac_address.replace(":", "").replace("-", "").upper() if d.mac_address else None
                     is_active = (d.ip_address and d.ip_address in active_ips) or (d_mac and d_mac in active_macs)
 
                     if not is_active and d.ip_address:
-                        # Prioritize the device's recorded interface, then fall back to others
-                        preferred_iface = getattr(d, "network_interface", None) or "eth0"
-                        ifaces_to_try = [preferred_iface]
-                        for alt in ("eth0", "wlan0"):
-                            if alt not in ifaces_to_try:
-                                ifaces_to_try.append(alt)
-                        for iface in ifaces_to_try:
-                            try:
-                                res = subprocess.run(
-                                    ["arping", "-c", "2", "-w", "2", "-i", iface, d.ip_address],
-                                    capture_output=True,
-                                    check=False,
-                                    timeout=3,
-                                )
-                                if res.returncode == 0:
-                                    is_active = True
-                                    d.network_interface = iface
-                                    break
-                            except Exception:
-                                pass
-
-                        if not is_active:
+                        # Do NOT send active broadcast arping probes to quarantined or isolated devices.
+                        # Active broadcast ARP probes force the quarantined device to emit an authentic
+                        # ARP reply, which undoes the Layer 2 quarantine on routers and switches.
+                        is_quarantined_or_blocked = (
+                            getattr(d, "enforcement_status", None) in ("quarantined", "isolated")
+                            or not getattr(d, "internet_access_authorized", False)
+                            or getattr(d, "approval_status", None) in ("pending", "rejected")
+                            or getattr(d, "vlan_id", None) == 90
+                        )
+                        if is_quarantined_or_blocked:
+                            # Skip active broadcast arping for unapproved/quarantined devices
+                            pass
+                        else:
+                            # Prioritize the device's recorded interface, then fall back to others
+                            preferred_iface = getattr(d, "network_interface", None) or "eth0"
+                            ifaces_to_try = [preferred_iface]
+                            for alt in ("eth0", "wlan0"):
+                                if alt not in ifaces_to_try:
+                                    ifaces_to_try.append(alt)
                             for iface in ifaces_to_try:
                                 try:
                                     res = subprocess.run(
-                                        ["ping", "-I", iface, "-c", "1", "-W", "1", d.ip_address],
+                                        ["arping", "-c", "2", "-w", "2", "-i", iface, d.ip_address],
                                         capture_output=True,
                                         check=False,
-                                        timeout=2,
+                                        timeout=3,
                                     )
                                     if res.returncode == 0:
                                         is_active = True
@@ -249,6 +362,22 @@ async def endpoint_health_monitor_loop():
                                         break
                                 except Exception:
                                     pass
+
+                            if not is_active:
+                                for iface in ifaces_to_try:
+                                    try:
+                                        res = subprocess.run(
+                                            ["ping", "-I", iface, "-c", "1", "-W", "1", d.ip_address],
+                                            capture_output=True,
+                                            check=False,
+                                            timeout=2,
+                                        )
+                                        if res.returncode == 0:
+                                            is_active = True
+                                            d.network_interface = iface
+                                            break
+                                    except Exception:
+                                        pass
 
                     d_key = d_mac or str(d.id)
                     if is_active:
@@ -270,45 +399,92 @@ async def endpoint_health_monitor_loop():
                                         device_id=d.id,
                                     )
                                 else:
-                                    # DHCP lease change: treat as a new machine accessing our internet
-                                    try:
-                                        active_fw = get_active_firewall_driver(db)
-                                        if active_fw.vendor != "sophos" and active_fw.is_configured() and old_ip:
-                                            active_fw.allow_device(old_ip)
-                                        elif is_sophos_configured() and old_ip:
-                                            sophos_allow_device(old_ip)
-                                        restore_device_l2(old_ip, d.mac_address)
-                                    except Exception as exc:
-                                        print(f"[MONITOR] Error releasing old IP {old_ip}: {exc}")
-
-                                    d.ip_address = new_ip
-                                    d.approval_status = "pending"
-                                    d.internet_access_authorized = False
-                                    d.vlan_id = 90
-                                    d.enforcement_status = "quarantined"
-
-                                    try:
-                                        enforce_device_access(d, db, force=True)
-                                    except Exception as exc:
-                                        print(f"[MONITOR] Error enforcing quarantine on {new_ip}: {exc}")
-
-                                    create_event(
-                                        db=db,
-                                        event_type="ip_address_changed",
-                                        message=f"Device IP address changed from {old_ip} to {new_ip} ({d.mac_address})",
-                                        device_id=d.id,
+                                    # Check if the device is a protected gateway, server, router, switch, or local host
+                                    is_infra_or_host = (
+                                        (d.mac_address and d.mac_address in get_all_protected_macs())
+                                        or getattr(d, "device_type", None) in ("router", "firewall", "switch")
+                                        or any(k in (d.hostname or "").lower() for k in ("router", "gateway", "kali", "sophos", "mikrotik", "cisco"))
                                     )
-                                    create_event(
-                                        db=db,
-                                        event_type="new_device",
-                                        message=(
-                                            f"Machine connected with new DHCP IP ({live_info.get('interface') or d.network_interface or 'eth0'}): "
-                                            f"{d.hostname or d.mac_address} ({new_ip} / {d.mac_address}) "
-                                            f"[{d.vendor or 'LAN Device'}] — "
-                                            f"Previous IP was {old_ip}. Treated as new machine: Placed in VLAN 90 Quarantine. Awaiting administrator review & approval."
-                                        ),
-                                        device_id=d.id,
-                                    )
+                                    if is_infra_or_host:
+                                        d.ip_address = new_ip
+                                        d.approval_status = "approved"
+                                        d.enforcement_status = "allowed"
+                                        d.internet_access_authorized = True
+                                        target_vlan = 60 if d.device_type == "access_point" else (30 if d.device_type == "server" else 20)
+                                        if getattr(d, "vlan_id", None) == 90 or not getattr(d, "vlan_id", None):
+                                            d.vlan_id = target_vlan
+                                        create_event(
+                                            db=db,
+                                            event_type="ip_address_changed",
+                                            message=f"Infrastructure device IP updated from {old_ip} to {new_ip} ({d.mac_address})",
+                                            device_id=d.id,
+                                        )
+                                    elif d.approval_status == "approved" and getattr(d, "internet_access_authorized", False) and d.enforcement_status == "allowed":
+                                        # Approved client device renewed DHCP IP: preserve approved status so remote user is not interrupted
+                                        if old_ip:
+                                            try:
+                                                restore_device_l2(old_ip, d.mac_address)
+                                            except Exception:
+                                                pass
+                                        try:
+                                            restore_device_l2(new_ip, d.mac_address, burst=3)
+                                        except Exception:
+                                            pass
+                                        d.ip_address = new_ip
+                                        d.approval_status = "approved"
+                                        d.enforcement_status = "allowed"
+                                        d.internet_access_authorized = True
+                                        target_vlan = get_vlan_for_device_type(d.device_type)
+                                        if getattr(d, "vlan_id", None) == 90 or not getattr(d, "vlan_id", None):
+                                            d.vlan_id = target_vlan if target_vlan != 90 else 20
+                                        create_event(
+                                            db=db,
+                                            event_type="ip_address_changed",
+                                            message=f"Approved device IP updated from {old_ip} to {new_ip} ({d.mac_address})",
+                                            device_id=d.id,
+                                        )
+                                    else:
+                                        # Device is unapproved, rejected, or explicitly quarantined:
+                                        # Enforce quarantine and deny internet access
+                                        try:
+                                            active_fw = get_active_firewall_driver(db)
+                                            if active_fw.vendor != "sophos" and active_fw.is_configured() and old_ip:
+                                                active_fw.allow_device(old_ip)
+                                            elif is_sophos_configured() and old_ip:
+                                                sophos_allow_device(old_ip)
+                                            restore_device_l2(old_ip, d.mac_address)
+                                        except Exception as exc:
+                                            print(f"[MONITOR] Error releasing old IP {old_ip}: {exc}")
+
+                                        d.ip_address = new_ip
+                                        d.approval_status = "pending" if d.approval_status != "rejected" else "rejected"
+                                        d.internet_access_authorized = False
+                                        d.vlan_id = 90
+                                        d.enforcement_status = "quarantined"
+                                        d.status = "offline"
+
+                                        try:
+                                            enforce_device_access(d, db, force=True)
+                                        except Exception as exc:
+                                            print(f"[MONITOR] Error enforcing quarantine on {new_ip}: {exc}")
+
+                                        create_event(
+                                            db=db,
+                                            event_type="ip_address_changed",
+                                            message=f"Device IP address changed from {old_ip} to {new_ip} ({d.mac_address})",
+                                            device_id=d.id,
+                                        )
+                                        create_event(
+                                            db=db,
+                                            event_type="new_device",
+                                            message=(
+                                                f"Machine connected with new DHCP IP ({live_info.get('interface') or d.network_interface or 'eth0'}): "
+                                                f"{d.hostname or d.mac_address} ({new_ip} / {d.mac_address}) "
+                                                f"[{d.vendor or 'LAN Device'}] — "
+                                                f"Previous IP was {old_ip}. Treated as new machine: Placed in VLAN 90 Quarantine. Awaiting administrator review & approval."
+                                            ),
+                                            device_id=d.id,
+                                        )
                             elif new_ip and not old_ip:
                                 d.ip_address = new_ip
 
@@ -389,6 +565,9 @@ async def endpoint_health_monitor_loop():
                                         ),
                                         device_id=d.id,
                                     )
+
+            # Reconcile dual-interface devices (LAN vs WLAN mutual exclusivity)
+            reconcile_dual_interface_devices(device_query, online_devices)
 
             online_macs = set()
             online_ips = set()

@@ -13,7 +13,7 @@ from ..models.device import Device
 from ..models.event import Event
 from .event_service import create_event
 from .device_classifier import classify_device
-from .l2_quarantine import quarantine_device_l2, PROTECTED_IPS
+from .l2_quarantine import quarantine_device_l2, PROTECTED_IPS, _is_cloud_host
 
 logger = logging.getLogger(__name__)
 
@@ -206,6 +206,9 @@ def start_passive_sniffer() -> None:
     """Start the real-time passive network sniffer background thread."""
     global _sniffer_thread, _stop_event
     if _is_test_env():
+        return
+    if _is_cloud_host():
+        logger.info("[PASSIVE-SNIFFER] Running on cloud environment. Passive raw sniffer disabled.")
         return
     if _sniffer_thread and _sniffer_thread.is_alive():
         return

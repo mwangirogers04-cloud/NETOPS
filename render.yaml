@@ -1,0 +1,71 @@
+# =============================================================================
+# Render Blueprint Configuration for NETOPS Platform
+# Relocating from Oracle Cloud to Render (https://render.com)
+# =============================================================================
+
+databases:
+  # ---------------------------------------------------------------------------
+  # Managed PostgreSQL Database
+  # ---------------------------------------------------------------------------
+  - name: netops-db
+    databaseName: netops
+    user: netops
+    plan: free # Change to 'starter' ($7/mo) for persistent, unpaused production storage
+    region: frankfurt # Choose frankfurt, oregon, ohio, or singapore
+
+services:
+  # ---------------------------------------------------------------------------
+  # NETOPS FastAPI Backend Web Service
+  # ---------------------------------------------------------------------------
+  - type: web
+    name: netops-api
+    runtime: python
+    region: frankfurt # Must match the database region for minimal latency
+    plan: free # Change to 'starter' ($7/mo) for production SLA
+    buildCommand: "pip install --upgrade pip && pip install -r backend/requirements.txt"
+    startCommand: "uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT --workers 2"
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.3
+      - key: APP_NAME
+        value: NETOPS
+      - key: APP_ENV
+        value: production
+      - key: DEBUG
+        value: "false"
+      - key: CLOUD_MODE
+        value: "true"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: netops-db
+          property: connectionString
+      - key: CORS_ORIGINS
+        value: "https://www.netops.co.ke,https://netops.co.ke,https://net-ops.ac.ke,https://www.net-ops.ac.ke,http://localhost:5173"
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: JWT_ALGORITHM
+        value: HS256
+      - key: JWT_ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "1440"
+
+  # ---------------------------------------------------------------------------
+  # NETOPS React / Vite Frontend (Static Site)
+  # (Can be hosted here on Render or kept on Vercel pointing to Render API)
+  # ---------------------------------------------------------------------------
+  - type: web
+    name: netops-frontend
+    runtime: static
+    buildCommand: "cd frontend && npm install && npm run build"
+    staticPublishPath: "./frontend/dist"
+    autoDeploy: true
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_URL
+        value: "https://api.netops.co.ke"
+      - key: VITE_WS_URL
+        value: "wss://api.netops.co.ke/ws/events"

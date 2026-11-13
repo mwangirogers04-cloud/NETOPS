@@ -28,6 +28,7 @@ from .api.firewall import router as firewall_router
 from .api.simulation import router as simulation_router
 from .api.auth import router as auth_router
 from .api.users import router as users_router
+from .services.l2_quarantine import sync_quarantined_targets_from_db
 from .services.passive_sniffer import start_passive_sniffer, stop_passive_sniffer
 from .api.switches import router as switches_router
 from .api.notifications import router as notifications_router
@@ -304,8 +305,9 @@ async def startup_event_broadcaster():
     db = SessionLocal()
     try:
         seed_default_users(db)
+        sync_quarantined_targets_from_db(db)
     except Exception as exc:
-        print(f"[AUTH] Error seeding default users: {exc}")
+        print(f"[AUTH/L2] Error during startup sync: {exc}")
     finally:
         db.close()
 

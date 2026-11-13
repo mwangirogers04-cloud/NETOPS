@@ -38,6 +38,7 @@ from backend.app.services.l2_quarantine import (
     quarantine_device_l2,
     restore_device_l2,
     is_protected,
+    is_target_quarantined,
 )
 from backend.app.services.sophos_enforcement import (
     is_sophos_configured,
@@ -186,13 +187,14 @@ def _background_discovery_sweep(interval: float = 45.0):
         time.sleep(interval)
 
 
-def sync_to_cloud(server_url: str, devices: list, token: str | None = None) -> bool:
+def sync_to_cloud(server_url: str, devices: list, token: str | None = None, network_name: str = "Home Network") -> bool:
     """Send live discovered devices to NETOPS cloud endpoint and enforce Layer 2 states rapidly."""
     global _locally_quarantined_ips, _enforcement_initialized
     endpoint = f"{server_url.rstrip('/')}/discovery/agent-sync"
     payload = {
         "network": "192.168.0.0/24",
         "interface": "all",
+        "network_name": network_name,
         "devices": devices,
     }
     data = json.dumps(payload).encode("utf-8")
@@ -223,9 +225,10 @@ def sync_to_cloud(server_url: str, devices: list, token: str | None = None) -> b
             # 1. Immediate Layer-2 Restoration for allowed devices (unblock + authentic GARP restoration)
             for ip, dev in current_allowed_map.items():
                 mac = dev.get("mac_address")
-                if ip in _locally_quarantined_ips or (not _enforcement_initialized and ip not in current_quarantined_ips):
+                dev_iface = dev.get("network_interface") or dev.get("interface")
+                if ip in _locally_quarantined_ips or is_target_quarantined(ip, mac) or (not _enforcement_initialized and ip not in current_quarantined_ips):
                     try:
-                        restore_device_l2(ip, mac, burst=5)
+                        restore_device_l2(ip, mac, burst=5, interface=dev_iface)
                         _locally_quarantined_ips.discard(ip)
                         logger.info(f"[⚡ RESTORED] Rapid ARP unpoisoning & unblocking for {ip} ({mac})")
                     except Exception as r_exc:
@@ -234,9 +237,12 @@ def sync_to_cloud(server_url: str, devices: list, token: str | None = None) -> b
             # 2. Immediate Layer-2 Quarantine for quarantined devices (block + continuous poison)
             for ip, dev in current_quarantined_map.items():
                 mac = dev.get("mac_address")
+                if is_protected(ip, mac):
+                    continue
+                dev_iface = dev.get("network_interface") or dev.get("interface")
                 if ip not in _locally_quarantined_ips or not _enforcement_initialized:
                     try:
-                        quarantine_device_l2(ip, mac, burst=5)
+                        quarantine_device_l2(ip, mac, burst=5, interface=dev_iface)
                         _locally_quarantined_ips.add(ip)
                         logger.info(f"[🔒 QUARANTINED] Rapid L2 ARP poison & blocking enforced for {ip} ({mac})")
                     except Exception as q_exc:
@@ -284,9 +290,9 @@ def sync_to_cloud(server_url: str, devices: list, token: str | None = None) -> b
         return False
 
 
-def run_sync_loop(server_url: str, interval: float = 2.0, token: str | None = None):
+def run_sync_loop(server_url: str, interval: float = 2.0, token: str | None = None, network_name: str = "Home Network"):
     """Main continuous daemon loop with high-frequency enforcement polling and background sweeping."""
-    logger.info(f"Starting NETOPS Cloud Sync Daemon targeting {server_url} (enforcement polling={interval}s)")
+    logger.info(f"Starting NETOPS Cloud Sync Daemon targeting {server_url} (site={network_name}, polling={interval}s)")
 
     # 1. Quick initial neighbor read (< 5ms)
     global _cached_devices
@@ -307,7 +313,7 @@ def run_sync_loop(server_url: str, interval: float = 2.0, token: str | None = No
         try:
             with _devices_lock:
                 devs_to_send = list(_cached_devices)
-            sync_to_cloud(server_url, devs_to_send, token)
+            sync_to_cloud(server_url, devs_to_send, token, network_name=network_name)
         except Exception as exc:
             logger.error(f"Unexpected error in sync loop: {exc}")
 
@@ -333,6 +339,11 @@ def main():
         help="Optional JWT token",
     )
     parser.add_argument(
+        "--network-name",
+        default=os.environ.get("NETOPS_NETWORK_NAME", "Home Network"),
+        help="Network / site name for this enforcer agent (default: Home Network)",
+    )
+    parser.add_argument(
         "--once",
         action="store_true",
         help="Run once and exit immediately",
@@ -344,9 +355,9 @@ def main():
         logger.info(f"Discovered {len(devs)} device(s):")
         for d in devs:
             logger.info(f"  - {d.get('ip_address')} ({d.get('mac_address')}): {d.get('hostname')} [{d.get('network_interface')}]")
-        sync_to_cloud(args.server, devs, args.token)
+        sync_to_cloud(args.server, devs, args.token, network_name=args.network_name)
     else:
-        run_sync_loop(args.server, interval=args.interval, token=args.token)
+        run_sync_loop(args.server, interval=args.interval, token=args.token, network_name=args.network_name)
 
 
 if __name__ == "__main__":

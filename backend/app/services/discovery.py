@@ -19,11 +19,15 @@ from .sophos_enforcement import (
     sophos_allow_device,
     sophos_block_device,
 )
-from .l2_quarantine import restore_device_l2, is_protected
+from .l2_quarantine import restore_device_l2, quarantine_device_l2, is_protected, get_all_protected_macs
 from .network_enforcement import enforce_device_access
 
 from .device_classifier import classify_device
-from .endpoint_health_monitor import unsuppress_mac_from_auto_registration
+from .endpoint_health_monitor import (
+    unsuppress_mac_from_auto_registration,
+    get_local_active_connection,
+    reconcile_dual_interface_devices,
+)
 
 
 def is_valid_ip_address(ip_address: str | None) -> bool:
@@ -1250,6 +1254,7 @@ def save_discovered_devices(
     db: Session,
     scanned_interface: str | None = None,
     owner_id: int | None = None,
+    network_name: str | None = None,
 ):
     """
     Save discovered devices and update their state.
@@ -1271,9 +1276,14 @@ def save_discovered_devices(
         if device.get("mac_address")
     }
 
+    clean_network_name = (network_name or "").strip() or None
     existing_query = select(Device)
     if owner_id is not None:
         existing_query = existing_query.where(Device.owner_id == owner_id)
+    if clean_network_name:
+        existing_query = existing_query.where(
+            func.lower(Device.network_name) == clean_network_name.lower()
+        )
     existing_devices = db.scalars(existing_query).all()
 
     # ---------------------------------------------------------
@@ -1311,14 +1321,17 @@ def save_discovered_devices(
                 else ""
             )
 
-            # Never mark local machine interfaces offline
+            # Reconcile local machine interfaces based on physical active connection
             local_host_macs = {
-                (get_local_mac("eth0") or "").replace(":", "").replace("-", "").upper(),
-                (get_local_mac("wlan0") or "").replace(":", "").replace("-", "").upper(),
+                (get_local_mac("eth0") or "").replace(":", "").replace("-", "").upper(): "eth0",
+                (get_local_mac("wlan0") or "").replace(":", "").replace("-", "").upper(): "wlan0",
             }
             if dev_mac in local_host_macs:
-                if existing_device.status != "online":
-                    existing_device.status = "online"
+                active_local, _ = get_local_active_connection()
+                dev_iface = local_host_macs[dev_mac]
+                expected_status = "online" if active_local == dev_iface else "offline"
+                if existing_device.status != expected_status:
+                    existing_device.status = expected_status
                 continue
 
             if (
@@ -1400,6 +1413,10 @@ def save_discovered_devices(
                 existing_device.mac_address = mac_address
             if owner_id is not None:
                 existing_device.owner_id = owner_id
+            if clean_network_name:
+                existing_device.network_name = clean_network_name
+            elif not existing_device.network_name:
+                existing_device.network_name = "Home Network"
 
         hostname = discovered.get("hostname")
         vendor = discovered.get("vendor")
@@ -1469,19 +1486,20 @@ def save_discovered_devices(
                     other.ip_address = None
 
             if ip_changed:
-                active_fw = get_active_firewall_driver(db)
-                if active_fw.vendor != "sophos" and active_fw.is_configured() and old_ip:
-                    try:
-                        active_fw.allow_device(old_ip)
-                    except Exception as exc:
-                        print(f"[DISCOVERY] Error releasing old IP {old_ip} on {active_fw.vendor_title}: {exc}")
-                elif is_sophos_configured() and old_ip:
+                if is_sophos_configured() and old_ip:
                     try:
                         sophos_allow_device(old_ip)
                     except Exception as exc:
                         print(
                             f"[DISCOVERY] Error releasing old IP {old_ip} on Sophos: {exc}"
                         )
+                else:
+                    active_fw = get_active_firewall_driver(db)
+                    if active_fw.is_configured() and old_ip:
+                        try:
+                            active_fw.allow_device(old_ip)
+                        except Exception as exc:
+                            print(f"[DISCOVERY] Error releasing old IP {old_ip} on {active_fw.vendor_title}: {exc}")
                 if old_ip:
                     try:
                         restore_device_l2(old_ip, existing_device.mac_address)
@@ -1512,22 +1530,57 @@ def save_discovered_devices(
                     )
                 else:
                     is_infra_or_host = (
-                        is_protected(new_ip, existing_device.mac_address)
+                        (existing_device.mac_address and existing_device.mac_address in get_all_protected_macs())
                         or getattr(existing_device, "device_type", None) in ("router", "firewall", "switch")
-                        or (new_ip and (new_ip.endswith(".1") or new_ip.endswith(".254")))
                         or any(k in (existing_device.hostname or "").lower() for k in ("router", "gateway", "kali", "sophos", "mikrotik"))
+                    )
+                    is_previously_approved = (
+                        existing_device.approval_status == "approved"
+                        and getattr(existing_device, "internet_access_authorized", False)
+                        and existing_device.enforcement_status == "allowed"
                     )
                     if is_infra_or_host:
                         existing_device.approval_status = "approved"
                         existing_device.enforcement_status = "allowed"
                         existing_device.internet_access_authorized = True
-                        existing_device.vlan_id = 10
+                        if getattr(existing_device, "vlan_id", None) == 90 or not getattr(existing_device, "vlan_id", None):
+                            existing_device.vlan_id = 10
+                    elif is_previously_approved:
+                        # Existing APPROVED device renewed or changed its DHCP lease:
+                        # Retain approval and internet authorization so remote users / workstations are not locked out!
+                        if old_ip:
+                            try:
+                                restore_device_l2(old_ip, existing_device.mac_address)
+                            except Exception:
+                                pass
+                        try:
+                            restore_device_l2(new_ip, existing_device.mac_address, burst=3)
+                        except Exception:
+                            pass
+                        existing_device.approval_status = "approved"
+                        existing_device.enforcement_status = "allowed"
+                        existing_device.internet_access_authorized = True
+                        if getattr(existing_device, "vlan_id", None) == 90 or not getattr(existing_device, "vlan_id", None):
+                            target_vlan = get_vlan_for_device_type(existing_device.device_type)
+                            existing_device.vlan_id = target_vlan if target_vlan != 90 else 20
                     else:
-                        # DHCP device: Treat as a brand new machine accessing internet
-                        existing_device.approval_status = "pending"
+                        # Device is unapproved, rejected, or explicitly quarantined:
+                        # Deny internet access and keep in VLAN 90 quarantine
+                        existing_device.approval_status = "pending" if existing_device.approval_status != "rejected" else "rejected"
                         existing_device.internet_access_authorized = False
                         existing_device.vlan_id = 90
                         existing_device.enforcement_status = "quarantined"
+                        existing_device.status = "offline"
+                        if new_ip and existing_device.mac_address:
+                            try:
+                                quarantine_device_l2(
+                                    new_ip,
+                                    existing_device.mac_address,
+                                    burst=3,
+                                    interface=existing_device.network_interface or scanned_interface,
+                                )
+                            except Exception:
+                                pass
                         create_event(
                             db,
                             "new_device",
@@ -1666,30 +1719,37 @@ def save_discovered_devices(
                         "normal"
                     )
 
-            # A physically discovered device is online on the local network.
-            # (Internet authorization and quarantine policy are maintained via enforcement_status)
-            was_offline = (existing_device.status != "online")
-            existing_device.status = "online"
-            if was_offline:
-                last_ev = db.scalar(
-                    select(Event)
-                    .where(
-                        Event.device_id == existing_device.id,
-                        Event.event_type.in_(["device_online", "device_offline"]),
+            # If the device is disconnected/quarantined from internet, status indicates offline
+            if (
+                existing_device.enforcement_status in ("quarantined", "isolated")
+                or not getattr(existing_device, "internet_access_authorized", False)
+                or getattr(existing_device, "approval_status", None) in ("pending", "rejected")
+                or getattr(existing_device, "vlan_id", None) == 90
+            ):
+                existing_device.status = "offline"
+            else:
+                was_offline = (existing_device.status != "online")
+                existing_device.status = "online"
+                if was_offline:
+                    last_ev = db.scalar(
+                        select(Event)
+                        .where(
+                            Event.device_id == existing_device.id,
+                            Event.event_type.in_(["device_online", "device_offline"]),
+                        )
+                        .order_by(Event.id.desc())
+                        .limit(1)
                     )
-                    .order_by(Event.id.desc())
-                    .limit(1)
-                )
-                if not last_ev or last_ev.event_type != "device_online":
-                    create_event(
-                        db,
-                        "device_online",
-                        (
-                            f"Device {existing_device.hostname or existing_device.ip_address} "
-                            f"({existing_device.mac_address}) reconnected and is back online on the LAN."
-                        ),
-                        existing_device.id,
-                    )
+                    if not last_ev or last_ev.event_type != "device_online":
+                        create_event(
+                            db,
+                            "device_online",
+                            (
+                                f"Device {existing_device.hostname or existing_device.ip_address} "
+                                f"({existing_device.mac_address}) reconnected and is back online on the LAN."
+                            ),
+                            existing_device.id,
+                        )
             saved_devices.append(existing_device)
 
             if ip_changed:
@@ -1739,6 +1799,7 @@ def save_discovered_devices(
                 hostname=hostname,
                 vendor=vendor,
                 device_type=device_type or ("router" if new_ip and new_ip.endswith(".1") else None),
+                network_name=clean_network_name or discovered.get("network_name") or "Home Network",
                 network_interface=(
                     discovered.get("network_interface")
                     or discovered.get("interface")
@@ -1764,7 +1825,7 @@ def save_discovered_devices(
                 enforce_device_access(new_device, db, force=True)
             except Exception:
                 pass
-            new_device.status = "online"
+            new_device.status = "offline"
 
             create_event(
                 db,
@@ -1789,6 +1850,10 @@ def save_discovered_devices(
                     ),
                     new_device.id,
                 )
+
+    # Enforce LAN vs WLAN mutual exclusivity across all devices in DB
+    all_db_devices = db.scalars(select(Device)).all()
+    reconcile_dual_interface_devices(all_db_devices)
 
     db.commit()
 

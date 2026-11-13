@@ -2,7 +2,7 @@ import os
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, field_validator
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -37,6 +37,7 @@ def get_local_subnets():
 class DiscoveryRequest(BaseModel):
     network: str | None = None
     interface: str | None = None
+    network_name: str | None = None
 
     @field_validator("network")
     @classmethod
@@ -54,11 +55,13 @@ class AgentDeviceItem(BaseModel):
     device_type: str | None = None
     network_interface: str | None = None
     interface: str | None = None
+    network_name: str | None = None
 
 
 class AgentSyncRequest(BaseModel):
     network: str
     interface: str | None = None
+    network_name: str | None = None
     devices: list[AgentDeviceItem]
 
 
@@ -211,6 +214,13 @@ def run_discovery_scan(
                 target_network
             )
 
+        target_network_name = (request.network_name or "").strip()
+        if not target_network_name:
+            if "192.168.0." in target_network:
+                target_network_name = "Home Network"
+            else:
+                target_network_name = "Remote Network"
+
         # If physical ARP/ping discovery found no devices (e.g. running on a cloud host
         # or remote VPS unable to reach the private LAN directly), generate isolated endpoints
         # for this user's custom subnet, preserving any existing endpoints registered to this user.
@@ -220,10 +230,18 @@ def run_discovery_scan(
                 clean_iface=clean_iface,
                 owner_id=owner_id,
             )
+            for d in discovered_devices:
+                d["network_name"] = target_network_name
+
             if owner_id is not None:
-                existing_user_devs = db.scalars(
-                    select(Device).where(Device.owner_id == owner_id)
-                ).all()
+                existing_query = select(Device).where(
+                    Device.owner_id == owner_id,
+                    or_(
+                        func.lower(Device.network_name) == target_network_name.lower(),
+                        Device.network_name.is_(None) if target_network_name == "Home Network" else False,
+                    )
+                )
+                existing_user_devs = db.scalars(existing_query).all()
                 existing_macs = {d["mac_address"].upper() for d in discovered_devices if d.get("mac_address")}
                 for u_dev in existing_user_devs:
                     if u_dev.mac_address and u_dev.mac_address.upper() not in existing_macs:
@@ -233,6 +251,7 @@ def run_discovery_scan(
                             "hostname": u_dev.hostname,
                             "vendor": u_dev.vendor,
                             "device_type": u_dev.device_type,
+                            "network_name": u_dev.network_name or target_network_name,
                             "network_interface": u_dev.network_interface or clean_iface,
                             "status": "online",
                         })
@@ -242,6 +261,7 @@ def run_discovery_scan(
             db,
             scanned_interface=clean_iface,
             owner_id=owner_id,
+            network_name=target_network_name,
         )
 
         # Detect and record endpoint update posture for all active online devices
@@ -347,13 +367,26 @@ def sync_agent_devices(
             select(User).where(User.role == "super_admin").order_by(User.id)
         )
         owner_id = admin_user.id if admin_user else 1
+
+    site_name = (request.network_name or "").strip()
+    if not site_name:
+        if "192.168.0." in request.network:
+            site_name = "Home Network"
+        else:
+            site_name = "Remote Network"
+
     raw_devices = [d.model_dump() for d in request.devices]
+    for rd in raw_devices:
+        if not rd.get("network_name"):
+            rd["network_name"] = site_name
+
     clean_iface = request.interface.strip() if request.interface and request.interface.strip() else None
     saved = save_discovered_devices(
         raw_devices,
         db=db,
         scanned_interface=clean_iface,
         owner_id=owner_id,
+        network_name=site_name,
     )
     db.commit()
 
@@ -362,6 +395,10 @@ def sync_agent_devices(
         for d in db.scalars(
             select(Device).where(
                 Device.owner_id == owner_id,
+                or_(
+                    func.lower(Device.network_name) == site_name.lower(),
+                    Device.network_name.is_(None) if site_name == "Home Network" else False,
+                ),
                 Device.enforcement_status.in_(["quarantined", "isolated"]),
             )
         ).all()
@@ -372,6 +409,10 @@ def sync_agent_devices(
         for d in db.scalars(
             select(Device).where(
                 Device.owner_id == owner_id,
+                or_(
+                    func.lower(Device.network_name) == site_name.lower(),
+                    Device.network_name.is_(None) if site_name == "Home Network" else False,
+                ),
                 Device.enforcement_status == "allowed",
             )
         ).all()
@@ -381,6 +422,7 @@ def sync_agent_devices(
     return {
         "status": "completed",
         "network": request.network,
+        "network_name": site_name,
         "owner_id": owner_id,
         "devices_discovered": len(raw_devices),
         "devices_saved": len(saved),
@@ -405,11 +447,15 @@ def download_probe_script():
 
 
 @router.get("/launcher/windows")
-def download_windows_launcher(token: str | None = Query(None, description="User auth token for 1-click execution")):
+def download_windows_launcher(
+    token: str | None = Query(None, description="User auth token for 1-click execution"),
+    network_name: str | None = Query("Remote Network", description="Target site/network name"),
+):
     """
     Serves a 1-click .bat script for Windows users to scan their remote physical Wi-Fi/LAN.
     """
     token_flag = f' --token "{token.strip()}"' if token and token.strip() else ""
+    net_flag = f' --network-name "{network_name.strip()}"' if network_name and network_name.strip() else ' --network-name "Remote Network"'
     bat_content = (
         "@echo off\r\n"
         "title NETOPS Wi-Fi Scanner\r\n"
@@ -438,7 +484,7 @@ def download_windows_launcher(token: str | None = Query(None, description="User 
         ")\r\n\r\n"
         "echo [*] Starting scan on your local Wi-Fi / LAN network...\r\n"
         "echo.\r\n"
-        f"python netops_probe.py{token_flag}\r\n"
+        f"python netops_probe.py{token_flag}{net_flag}\r\n"
         "echo.\r\n"
         "echo ========================================================\r\n"
         "echo [✓] Scan complete! Refresh https://www.netops.co.ke to view your devices.\r\n"
@@ -453,11 +499,15 @@ def download_windows_launcher(token: str | None = Query(None, description="User 
 
 
 @router.get("/launcher/linux-mac")
-def download_linux_mac_launcher(token: str | None = Query(None, description="User auth token for 1-click execution")):
+def download_linux_mac_launcher(
+    token: str | None = Query(None, description="User auth token for 1-click execution"),
+    network_name: str | None = Query("Remote Network", description="Target site/network name"),
+):
     """
     Serves a 1-click shell script for Linux/macOS users to scan their remote physical Wi-Fi/LAN.
     """
     token_flag = f' --token "{token.strip()}"' if token and token.strip() else ""
+    net_flag = f' --network-name "{network_name.strip()}"' if network_name and network_name.strip() else ' --network-name "Remote Network"'
     sh_content = (
         "#!/usr/bin/env bash\n"
         "set -e\n"
@@ -477,7 +527,7 @@ def download_linux_mac_launcher(token: str | None = Query(None, description="Use
         "curl -sSL 'https://api.netops.co.ke/discovery/probe-script' -o 'netops_probe.py'\n\n"
         "echo '[*] Starting scan on your local Wi-Fi / LAN network...'\n"
         "echo ''\n"
-        f"$PY_CMD netops_probe.py{token_flag}\n"
+        f"$PY_CMD netops_probe.py{token_flag}{net_flag}\n"
         "echo ''\n"
         "echo '========================================================'\n"
         "echo '[✓] Scan complete! Refresh https://www.netops.co.ke to view your devices.'\n"

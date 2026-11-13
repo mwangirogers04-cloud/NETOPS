@@ -150,7 +150,14 @@ def test_set_device_vlan_to_90_quarantines_and_disconnects_internet(monkeypatch)
 
     app.dependency_overrides[get_db] = override_get_db
 
-    mock_enforce = MagicMock(return_value={"action": "quarantine"})
+    def fake_enforce(dev, session, force=False):
+        if dev.internet_access_authorized and dev.approval_status == "approved":
+            dev.enforcement_status = "allowed"
+            return {"action": "allow"}
+        dev.enforcement_status = "quarantined"
+        return {"action": "quarantine"}
+
+    mock_enforce = MagicMock(side_effect=fake_enforce)
     monkeypatch.setattr(devices, "enforce_device_access", mock_enforce)
     monkeypatch.setattr(devices, "create_event", MagicMock())
 
@@ -193,7 +200,14 @@ def test_set_device_type_unknown_quarantines_and_disconnects_internet(monkeypatc
 
     app.dependency_overrides[get_db] = override_get_db
 
-    mock_enforce = MagicMock(return_value={"action": "quarantine"})
+    def fake_enforce(dev, session, force=False):
+        if dev.internet_access_authorized and dev.approval_status == "approved":
+            dev.enforcement_status = "allowed"
+            return {"action": "allow"}
+        dev.enforcement_status = "quarantined"
+        return {"action": "quarantine"}
+
+    mock_enforce = MagicMock(side_effect=fake_enforce)
     monkeypatch.setattr(devices, "enforce_device_access", mock_enforce)
     monkeypatch.setattr(devices, "create_event", MagicMock())
 
@@ -429,5 +443,149 @@ def test_set_device_type_to_server_and_access_point():
         assert device.vlan_id == 60
     finally:
         app.dependency_overrides.pop(get_db, None)
+
+
+def test_automate_device_vlan_assigns_vlan_without_granting_internet(monkeypatch):
+    """
+    Ensure clicking Auto VLAN assigns the classified VLAN (e.g. VLAN 20 for computer)
+    without granting internet access. Internet access must require clicking Allow Internet.
+    """
+    from fastapi.testclient import TestClient
+    from backend.app.api import devices
+    from backend.app.database import get_db
+    from backend.app.main import app
+
+    device = make_device("02:AA:BB:CC:DD:77")
+    device.device_type = "computer"
+    device.vlan_id = 90
+    device.approval_status = "pending"
+    device.enforcement_status = "quarantined"
+    device.internet_access_authorized = False
+    device.classification_status = "normal"
+    device.status = "online"
+    device.first_seen = datetime.now()
+    device.last_seen = datetime.now()
+
+    db = MagicMock()
+    db.get.return_value = device
+
+    def override_get_db():
+        yield db
+
+    app.dependency_overrides[get_db] = override_get_db
+
+    def fake_enforce(dev, session, force=False):
+        if dev.internet_access_authorized and dev.approval_status == "approved":
+            dev.enforcement_status = "allowed"
+            return {"action": "allow"}
+        dev.enforcement_status = "quarantined"
+        return {"action": "quarantine"}
+
+    mock_enforce = MagicMock(side_effect=fake_enforce)
+    monkeypatch.setattr(devices, "enforce_device_access", mock_enforce)
+    monkeypatch.setattr(devices, "create_event", MagicMock())
+
+    try:
+        client = TestClient(app)
+        response = client.post("/devices/1/automate-vlan")
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["vlan_id"] == 20
+    assert data["internet_access_authorized"] is False
+    assert data["enforcement_status"] == "quarantined"
+
+    # Device properties verified
+    assert device.vlan_id == 20
+    assert device.approval_status == "approved"
+    assert device.internet_access_authorized is False
+    assert device.enforcement_status == "quarantined"
+    mock_enforce.assert_called_once_with(device, db, force=True)
+
+    # Now verify that subsequent explicit allow grants internet while keeping VLAN 20
+    mock_enforce.reset_mock()
+    mock_enforce.return_value = {"action": "allow"}
+
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        allow_response = client.post("/devices/1/allow")
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+    assert allow_response.status_code == 200
+    allow_data = allow_response.json()
+    assert allow_data["vlan_id"] == 20
+    assert device.vlan_id == 20
+    assert device.internet_access_authorized is True
+    assert device.enforcement_status == "allowed"
+    mock_enforce.assert_called_once_with(device, db, force=True)
+
+
+def test_batch_automate_vlans_assigns_without_granting_internet(monkeypatch):
+    """
+    Ensure batch Auto VLAN endpoint /devices/automate-vlans assigns optimal VLANs
+    without granting internet access.
+    """
+    from fastapi.testclient import TestClient
+    from backend.app.api import devices
+    from backend.app.database import get_db
+    from backend.app.main import app
+
+    device1 = make_device("02:AA:BB:CC:DD:01")
+    device1.id = 1
+    device1.device_type = "computer"
+    device1.vlan_id = 90
+    device1.approval_status = "pending"
+    device1.enforcement_status = "quarantined"
+    device1.internet_access_authorized = False
+    device1.first_seen = datetime.now()
+    device1.last_seen = datetime.now()
+
+    device2 = make_device("02:AA:BB:CC:DD:02")
+    device2.id = 2
+    device2.device_type = "ip_phone"
+    device2.vlan_id = 90
+    device2.approval_status = "pending"
+    device2.enforcement_status = "quarantined"
+    device2.internet_access_authorized = False
+    device2.first_seen = datetime.now()
+    device2.last_seen = datetime.now()
+
+    db = MagicMock()
+    mock_scalars = MagicMock()
+    mock_scalars.all.return_value = [device1, device2]
+    db.scalars.return_value = mock_scalars
+
+    def override_get_db():
+        yield db
+
+    app.dependency_overrides[get_db] = override_get_db
+
+    mock_enforce = MagicMock(return_value={"action": "quarantine"})
+    monkeypatch.setattr(devices, "enforce_device_access", mock_enforce)
+    monkeypatch.setattr(devices, "create_event", MagicMock())
+
+    try:
+        client = TestClient(app)
+        response = client.post("/devices/automate-all-vlans")
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "completed"
+    assert data["total_processed"] == 2
+
+    assert device1.vlan_id == 20
+    assert device1.internet_access_authorized is False
+    assert device1.enforcement_status == "quarantined"
+
+    assert device2.vlan_id == 10
+    assert device2.internet_access_authorized is False
+    assert device2.enforcement_status == "quarantined"
+
+
 
 

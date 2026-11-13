@@ -125,8 +125,9 @@ def enforce_device_access(
             decision = "quarantine"
 
         elif not device.internet_access_authorized:
-            # Without active schedule, honor administrator manual disallow/disconnect
-            device.vlan_id = 90
+            # Honor unauthorized internet access: keep decision as quarantine without overwriting assigned operational VLAN
+            if not getattr(device, "vlan_id", None):
+                device.vlan_id = 90
             decision = "quarantine"
 
         else:
@@ -236,7 +237,13 @@ def enforce_device_access(
     # ---------------------------------------------------------
 
     device.enforcement_status = enforcement_status
-    if enforcement_status in ("quarantined", "isolated"):
+    if (
+        enforcement_status in ("quarantined", "isolated")
+        or not getattr(device, "internet_access_authorized", False)
+        or device.approval_status in ("pending", "rejected")
+        or getattr(device, "vlan_id", None) == 90
+        or not is_type_and_vlan_matching(device.device_type, getattr(device, "vlan_id", None))
+    ):
         device.status = "offline"
     else:
         device.status = "online"

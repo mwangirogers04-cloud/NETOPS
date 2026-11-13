@@ -65,22 +65,8 @@ def test_process_sniffed_packet_creates_quarantined_device():
 
         process_sniffed_packet(frame, "eth0")
 
-        # Verify device was added to DB
-        mock_db.add.assert_called_once()
-        added_device = mock_db.add.call_args[0][0]
-
-        assert added_device.mac_address == test_mac
-        assert added_device.ip_address == test_ip
-        assert added_device.approval_status == "pending"
-        assert added_device.vlan_id == 90
-        assert added_device.enforcement_status == "quarantined"
-        assert added_device.internet_access_authorized is False
-
-        # Verify L2 quarantine was triggered immediately
-        mock_l2.assert_called_once_with(test_ip, test_mac, interface="eth0")
-
-        # Verify MAC is now in known cache so subsequent packets are ignored
-        assert test_mac in _known_macs_cache
+        # Verify auto-registration is disabled for unmanaged/unknown devices
+        mock_db.add.assert_not_called()
 
 
 def test_start_and_stop_passive_sniffer_lifecycle():

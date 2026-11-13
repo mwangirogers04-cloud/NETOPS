@@ -387,6 +387,26 @@ function App() {
   const [deviceSearchQuery, setDeviceSearchQuery] = useState("");
   const [lanFilterStatus, setLanFilterStatus] = useState("all");
 
+  const [selectedNetwork, setSelectedNetwork] = useState(() => {
+    try {
+      const saved = localStorage.getItem("netops_selected_network");
+      if (saved && saved !== "Remote Network") {
+        return saved;
+      }
+      return "all";
+    } catch {
+      return "all";
+    }
+  });
+
+  const handleSelectNetwork = (netName) => {
+    setSelectedNetwork(netName);
+    try {
+      localStorage.setItem("netops_selected_network", netName);
+    } catch (_) {}
+    loadDevices(netName);
+  };
+
   // Device Troubleshooting & Root Cause Diagnostics
   const [troubleshootModalDevice, setTroubleshootModalDevice] = useState(null);
   const [troubleshootLoading, setTroubleshootLoading] = useState(false);
@@ -523,6 +543,7 @@ function App() {
         body: JSON.stringify({
           network: targetNetwork,
           interface: targetInterface,
+          network_name: selectedNetwork === "all" ? "Remote Network" : selectedNetwork,
         }),
         signal: controller.signal,
       });
@@ -908,32 +929,51 @@ function App() {
     return devIface === selectedInterface.toLowerCase();
   };
 
-  const scopedDevices = (selectedInterface && selectedInterface !== "all")
-    ? devices.filter(matchesSelectedInterface).slice().sort((a, b) => ipToNum(a.ip_address) - ipToNum(b.ip_address))
-    : devices.slice().sort((a, b) => ipToNum(a.ip_address) - ipToNum(b.ip_address));
+  const matchesSelectedNetwork = (device) => {
+    if (!selectedNetwork || selectedNetwork === "all") return true;
+    const devNet = (device.network_name || "Home Network").toLowerCase();
+    const selNet = selectedNetwork.toLowerCase();
+    if (selNet === "home network") {
+      return devNet === "home network" || !device.network_name;
+    }
+    return devNet === selNet;
+  };
 
-  const totalDevices = devices.length;
-  const onlineDevices = devices.filter((device) => isDeviceActuallyOnline(device)).length;
-  const pendingDevices = devices.filter(
+  const siteScopedDevices = devices.filter(matchesSelectedNetwork);
+
+  const scopedDevices = (selectedInterface && selectedInterface !== "all")
+    ? siteScopedDevices.filter(matchesSelectedInterface).slice().sort((a, b) => ipToNum(a.ip_address) - ipToNum(b.ip_address))
+    : siteScopedDevices.slice().sort((a, b) => ipToNum(a.ip_address) - ipToNum(b.ip_address));
+
+  const totalDevices = siteScopedDevices.length;
+  const onlineDevices = siteScopedDevices.filter((device) => isDeviceActuallyOnline(device)).length;
+  const pendingDevices = siteScopedDevices.filter(
     (device) => device.approval_status === "pending"
   ).length;
 
-  const rejectedDevices = devices.filter(
+  const rejectedDevices = siteScopedDevices.filter(
     (device) => device.approval_status === "rejected"
   ).length;
 
-  const quarantinedDevices = devices.filter(
+  const quarantinedDevices = siteScopedDevices.filter(
     (device) => device.enforcement_status === "quarantined"
   ).length;
 
-  const isolatedDevices = devices.filter(
+  const isolatedDevices = siteScopedDevices.filter(
     (device) => device.enforcement_status === "isolated"
   ).length;
 
-  const loadDevices = async () => {
+  const loadDevices = async (networkOverride) => {
     try {
-      const scopeParam = (isAdmin || isSuperAdmin) ? "?scope=all" : "";
-      const response = await fetch(`${API_URL}/devices/${scopeParam}`, {
+      const net = networkOverride !== undefined ? networkOverride : selectedNetwork;
+      const params = new URLSearchParams();
+      if (isAdmin || isSuperAdmin) {
+        params.set("scope", "all");
+      }
+      if (net && net !== "all") {
+        params.set("network_name", net);
+      }
+      const response = await fetch(`${API_URL}/devices/?${params.toString()}`, {
         headers: getAuthHeaders(),
       });
 
@@ -1166,6 +1206,11 @@ const loadEvents = async () => {
     loadDetectedSubnets();
   }, [currentUser]);
 
+  useEffect(() => {
+    if (!currentUser) return;
+    loadDevices();
+  }, [selectedNetwork]);
+
   // ------------------------------------------------------------
   // REAL-TIME BACKGROUND AUTO-REFRESH & DATA SYNCHRONIZATION
   // Continuously refreshes devices, pending approvals, patch jobs,
@@ -1177,6 +1222,7 @@ const loadEvents = async () => {
 
     let cycle = 0;
     const timer = setInterval(() => {
+      if (document.hidden) return;
       cycle += 1;
       // Core devices & patch jobs refresh every 3 seconds
       loadDevices();
@@ -1364,6 +1410,7 @@ const loadEvents = async () => {
     let highestSeenId = null;
 
     const pollLatestEvents = async () => {
+      if (document.hidden) return;
       try {
         const res = await fetch(`${API_URL}/events/?limit=10&offset=0`);
         if (!res.ok) return;
@@ -4126,7 +4173,7 @@ const DevicesPage = () => {
 // ------------------------------------------------------------
 
 const LanScannerPage = () => {
-  const interfaceDevices = devices;
+  const interfaceDevices = devices.filter(matchesSelectedNetwork);
   const isAllInterfaces = !selectedInterface || selectedInterface === "all";
   const displayedInterfaceDevices = isAllInterfaces
     ? interfaceDevices
@@ -10277,6 +10324,10 @@ const Dashboard = () => {
     (device) => isDeviceActuallyOnline(device)
   ).length;
 
+  const offlineDevices = devices.filter(
+    (device) => !isDeviceActuallyOnline(device)
+  ).length;
+
   const pendingDevices = devices.filter(
     (device) => device.approval_status === "pending"
   ).length;
@@ -10289,6 +10340,10 @@ const Dashboard = () => {
     (device) =>
       device.enforcement_status === "quarantined" ||
       device.access_decision === "quarantine"
+  ).length;
+
+  const rejectedDevices = devices.filter(
+    (device) => device.approval_status === "rejected"
   ).length;
 
   const ipPhoneDevices = devices.filter(
@@ -10323,6 +10378,7 @@ const Dashboard = () => {
 
   const filteredDashboardDevices = devices.filter((device) => {
     if (dashboardDeviceFilter === "online") return isDeviceActuallyOnline(device);
+    if (dashboardDeviceFilter === "offline") return !isDeviceActuallyOnline(device);
     if (dashboardDeviceFilter === "pending") return device.approval_status === "pending";
     if (dashboardDeviceFilter === "quarantined") {
       return (
@@ -10382,7 +10438,11 @@ const Dashboard = () => {
           title="Total Devices"
           value={totalDevices}
           text="Devices detected on the LAN"
-          onClick={() => setDashboardDeviceFilter("all")}
+          onClick={() => {
+            setDashboardDeviceFilter("all");
+            const el = document.getElementById("dashboard-devices-panel");
+            if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+          }}
           active={dashboardDeviceFilter === "all"}
         />
 
@@ -10390,15 +10450,35 @@ const Dashboard = () => {
           title="Online"
           value={onlineDevices}
           text="Currently connected"
-          onClick={() => setDashboardDeviceFilter("online")}
+          onClick={() => {
+            setDashboardDeviceFilter("online");
+            const el = document.getElementById("dashboard-devices-panel");
+            if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+          }}
           active={dashboardDeviceFilter === "online"}
+        />
+
+        <AccessSummary
+          title="Offline"
+          value={offlineDevices}
+          text="Disconnected or internet-blocked"
+          onClick={() => {
+            setDashboardDeviceFilter("offline");
+            const el = document.getElementById("dashboard-devices-panel");
+            if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+          }}
+          active={dashboardDeviceFilter === "offline"}
         />
 
         <AccessSummary
           title="Pending"
           value={pendingDevices}
           text="Awaiting administrator approval"
-          onClick={() => setDashboardDeviceFilter("pending")}
+          onClick={() => {
+            setDashboardDeviceFilter("pending");
+            const el = document.getElementById("dashboard-devices-panel");
+            if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+          }}
           active={dashboardDeviceFilter === "pending"}
         />
 
@@ -10406,7 +10486,11 @@ const Dashboard = () => {
           title="Quarantined"
           value={quarantinedDevices}
           text="Internet access blocked"
-          onClick={() => setDashboardDeviceFilter("quarantined")}
+          onClick={() => {
+            setDashboardDeviceFilter("quarantined");
+            const el = document.getElementById("dashboard-devices-panel");
+            if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+          }}
           active={dashboardDeviceFilter === "quarantined"}
         />
 
@@ -10414,14 +10498,18 @@ const Dashboard = () => {
           title="Rejected"
           value={rejectedDevices}
           text="Devices rejected by administrator"
-          onClick={() => setDashboardDeviceFilter("rejected")}
+          onClick={() => {
+            setDashboardDeviceFilter("rejected");
+            const el = document.getElementById("dashboard-devices-panel");
+            if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+          }}
           active={dashboardDeviceFilter === "rejected"}
         />
 
       </div>
 
       {/* LIVE CONNECTED NETWORK DEVICES ON THE DASHBOARD */}
-      <div className="panel" style={{ marginTop: "4px", marginBottom: "22px" }}>
+      <div id="dashboard-devices-panel" className="panel" style={{ marginTop: "4px", marginBottom: "22px" }}>
         <div
           className="panel-header"
           style={{
@@ -10434,10 +10522,24 @@ const Dashboard = () => {
         >
           <div>
             <div className="panel-title" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <span>🖥️</span> Connected Network Devices ({filteredDashboardDevices.length})
+              <span>🖥️</span>{" "}
+              {dashboardDeviceFilter === "offline"
+                ? "Offline Devices"
+                : dashboardDeviceFilter === "online"
+                ? "Online Devices"
+                : dashboardDeviceFilter === "quarantined"
+                ? "Quarantined Devices"
+                : dashboardDeviceFilter === "pending"
+                ? "Pending Devices"
+                : dashboardDeviceFilter === "rejected"
+                ? "Rejected Devices"
+                : "Connected Network Devices"}{" "}
+              ({filteredDashboardDevices.length})
             </div>
             <div className="panel-subtitle">
-              Live LAN &amp; Wi-Fi devices detected across your network infrastructure
+              {dashboardDeviceFilter === "offline"
+                ? "Endpoints currently disconnected or blocked from the network"
+                : "Live LAN & Wi-Fi devices detected across your network infrastructure"}
             </div>
           </div>
 
@@ -10478,6 +10580,18 @@ const Dashboard = () => {
               </button>
               <button
                 type="button"
+                className={`secondary-button small ${dashboardDeviceFilter === "offline" ? "active" : ""}`}
+                style={
+                  dashboardDeviceFilter === "offline"
+                    ? { background: "#dc2626", color: "#ffffff", fontWeight: "700" }
+                    : { padding: "4px 9px", fontSize: "11px", color: "#dc2626", borderColor: "#fca5a5" }
+                }
+                onClick={() => setDashboardDeviceFilter("offline")}
+              >
+                Offline ({offlineDevices})
+              </button>
+              <button
+                type="button"
                 className={`secondary-button small ${dashboardDeviceFilter === "pending" ? "active" : ""}`}
                 style={
                   dashboardDeviceFilter === "pending"
@@ -10493,7 +10607,7 @@ const Dashboard = () => {
                 className={`secondary-button small ${dashboardDeviceFilter === "quarantined" ? "active" : ""}`}
                 style={
                   dashboardDeviceFilter === "quarantined"
-                    ? { background: "#dc2626", color: "#ffffff", fontWeight: "700" }
+                    ? { background: "#7c3aed", color: "#ffffff", fontWeight: "700" }
                     : { padding: "4px 9px", fontSize: "11px" }
                 }
                 onClick={() => setDashboardDeviceFilter("quarantined")}
@@ -11399,6 +11513,7 @@ const Dashboard = () => {
     loadEndpointUpdates(false);
 
     const refreshInterval = setInterval(() => {
+      if (document.hidden) return;
       loadEndpointUpdates(true);
     }, 3500);
 
@@ -15722,6 +15837,43 @@ const EndpointUpdatesPage = () => {
                 <span>{refreshingAll ? "Syncing..." : "Auto-Refresh Active"}</span>
               </div>
 
+              {/* Site Scope Selector Pill */}
+              <div
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  background: selectedNetwork === "Remote Network" ? "#eff6ff" : selectedNetwork === "Home Network" ? "#f0fdf4" : "#f8fafc",
+                  border: `1.5px solid ${selectedNetwork === "Remote Network" ? "#93c5fd" : selectedNetwork === "Home Network" ? "#86efac" : "#cbd5e1"}`,
+                  borderRadius: "20px",
+                  padding: "4px 10px",
+                  boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
+                }}
+                title="Active Site / Network Scope: Switch between Remote Network and Home Network"
+              >
+                <span style={{ fontSize: "13px" }}>
+                  {selectedNetwork === "Remote Network" ? "🌐" : selectedNetwork === "Home Network" ? "🏠" : "🌍"}
+                </span>
+                <span style={{ fontSize: "11px", fontWeight: "800", color: "#64748b", textTransform: "uppercase" }}>Site:</span>
+                <select
+                  value={selectedNetwork}
+                  onChange={(e) => handleSelectNetwork(e.target.value)}
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    fontSize: "12px",
+                    fontWeight: "800",
+                    color: selectedNetwork === "Remote Network" ? "#1d4ed8" : selectedNetwork === "Home Network" ? "#15803d" : "#0f172a",
+                    cursor: "pointer",
+                    outline: "none",
+                  }}
+                >
+                  <option value="all">🌍 All Networks (Global View)</option>
+                  <option value="Home Network">🏠 Home Network (Home LAN)</option>
+                  <option value="Remote Network">🌐 Remote Network (Remote Probe)</option>
+                </select>
+              </div>
+
               <button
                 type="button"
                 onClick={() => setShowContactModal(true)}
@@ -15905,6 +16057,43 @@ const EndpointUpdatesPage = () => {
                 ✉️ rogersiru@gmail.com
               </a>
               <span className="netops-footer-dot">•</span>
+              {/* Site Scope Selector Pill */}
+              <div
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  background: selectedNetwork === "Remote Network" ? "#eff6ff" : selectedNetwork === "Home Network" ? "#f0fdf4" : "#f8fafc",
+                  border: `1.5px solid ${selectedNetwork === "Remote Network" ? "#93c5fd" : selectedNetwork === "Home Network" ? "#86efac" : "#cbd5e1"}`,
+                  borderRadius: "20px",
+                  padding: "4px 10px",
+                  boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
+                }}
+                title="Active Site / Network Scope: Switch between Remote Network and Home Network"
+              >
+                <span style={{ fontSize: "13px" }}>
+                  {selectedNetwork === "Remote Network" ? "🌐" : selectedNetwork === "Home Network" ? "🏠" : "🌍"}
+                </span>
+                <span style={{ fontSize: "11px", fontWeight: "800", color: "#64748b", textTransform: "uppercase" }}>Site:</span>
+                <select
+                  value={selectedNetwork}
+                  onChange={(e) => handleSelectNetwork(e.target.value)}
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    fontSize: "12px",
+                    fontWeight: "800",
+                    color: selectedNetwork === "Remote Network" ? "#1d4ed8" : selectedNetwork === "Home Network" ? "#15803d" : "#0f172a",
+                    cursor: "pointer",
+                    outline: "none",
+                  }}
+                >
+                  <option value="all">🌍 All Networks (Global View)</option>
+                  <option value="Home Network">🏠 Home Network (Home LAN)</option>
+                  <option value="Remote Network">🌐 Remote Network (Remote Probe)</option>
+                </select>
+              </div>
+
               <button
                 type="button"
                 onClick={() => setShowContactModal(true)}

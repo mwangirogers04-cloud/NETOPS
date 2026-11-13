@@ -13,11 +13,10 @@ STATIC_PROTECTED_IPS = {
     "127.0.0.1",
     "0.0.0.0",
     "192.168.0.1",    # Wi-Fi Router / Gateway (Tenda)
+    "192.168.0.2",    # Cisco Core Switch
     "192.168.0.10",   # Sophos Firewall
     "192.168.0.11",   # MikroTik Router
-    "192.168.0.13",   # NETOPS Server (eth0)
-    "192.168.0.101",  # NETOPS Server (wlan0)
-    "192.168.0.102",  # NETOPS Server (wlan0)
+    "192.168.0.13",   # NETOPS Server eth0 static
 }
 
 STATIC_PROTECTED_MACS = {
@@ -139,8 +138,14 @@ def _is_cloud_host() -> bool:
     if _is_test_env():
         return False
     return (
-        not os.path.exists("/sys/class/net/wlan0")
-        and not any(os.path.exists(f"/sys/class/net/{i}") for i in ("eth0", "lan0"))
+        os.environ.get("RENDER") is not None
+        or os.environ.get("CLOUD_MODE") == "true"
+        or os.environ.get("APP_ENV") == "production"
+        or os.environ.get("DYNO") is not None
+        or (
+            not os.path.exists("/sys/class/net/wlan0")
+            and not any(os.path.exists(f"/sys/class/net/{i}") for i in ("eth0", "lan0"))
+        )
     )
 
 
@@ -242,9 +247,28 @@ def _get_neighbor_mac_map() -> dict[str, str]:
     return mapping
 
 
+def _is_interface_carrier_up(iface: str) -> bool:
+    """Check if interface is operationally up and has active link carrier."""
+    try:
+        oper_file = f"/sys/class/net/{iface}/operstate"
+        if os.path.exists(oper_file):
+            with open(oper_file, "r", encoding="utf-8") as f:
+                if f.read().strip().lower() == "down":
+                    return False
+        carrier_file = f"/sys/class/net/{iface}/carrier"
+        if os.path.exists(carrier_file):
+            with open(carrier_file, "r", encoding="utf-8") as f:
+                if f.read().strip() == "0":
+                    return False
+        return True
+    except Exception:
+        return True
+
+
 def _get_active_gateways() -> list[dict]:
     """
     Detect all default IPv4 gateways across eth0 and wlan0 along with their MACs.
+    Only active interfaces with operational link carrier are used.
     """
     neigh_map = _get_neighbor_mac_map()
     gateways: list[dict] = []
@@ -281,18 +305,24 @@ def _get_active_gateways() -> list[dict]:
     except Exception:
         pass
 
-    # Deduplicate gateways by gw_ip to prevent cross-interface ARP storms
+    # Deduplicate gateways by gw_ip to prevent cross-interface ARP storms.
+    # Discard any gateway interface that has no carrier / link down.
     deduped: dict[str, dict] = {}
     for gw in gateways:
         gw_ip = gw["gw_ip"]
+        iface = gw["interface"]
+        if not _is_interface_carrier_up(iface):
+            continue
         if gw_ip not in deduped:
             deduped[gw_ip] = gw
         else:
-            # If eth0 and wlan0 share the same gateway, prefer eth0 (wired connection)
-            if gw["interface"].startswith("eth") or gw["interface"].startswith("en"):
+            curr_iface = deduped[gw_ip]["interface"]
+            if not _is_interface_carrier_up(curr_iface):
+                deduped[gw_ip] = gw
+            elif iface.startswith("eth") or iface.startswith("en"):
                 deduped[gw_ip] = gw
 
-    return list(deduped.values())
+    return list(deduped.values()) or gateways
 
 
 def _run_iptables(args: list[str]) -> bool:
@@ -360,21 +390,37 @@ def add_iptables_quarantine_ip(ip_address: str, mac_address: str | None = None) 
         return
     ensure_iptables_quarantine_chain()
     if ip_address not in _currently_blocked_ips:
+        # 1. Immediate TCP RST rejection for instant TCP connection drop
+        if not _run_iptables(["-C", IPTABLES_CHAIN, "-s", ip_address, "-p", "tcp", "-j", "REJECT", "--reject-with", "tcp-reset"]):
+            _run_iptables(["-I", IPTABLES_CHAIN, "1", "-s", ip_address, "-p", "tcp", "-j", "REJECT", "--reject-with", "tcp-reset"])
+        # 2. Immediate ICMP host-prohibited rejection for UDP (DNS 53, QUIC 443) and ICMP
+        if not _run_iptables(["-C", IPTABLES_CHAIN, "-s", ip_address, "-j", "REJECT", "--reject-with", "icmp-host-prohibited"]):
+            _run_iptables(["-I", IPTABLES_CHAIN, "2", "-s", ip_address, "-j", "REJECT", "--reject-with", "icmp-host-prohibited"])
+        # 3. Fallback drop for outbound & inbound
         if not _run_iptables(["-C", IPTABLES_CHAIN, "-s", ip_address, "-j", "DROP"]):
-            _run_iptables(["-I", IPTABLES_CHAIN, "1", "-s", ip_address, "-j", "DROP"])
+            _run_iptables(["-I", IPTABLES_CHAIN, "3", "-s", ip_address, "-j", "DROP"])
         if not _run_iptables(["-C", IPTABLES_CHAIN, "-d", ip_address, "-j", "DROP"]):
-            _run_iptables(["-I", IPTABLES_CHAIN, "1", "-d", ip_address, "-j", "DROP"])
+            _run_iptables(["-I", IPTABLES_CHAIN, "4", "-d", ip_address, "-j", "DROP"])
         _currently_blocked_ips.add(ip_address)
+
     if mac_address and not is_protected(None, mac_address):
         clean_mac = mac_address.strip().upper()
+        if not _run_iptables(["-C", IPTABLES_CHAIN, "-m", "mac", "--mac-source", clean_mac, "-p", "tcp", "-j", "REJECT", "--reject-with", "tcp-reset"]):
+            _run_iptables(["-I", IPTABLES_CHAIN, "1", "-m", "mac", "--mac-source", clean_mac, "-p", "tcp", "-j", "REJECT", "--reject-with", "tcp-reset"])
+        if not _run_iptables(["-C", IPTABLES_CHAIN, "-m", "mac", "--mac-source", clean_mac, "-j", "REJECT", "--reject-with", "icmp-host-prohibited"]):
+            _run_iptables(["-I", IPTABLES_CHAIN, "2", "-m", "mac", "--mac-source", clean_mac, "-j", "REJECT", "--reject-with", "icmp-host-prohibited"])
         if not _run_iptables(["-C", IPTABLES_CHAIN, "-m", "mac", "--mac-source", clean_mac, "-j", "DROP"]):
-            _run_iptables(["-I", IPTABLES_CHAIN, "1", "-m", "mac", "--mac-source", clean_mac, "-j", "DROP"])
+            _run_iptables(["-I", IPTABLES_CHAIN, "3", "-m", "mac", "--mac-source", clean_mac, "-j", "DROP"])
 
 
 def remove_iptables_quarantine_ip(ip_address: str, mac_address: str | None = None) -> None:
     if _is_test_env() or not ip_address:
         return
     ensure_iptables_quarantine_chain()
+    while _run_iptables(["-D", IPTABLES_CHAIN, "-s", ip_address, "-p", "tcp", "-j", "REJECT", "--reject-with", "tcp-reset"]):
+        pass
+    while _run_iptables(["-D", IPTABLES_CHAIN, "-s", ip_address, "-j", "REJECT", "--reject-with", "icmp-host-prohibited"]):
+        pass
     while _run_iptables(["-D", IPTABLES_CHAIN, "-s", ip_address, "-j", "DROP"]):
         pass
     while _run_iptables(["-D", IPTABLES_CHAIN, "-d", ip_address, "-j", "DROP"]):
@@ -385,6 +431,10 @@ def remove_iptables_quarantine_ip(ip_address: str, mac_address: str | None = Non
         pass
     if mac_address:
         clean_mac = mac_address.strip().upper()
+        while _run_iptables(["-D", IPTABLES_CHAIN, "-m", "mac", "--mac-source", clean_mac, "-p", "tcp", "-j", "REJECT", "--reject-with", "tcp-reset"]):
+            pass
+        while _run_iptables(["-D", IPTABLES_CHAIN, "-m", "mac", "--mac-source", clean_mac, "-j", "REJECT", "--reject-with", "icmp-host-prohibited"]):
+            pass
         while _run_iptables(["-D", IPTABLES_CHAIN, "-m", "mac", "--mac-source", clean_mac, "-j", "DROP"]):
             pass
     _currently_blocked_ips.discard(ip_address)
@@ -405,29 +455,48 @@ def _send_arp_frames(iface: str, frames: list[bytes]) -> None:
         logger.debug(f"Raw ARP send on {iface} note: {exc}")
 
 
+def _is_carrier_up(iface: str) -> bool:
+    """Check if the physical network interface link carrier is active."""
+    try:
+        path = f"/sys/class/net/{iface}/carrier"
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                return f.read().strip() == "1"
+    except Exception:
+        pass
+    return False
+
+
 def _build_quarantine_frames_for_target(
     clean_ip: str,
     clean_mac: str,
     gw: dict,
 ) -> list[bytes]:
     """
-    Build pure ARP Reply (op=2) frames. Never emit ARP Requests (op=1),
-    because hosts receiving an ARP Request for their IP will reply with
-    their authentic hardware MAC, undoing the quarantine!
+    Construct safe targeted unicast ARP Reply (op=2) frames:
+    1. Unicast ARP Reply (op=2) to Target Device:
+       Tells only the target device that the gateway IP is at our MAC.
+    2. Unicast ARP Reply (op=2) to Gateway Router:
+       Tells the gateway router that target device IP is at our MAC.
+
+    CRITICAL SAFETY RULES:
+    - NEVER emit ARP Requests (op=1) claiming to be the gateway: if the target's MAC
+      is not yet learned by an Ethernet switch, the switch floods the request out of
+      all ports, causing EVERY computer on the LAN to hijack the gateway IP and disconnect.
+    - NEVER broadcast Gratuitous ARP (GARP) with dst_mac=FF:FF:FF:FF:FF:FF: broadcasting
+      an IP onto the whole LAN crashes switches and triggers OS address conflict defenses.
     """
     iface_mac = gw["iface_mac"]
     gw_ip = gw["gw_ip"]
     gw_mac = gw.get("gw_mac")
-    bcast_mac = "FF:FF:FF:FF:FF:FF"
-    zero_mac = "00:00:00:00:00:00"
     frames = []
 
-    # 1. Unicast ARP Reply to Target Device: Tell target device gateway IP is at our MAC
+    # 1. Unicast ARP Reply (op=2) to Target Device only
     frames.append(
         _build_arp_packet(
             eth_src_mac=iface_mac,
             eth_dst_mac=clean_mac,
-            arp_op=2,  # Reply only
+            arp_op=2,  # Unicast reply only
             sender_mac=iface_mac,
             sender_ip=gw_ip,
             target_mac=clean_mac,
@@ -435,32 +504,19 @@ def _build_quarantine_frames_for_target(
         )
     )
 
-    # 2. Unicast ARP Reply to Gateway: Tell gateway target IP is at our MAC
-    if gw_mac:
+    # 2. Unicast ARP Reply (op=2) to Gateway Router only
+    if gw_mac and gw_mac != clean_mac:
         frames.append(
             _build_arp_packet(
                 eth_src_mac=iface_mac,
                 eth_dst_mac=gw_mac,
-                arp_op=2,  # Reply only
+                arp_op=2,  # Unicast reply only
                 sender_mac=iface_mac,
                 sender_ip=clean_ip,
                 target_mac=gw_mac,
                 target_ip=gw_ip,
             )
         )
-
-    # 3. Broadcast Gratuitous ARP (GARP) Reply: Force AP/switch bridge table to direct target IP to our port
-    frames.append(
-        _build_arp_packet(
-            eth_src_mac=iface_mac,
-            eth_dst_mac=bcast_mac,
-            arp_op=2,  # Reply only
-            sender_mac=iface_mac,
-            sender_ip=clean_ip,
-            target_mac=zero_mac,
-            target_ip=clean_ip,
-        )
-    )
 
     return frames
 
@@ -476,6 +532,9 @@ def _get_target_interface(target_ip: str) -> str | None:
             timeout=1,
         )
         for line in res.stdout.splitlines():
+            # Disregard incomplete or failed entries
+            if "FAILED" in line or "INCOMPLETE" in line:
+                continue
             parts = line.split()
             if "dev" in parts:
                 return parts[parts.index("dev") + 1]
@@ -486,10 +545,8 @@ def _get_target_interface(target_ip: str) -> str | None:
 
 def _continuous_quarantine_worker() -> None:
     """
-    Background worker loop that continuously transmits ARP poison frames
-    every 0.5 seconds for all actively quarantined targets.
-    This guarantees that devices cannot bypass quarantine even when
-    their OS attempts to refresh its ARP cache or receives router broadcast probes.
+    Background worker loop that continuously transmits unicast ARP poison frames
+    every 0.5 seconds for actively quarantined targets.
     """
     global _worker_running
     logger.info("NETOPS Layer 2 continuous quarantine background worker started.")
@@ -514,14 +571,19 @@ def _continuous_quarantine_worker() -> None:
                 time.sleep(0.5)
                 continue
 
-            for target_ip, info in targets.items():
+            for target_ip, info in list(targets.items()):
                 clean_mac = info.get("mac")
-                req_iface = info.get("interface") or _get_target_interface(target_ip)
                 if not clean_mac or is_protected(target_ip, clean_mac):
+                    with _quarantine_lock:
+                        _active_quarantine_targets.pop(target_ip, None)
                     continue
+
+                req_iface = info.get("interface") or _get_target_interface(target_ip)
 
                 for gw in cached_gateways:
                     iface = gw["interface"]
+                    if not _is_carrier_up(iface):
+                        continue
                     if req_iface and req_iface != "all" and iface != req_iface:
                         continue
                     if target_ip == gw["iface_ip"] or clean_mac == gw["iface_mac"]:
@@ -598,6 +660,21 @@ def quarantine_device_l2(
         )
     except Exception:
         pass
+    try:
+        subprocess.run(
+            ["ss", "-K", "dst", clean_ip],
+            capture_output=True,
+            check=False,
+            timeout=1,
+        )
+        subprocess.run(
+            ["ss", "-K", "src", clean_ip],
+            capture_output=True,
+            check=False,
+            timeout=1,
+        )
+    except Exception:
+        pass
 
     # 5. Immediate rapid burst for instantaneous (< 20ms) severance
     gateways = _get_active_gateways()
@@ -637,9 +714,6 @@ def restore_device_l2(
 
     clean_ip = ip_address.strip()
     clean_mac = mac_address.strip().upper()
-    if is_protected(clean_ip, clean_mac) or not clean_ip.startswith("192.168.0."):
-        logger.info(f"[IMMUNE] Skipping L2 quarantine for protected/external device: {clean_ip} ({clean_mac})")
-        return False
 
     # 1. Unregister from continuous poison loop
     with _quarantine_lock:
@@ -707,6 +781,22 @@ def get_quarantined_l2_targets() -> list[dict]:
         ]
 
 
+def is_target_quarantined(ip_address: str | None, mac_address: str | None = None) -> bool:
+    """Check if an IP or MAC is currently registered in L2 quarantine or blocked in iptables."""
+    if not ip_address and not mac_address:
+        return False
+    if ip_address and ip_address in _currently_blocked_ips:
+        return True
+    with _quarantine_lock:
+        if ip_address and ip_address in _active_quarantine_targets:
+            return True
+        if mac_address:
+            clean_mac = mac_address.strip().upper()
+            if any(info.get("mac") == clean_mac for info in _active_quarantine_targets.values()):
+                return True
+    return False
+
+
 def clear_all_l2_quarantines() -> None:
     """Restore all quarantined targets and clear active registry."""
     with _quarantine_lock:
@@ -719,3 +809,45 @@ def clear_all_l2_quarantines() -> None:
             pass
     _run_iptables(["-F", IPTABLES_CHAIN])
     _currently_blocked_ips.clear()
+
+
+def sync_quarantined_targets_from_db(db=None) -> int:
+    """
+    Enrolls all currently quarantined/isolated devices in the database
+    into the active continuous L2 quarantine worker.
+    """
+    if _is_test_env() or _is_cloud_host():
+        return 0
+    from ..models.device import Device
+    close_db = False
+    if db is None:
+        try:
+            from ..database import SessionLocal
+            db = SessionLocal()
+            close_db = True
+        except Exception:
+            return 0
+    try:
+        devices = db.query(Device).filter(
+            Device.enforcement_status.in_(["quarantined", "isolated"]),
+            Device.ip_address.isnot(None),
+        ).all()
+        enrolled = 0
+        for dev in devices:
+            if dev.ip_address and dev.mac_address and not is_protected(dev.ip_address, dev.mac_address):
+                quarantine_device_l2(
+                    dev.ip_address,
+                    dev.mac_address,
+                    burst=3,
+                    interface=getattr(dev, "network_interface", None),
+                )
+                enrolled += 1
+        logger.info(f"[L2 Quarantine] Synchronized {enrolled} quarantined target(s) from database.")
+        return enrolled
+    except Exception as exc:
+        logger.debug(f"[L2 Quarantine] Database sync note: {exc}")
+        return 0
+    finally:
+        if close_db and db:
+            db.close()
+

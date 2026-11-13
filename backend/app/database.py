@@ -4,7 +4,14 @@ from sqlalchemy.orm import DeclarativeBase, sessionmaker
 from .config import settings
 
 
-db_url = str(settings.database_url)
+db_url = str(settings.database_url).strip()
+
+# Normalize cloud-provided PostgreSQL connection strings (Render / Heroku / Neon use postgres:// or postgresql://)
+if db_url.startswith("postgres://"):
+    db_url = "postgresql+psycopg://" + db_url[len("postgres://"):]
+elif db_url.startswith("postgresql://") and not db_url.startswith("postgresql+"):
+    db_url = "postgresql+psycopg://" + db_url[len("postgresql://"):]
+
 if db_url.startswith("sqlite"):
     engine = create_engine(
         db_url,
@@ -12,21 +19,25 @@ if db_url.startswith("sqlite"):
         pool_pre_ping=True,
     )
 else:
-    # PostgreSQL with psycopg / psycopg2:
-    # pool_size=10, max_overflow=10 (up to 20 connections max) with pool_timeout=30s
-    # 1. idle_in_transaction_session_timeout=60000: Terminates any transaction idle > 60s
-    # 2. statement_timeout=30000: Terminates any hanging query > 30s.
-    engine = create_engine(
-        db_url,
-        pool_pre_ping=True,
-        pool_size=10,
-        max_overflow=10,
-        pool_recycle=180,
-        pool_timeout=30,
-        connect_args={
+    # PostgreSQL with psycopg (psycopg3):
+    # pool_size=20, max_overflow=20 (up to 40 connections max) with pool_timeout=30s
+    # pool_pre_ping=True ensures dead connections are dropped before checkout
+    # pool_recycle=300 refreshes pooled connections every 5 minutes to avoid stale cloud sockets
+    engine_kwargs = {
+        "pool_pre_ping": True,
+        "pool_size": 20,
+        "max_overflow": 20,
+        "pool_recycle": 300,
+        "pool_timeout": 30,
+    }
+
+    # Only pass server-side statement options if not running on external managed pooler
+    if "pooler" not in db_url and "pgbouncer" not in db_url:
+        engine_kwargs["connect_args"] = {
             "options": "-c idle_in_transaction_session_timeout=60000 -c statement_timeout=30000"
-        },
-    )
+        }
+
+    engine = create_engine(db_url, **engine_kwargs)
 
 
 @event.listens_for(engine, "reset")

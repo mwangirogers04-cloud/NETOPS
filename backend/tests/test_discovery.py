@@ -90,16 +90,18 @@ def test_save_discovered_devices_ip_migration(db_session):
     from backend.app.models.event import Event
     from backend.app.services.discovery import save_discovered_devices
 
-    # Device already exists with old IP
+    # Device already exists with old IP (unapproved / pending review)
     existing = Device(
         mac_address="F0:1F:AF:4C:6A:E9",
         ip_address="192.168.0.11",
         hostname="DELL-PC",
         vendor="Dell",
         device_type="computer",
-        approval_status="approved",
-        status="online",
-        internet_access_authorized=True,
+        approval_status="pending",
+        status="offline",
+        internet_access_authorized=False,
+        enforcement_status="quarantined",
+        vlan_id=90,
     )
     db_session.add(existing)
 

@@ -76,14 +76,28 @@ def add_access_information(device: Device):
     elif device.approval_status in {"pending", "rejected"}:
         device.access_decision = "quarantine"
 
+    elif getattr(device, "status", None) in ("offline", "disconnected"):
+        device.access_decision = "quarantine"
+
     elif getattr(device, "vlan_id", None) is not None and not is_type_and_vlan_matching(device.device_type, device.vlan_id):
         device.access_decision = "quarantine"
 
-    elif device.enforcement_status == "allowed":
+    elif device.enforcement_status == "allowed" and device.internet_access_authorized:
         device.access_decision = "allowed"
 
     else:
         device.access_decision = "quarantine"
+
+    # Once a device is disconnected, rejected, isolated, or quarantined from internet, its status indicates offline
+    if (
+        device.access_decision != "allowed"
+        or device.enforcement_status != "allowed"
+        or not getattr(device, "internet_access_authorized", False)
+        or getattr(device, "vlan_id", None) == 90
+        or getattr(device, "approval_status", None) in ("pending", "rejected")
+        or getattr(device, "status", None) in ("offline", "disconnected")
+    ):
+        device.status = "offline"
 
     # Explain the actual access state, not just approval eligibility.
     reason = get_access_reason(
@@ -217,6 +231,7 @@ def attach_update_information(devices: list[Device], db: Session):
 )
 def get_devices(
     scope: str | None = None,
+    network_name: str | None = None,
     current_user: User | None = Depends(get_optional_current_user),
     db: Session = Depends(get_db),
 ):
@@ -242,6 +257,18 @@ def get_devices(
         # Strict per-user network isolation for standard users
         query = query.where(Device.owner_id == current_user.id)
 
+    if network_name and network_name.strip() and network_name.strip().lower() != "all":
+        clean_net = network_name.strip().lower()
+        if clean_net == "home network":
+            query = query.where(
+                or_(
+                    func.lower(Device.network_name) == "home network",
+                    Device.network_name.is_(None),
+                )
+            )
+        else:
+            query = query.where(func.lower(Device.network_name) == clean_net)
+
     devices = db.scalars(query).all()
 
     attach_update_information(devices, db)
@@ -250,6 +277,47 @@ def get_devices(
         add_access_information(device)
 
     return devices
+
+
+@router.get("/networks")
+def get_user_networks(
+    current_user: User | None = Depends(get_optional_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Returns list of distinct networks/sites for the user with device statistics.
+    Always includes 'Home Network' and 'Remote Network'.
+    """
+    if not current_user:
+        return []
+
+    query = select(Device.network_name, Device.status)
+    if current_user.role != "super_admin" and current_user.username.lower() not in ("developer", "admin"):
+        query = query.where(Device.owner_id == current_user.id)
+
+    rows = db.execute(query).all()
+
+    counts = {
+        "Home Network": {"device_count": 0, "online_count": 0},
+        "Remote Network": {"device_count": 0, "online_count": 0},
+    }
+
+    for net_name, status in rows:
+        name = net_name or "Home Network"
+        if name not in counts:
+            counts[name] = {"device_count": 0, "online_count": 0}
+        counts[name]["device_count"] += 1
+        if status == "online":
+            counts[name]["online_count"] += 1
+
+    return [
+        {
+            "name": name,
+            "device_count": data["device_count"],
+            "online_count": data["online_count"],
+        }
+        for name, data in counts.items()
+    ]
 
 
 # ------------------------------------------------------------
@@ -368,6 +436,7 @@ def approve_device(
     # Keep the device blocked until the administrator
     # explicitly clicks "Allow Internet".
     device.enforcement_status = "quarantined"
+    device.status = "offline"
 
     has_user = isinstance(current_user, User) or (current_user and hasattr(current_user, "username") and not hasattr(current_user, "dependency"))
     actor_username = current_user.username if has_user else "administrator"
@@ -434,9 +503,10 @@ def reject_device(
 
     device.approval_status = "rejected"
 
-    # Rejected devices must always remain quarantined.
+    # Rejected devices must always remain quarantined and offline.
     device.internet_access_authorized = False
     device.enforcement_status = "quarantined"
+    device.status = "offline"
 
     # Rejected devices return to quarantine VLAN.
     device.vlan_id = 90
@@ -520,6 +590,7 @@ def allow_device(
         device.enforcement_status = "quarantined"
 
     device.internet_access_authorized = True
+    device.status = "online"
     result = enforce_device_access(
         device,
         db,
@@ -552,6 +623,7 @@ def allow_device(
         "approval_status": device.approval_status,
         "device_type": device.device_type,
         "vlan_id": device.vlan_id,
+        "status": device.status,
         "decision": device.access_decision,
         "action": "allow",
         "enforcement_status": device.enforcement_status,
@@ -586,7 +658,9 @@ def disallow_device(
 
     device.internet_access_authorized = False
     device.enforcement_status = "quarantined"
+    device.status = "offline"
     device.vlan_id = 90
+    device.status = "offline"
 
     result = enforce_device_access(
         device,
@@ -621,6 +695,7 @@ def disallow_device(
         "approval_status": device.approval_status,
         "device_type": device.device_type,
         "vlan_id": device.vlan_id,
+        "status": device.status,
         "decision": device.access_decision,
         "action": "disallow",
         "enforcement_status": device.enforcement_status,
@@ -749,6 +824,7 @@ def set_device_type(
     if new_vlan == 90 or new_type == "unknown":
         device.internet_access_authorized = False
         device.enforcement_status = "quarantined"
+        device.status = "offline"
         enforce_device_access(
             device,
             db,
@@ -821,6 +897,7 @@ def enforce_device(
     # give Internet access to an unapproved device.
     if device.approval_status != "approved":
         device.enforcement_status = "quarantined"
+        device.status = "offline"
 
     result = enforce_device_access(
         device,
@@ -858,15 +935,13 @@ def automate_all_devices_vlan(
     updated = []
     for device in devices:
         res = automate_vlan_assignment(device, db)
-        if device.vlan_id == 90 or res.get("vlan_id") == 90:
-            device.internet_access_authorized = False
-            device.enforcement_status = "quarantined"
-            enforce_device_access(device, db, force=True)
-        else:
+        if device.approval_status != "approved":
             device.approval_status = "approved"
-            device.internet_access_authorized = True
-            device.enforcement_status = "allowed"
-            enforce_device_access(device, db, force=True)
+        device.internet_access_authorized = False
+        if device.enforcement_status != "isolated":
+            device.enforcement_status = "quarantined"
+        device.status = "offline"
+        enforce_device_access(device, db, force=True)
         add_access_information(device)
         updated.append({
             "id": device.id,
@@ -875,6 +950,8 @@ def automate_all_devices_vlan(
             "vendor": device.vendor,
             "device_type": device.device_type,
             "vlan_id": device.vlan_id,
+            "status": device.status,
+            "enforcement_status": device.enforcement_status,
         })
     db.commit()
     return {
@@ -904,28 +981,30 @@ def automate_device_vlan(
         db,
     )
 
-    if device.vlan_id == 90 or result.get("vlan_id") == 90:
-        device.internet_access_authorized = False
-        device.enforcement_status = "quarantined"
-        enforce_device_access(
-            device,
-            db,
-            force=True,
-        )
-    else:
+    # Auto VLAN assigns the VLAN based on classification criteria, but must NOT grant internet access.
+    # Internet access must be explicitly authorized via the "Allow Internet" action.
+    if device.approval_status != "approved":
         device.approval_status = "approved"
-        device.internet_access_authorized = True
-        device.enforcement_status = "allowed"
-        enforce_device_access(
-            device,
-            db,
-            force=True,
-        )
+
+    device.internet_access_authorized = False
+    if device.enforcement_status != "isolated":
+        device.enforcement_status = "quarantined"
+    device.status = "offline"
+
+    enforce_device_access(
+        device,
+        db,
+        force=True,
+    )
 
     db.commit()
     db.refresh(device)
 
     add_access_information(device)
+
+    result["internet_access_authorized"] = False
+    result["enforcement_status"] = device.enforcement_status
+    result["status"] = device.status
 
     return result
 
@@ -972,6 +1051,7 @@ def set_device_vlan(
     if new_vlan == 90:
         device.internet_access_authorized = False
         device.enforcement_status = "quarantined"
+        device.status = "offline"
         enforce_device_access(
             device,
             db,
@@ -990,6 +1070,7 @@ def set_device_vlan(
     else:
         if device.enforcement_status == "isolated":
             device.enforcement_status = "quarantined"
+            device.status = "offline"
         create_event(
             db,
             "vlan_change",
@@ -1095,6 +1176,7 @@ def isolate_device(
     device.enforcement_status = "isolated"
     device.internet_access_authorized = False
     device.vlan_id = 90
+    device.status = "offline"
 
     # Disable active access schedules while device is explicitly isolated
     try:
@@ -1160,6 +1242,7 @@ def unisolate_device(
         )
 
     device.enforcement_status = "quarantined"
+    device.status = "offline"
 
     if device.approval_status == "approved":
         target_vlan = get_vlan_for_device_type(device.device_type)
@@ -1230,6 +1313,7 @@ def reset_device_for_experiment(
     device.classification_status = "normal"
     device.vlan_id = 90
     device.enforcement_status = "quarantined"
+    device.status = "offline"
     device.internet_access_authorized = False
 
     try:
