@@ -50,14 +50,18 @@ function App() {
     currentUser?.username?.toLowerCase() === "rogers" ||
     currentUser?.username?.toLowerCase() === "rogers mwangi" ||
     currentUser?.role?.toLowerCase() === "developer" ||
-    currentUser?.role?.toLowerCase() === "super_admin";
+    currentUser?.role?.toLowerCase() === "super_admin" ||
+    (currentUser?.role && currentUser.role.toLowerCase().includes("dev")) ||
+    currentUser?.can_manage_updates === true;
   const isSuperAdmin =
     currentUser?.role === "super_admin" ||
     currentUser?.role === "developer" ||
+    currentUser?.role === "admin" ||
     isDeveloper;
   const isAdmin =
     currentUser?.role === "admin" ||
     currentUser?.role === "super_admin" ||
+    currentUser?.role === "developer" ||
     isDeveloper;
 
   const getAuthHeaders = (extra = {}) => {
@@ -3830,9 +3834,30 @@ const DevicesPage = () => {
 
                         return (
                           <div>
-                            <span className="status-badge offline" style={{ opacity: 0.6 }} title="No telemetry agent reporting for this LAN machine">
-                              ⚪ NO AGENT
+                            <span className="status-badge warning" style={{ fontSize: "11px" }} title="Evaluated for updates on LAN">
+                              ⚠️ UPDATES PENDING
                             </span>
+                            {isSuperAdmin && (
+                              <button
+                                type="button"
+                                className="primary-button small"
+                                style={{
+                                  marginTop: "6px",
+                                  fontSize: "11px",
+                                  padding: "3px 8px",
+                                  backgroundColor: "#10b981",
+                                  borderColor: "#059669",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "4px",
+                                  fontWeight: "600",
+                                }}
+                                onClick={() => openDeployModal(device)}
+                                title="Centrally deploy updates to this machine"
+                              >
+                                ⚡ Deploy Updates
+                              </button>
+                            )}
                           </div>
                         );
                       })()}

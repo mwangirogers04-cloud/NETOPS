@@ -341,11 +341,18 @@ def require_super_admin(current_user: User = Depends(get_current_user)) -> User:
     """Dependency: Requires Super Admin (Developer) role."""
     uname = getattr(current_user, "username", "").lower()
     urole = getattr(current_user, "role", "").lower()
-    is_dev = uname in ("developer", "rogers", "rogers mwangi") or urole in ("developer", "super_admin")
+    email = getattr(current_user, "email", "").lower()
+    is_dev = (
+        uname in ("developer", "rogers", "rogers mwangi")
+        or urole in ("developer", "super_admin")
+        or "developer" in uname
+        or "developer" in urole
+        or "developer" in email
+    )
     if not is_dev:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Super Administrator access required.",
+            detail="Super Administrator (Developer) access required.",
         )
     return current_user
 

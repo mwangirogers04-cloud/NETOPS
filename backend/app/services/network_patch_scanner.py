@@ -358,24 +358,28 @@ def scan_lan_for_updates(network: str | None, db: Session) -> dict:
     updates_available_count = 0
     up_to_date_count = 0
 
-    # Step 3: Evaluate all online devices (both newly saved and existing online inventory)
-    devices_to_evaluate = [d for d in saved_devices if getattr(d, "status", None) == "online"]
+    # Step 3: Evaluate all devices on the network without leaving any machine behind
+    devices_to_evaluate = list(saved_devices)
     seen_device_ids = {d.id for d in devices_to_evaluate if getattr(d, "id", None)}
 
     try:
-        all_online_devices = db.scalars(
-            select(Device).where(Device.status == "online")
+        all_network_devices = db.scalars(
+            select(Device).where(
+                or_(
+                    Device.ip_address.isnot(None),
+                    Device.mac_address.isnot(None),
+                )
+            )
         ).all()
-        if isinstance(all_online_devices, list):
-            for d in all_online_devices:
-                if isinstance(d, Device) and d.id not in seen_device_ids:
-                    devices_to_evaluate.append(d)
-                    seen_device_ids.add(d.id)
+        for d in all_network_devices:
+            if isinstance(d, Device) and d.id not in seen_device_ids:
+                devices_to_evaluate.append(d)
+                seen_device_ids.add(d.id)
     except Exception:
         pass
 
     for device in devices_to_evaluate:
-        if getattr(device, "status", None) != "online":
+        if not getattr(device, "ip_address", None) and not getattr(device, "mac_address", None):
             continue
 
         result = assess_and_record_device_updates(

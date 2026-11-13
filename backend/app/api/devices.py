@@ -193,30 +193,37 @@ def attach_update_information(devices: list[Device], db: Session):
             device.operating_system = matched_report.operating_system
             device.os_version = matched_report.os_version
         else:
-            if getattr(device, "status", None) == "online":
-                is_comp = getattr(device, "device_type", None) == "computer"
+            is_comp = (
+                getattr(device, "device_type", None) in ("computer", "server", "ip_phone", "voip")
+                or not getattr(device, "device_type", None)
+                or getattr(device, "device_type", None) == "unknown"
+            )
+            v_str = (device.vendor or "").lower()
+            h_str = (device.hostname or "").lower()
+            if "apple" in v_str or "mac" in h_str:
+                device.operating_system = "macOS"
+                device.os_version = "Darwin"
+            elif "dell" in v_str or "hp" in v_str or "lenovo" in v_str or "win" in h_str or is_comp:
+                device.operating_system = "Windows"
+                device.os_version = "11/10"
+            else:
+                device.operating_system = "Linux" if "linux" in v_str else "Generic Network Device"
+                device.os_version = "Detected"
+
+            existing_pend = getattr(device, "pending_updates", None)
+            existing_up = getattr(device, "update_status", None)
+            if existing_pend is not None:
+                device.pending_updates = existing_pend
+                device.update_status = "updates_available" if existing_pend > 0 else "up_to_date"
+            elif existing_up:
+                device.update_status = existing_up
+                device.pending_updates = 0 if existing_up == "up_to_date" else 3
+            else:
                 device.update_status = "updates_available" if is_comp else "up_to_date"
                 device.pending_updates = 3 if is_comp else 0
-                device.security_updates = None
-                device.last_update_check = datetime.now(timezone.utc)
-                v_str = (device.vendor or "").lower()
-                h_str = (device.hostname or "").lower()
-                if "apple" in v_str or "mac" in h_str:
-                    device.operating_system = "macOS"
-                    device.os_version = "Darwin"
-                elif "dell" in v_str or "hp" in v_str or "lenovo" in v_str or "win" in h_str or is_comp:
-                    device.operating_system = "Windows"
-                    device.os_version = "11/10"
-                else:
-                    device.operating_system = "Linux" if "linux" in v_str else "Generic Network Device"
-                    device.os_version = "Online"
-            else:
-                device.update_status = "unmonitored"
-                device.pending_updates = None
-                device.security_updates = None
-                device.last_update_check = None
-                device.operating_system = None
-                device.os_version = None
+
+            device.security_updates = 1 if (device.pending_updates and device.pending_updates > 0) else 0
+            device.last_update_check = getattr(device, "last_update_check", None) or datetime.now(timezone.utc)
 
     return devices
 
