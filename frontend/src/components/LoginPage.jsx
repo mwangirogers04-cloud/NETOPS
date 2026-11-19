@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { NETOPS_FAQS } from "../data/faqs";
+import NetOpsLogo from "./NetOpsLogo";
 
 const formatFetchError = (err, defaultMsg = "Request failed.") => {
   const msg = err?.message || "";
@@ -595,17 +596,13 @@ export default function LoginPage({
           margin-bottom: 28px;
         }
         .login-brand-icon {
-          width: 54px;
-          height: 54px;
-          border-radius: 14px;
-          background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
+          width: 60px;
+          height: 60px;
           display: inline-flex;
           align-items: center;
           justify-content: center;
-          font-size: 26px;
-          color: #ffffff;
-          box-shadow: 0 8px 20px rgba(37, 99, 235, 0.25);
           margin-bottom: 12px;
+          filter: drop-shadow(0 6px 20px rgba(37, 99, 235, 0.35));
         }
         .login-brand-title {
           font-size: 24px;
@@ -834,7 +831,9 @@ export default function LoginPage({
       <div className="login-card">
         {/* BRAND HEADER */}
         <div className="login-brand-header">
-          <div className="login-brand-icon">🛡️</div>
+          <div className="login-brand-icon">
+            <NetOpsLogo size={58} />
+          </div>
           <h1 className="login-brand-title">NETOPS CONSOLE</h1>
           <div className="login-brand-subtitle">
             Role-Based Network Operations & Enforcement Platform

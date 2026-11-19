@@ -4,6 +4,7 @@ import UsersPage from "./components/UsersPage";
 import UserMonitoringPage from "./components/UserMonitoringPage";
 import SwitchVlanPage from "./components/SwitchVlanPage";
 import NetworkTopologyMap from "./components/NetworkTopologyMap";
+import NetOpsLogo from "./components/NetOpsLogo";
 import { NETOPS_FAQS, FAQ_CATEGORIES } from "./data/faqs";
 import {
   getDeviceInternetStatus,
@@ -15122,15 +15123,11 @@ const EndpointUpdatesPage = () => {
         .brand-mark {
           width: 38px;
           height: 38px;
-          border-radius: 8px;
-          background: #2563eb;
           display: flex;
           align-items: center;
           justify-content: center;
-          font-size: 14px;
-          font-weight: 800;
-          color: white;
           margin-right: 11px;
+          filter: drop-shadow(0 2px 6px rgba(37, 99, 235, 0.35));
         }
 
         .brand-name {
@@ -16523,7 +16520,7 @@ const EndpointUpdatesPage = () => {
         <aside className="sidebar">
           <div className="brand">
             <div className="brand-mark">
-              N
+              <NetOpsLogo size={36} />
             </div>
 
             <div className="brand-text">

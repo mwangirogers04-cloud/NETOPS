@@ -1,0 +1,116 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
+  <defs>
+    <!-- Background Shield Gradient -->
+    <linearGradient id="netopsShieldBg" x1="50" y1="8" x2="50" y2="94" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="50%" stop-color="#0a0f1d" />
+      <stop offset="100%" stop-color="#020617" />
+    </linearGradient>
+
+    <!-- Outer Border Gradient -->
+    <linearGradient id="netopsBorderGrad" x1="15" y1="8" x2="85" y2="94" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="35%" stop-color="#2563eb" />
+      <stop offset="70%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#06b6d4" />
+    </linearGradient>
+
+    <!-- Circuit Trace Gradient -->
+    <linearGradient id="netopsTraceGrad" x1="30" y1="30" x2="70" y2="70" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="50%" stop-color="#60a5fa" />
+      <stop offset="100%" stop-color="#06b6d4" />
+    </linearGradient>
+
+    <!-- Glow Filter -->
+    <filter id="netopsGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="2.5" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+
+    <!-- Core Pulse Glow -->
+    <filter id="coreGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="3.5" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- Outer Cyber Shield Base -->
+  <path
+    d="M50 7 L86 23 C86 23 87 53 86 54 C84 74 68 89 50 95 C32 89 16 74 14 54 C13 53 14 23 14 23 L50 7 Z"
+    fill="url(#netopsShieldBg)"
+    stroke="url(#netopsBorderGrad)"
+    stroke-width="3"
+    stroke-linejoin="round"
+  />
+
+  <!-- Subtle Inner Contour -->
+  <path
+    d="M50 13 L80 26.5 C80 26.5 81 50 80 51 C78 68 64 81 50 87 C36 81 22 68 20 51 C19 50 20 26.5 20 26.5 L50 13 Z"
+    stroke="#1e293b"
+    stroke-width="1.5"
+    fill="none"
+  />
+
+  <!-- Horizontal & Diagonal Secondary Data Bus Traces -->
+  <path d="M22 50 L34 50" stroke="#0ea5e9" stroke-width="1.5" stroke-opacity="0.6" stroke-linecap="round" />
+  <path d="M66 50 L78 50" stroke="#0ea5e9" stroke-width="1.5" stroke-opacity="0.6" stroke-linecap="round" />
+  <path d="M50 18 L50 32" stroke="#38bdf8" stroke-width="1.5" stroke-opacity="0.5" stroke-linecap="round" stroke-dasharray="2 3" />
+  <path d="M50 68 L50 82" stroke="#38bdf8" stroke-width="1.5" stroke-opacity="0.5" stroke-linecap="round" stroke-dasharray="2 3" />
+
+  <!-- Main 'N' Shaped Network Bus Structure -->
+  <g filter="url(#netopsGlow)">
+    <!-- Diagonal cross bus -->
+    <path
+      d="M34 32 L66 68"
+      stroke="url(#netopsTraceGrad)"
+      stroke-width="3.5"
+      stroke-linecap="round"
+    />
+    <!-- Left vertical trunk -->
+    <path
+      d="M34 68 L34 32"
+      stroke="url(#netopsTraceGrad)"
+      stroke-width="3.5"
+      stroke-linecap="round"
+    />
+    <!-- Right vertical trunk -->
+    <path
+      d="M66 68 L66 32"
+      stroke="url(#netopsTraceGrad)"
+      stroke-width="3.5"
+      stroke-linecap="round"
+    />
+  </g>
+
+  <!-- Secondary Cross Link with Pulse Core -->
+  <path d="M34 50 L66 50" stroke="#06b6d4" stroke-width="1.5" stroke-opacity="0.7" stroke-dasharray="3 3" />
+
+  <!-- Peripheral Bus Extension Nodes -->
+  <circle cx="22" cy="50" r="2.5" fill="#38bdf8" opacity="0.8" />
+  <circle cx="78" cy="50" r="2.5" fill="#38bdf8" opacity="0.8" />
+  <circle cx="50" cy="18" r="2" fill="#06b6d4" opacity="0.7" />
+  <circle cx="50" cy="82" r="2" fill="#06b6d4" opacity="0.7" />
+
+  <!-- Primary Network Corner Vertices ('N' nodes) -->
+  <!-- Top Left Node -->
+  <circle cx="34" cy="32" r="4.5" fill="#0f172a" stroke="#38bdf8" stroke-width="2.5" />
+  <circle cx="34" cy="32" r="2" fill="#38bdf8" />
+
+  <!-- Bottom Left Node -->
+  <circle cx="34" cy="68" r="4.5" fill="#0f172a" stroke="#2563eb" stroke-width="2.5" />
+  <circle cx="34" cy="68" r="2" fill="#60a5fa" />
+
+  <!-- Top Right Node -->
+  <circle cx="66" cy="32" r="4.5" fill="#0f172a" stroke="#6366f1" stroke-width="2.5" />
+  <circle cx="66" cy="32" r="2" fill="#818cf8" />
+
+  <!-- Bottom Right Node -->
+  <circle cx="66" cy="68" r="4.5" fill="#0f172a" stroke="#06b6d4" stroke-width="2.5" />
+  <circle cx="66" cy="68" r="2" fill="#22d3ee" />
+
+  <!-- Central Real-time Telemetry / Security Pulse Core -->
+  <circle cx="50" cy="50" r="7" fill="#06b6d4" fill-opacity="0.15" />
+  <circle cx="50" cy="50" r="4.5" fill="#0f172a" stroke="#10b981" stroke-width="2" filter="url(#coreGlow)" />
+  <circle cx="50" cy="50" r="2.2" fill="#10b981" />
+</svg>
