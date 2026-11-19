@@ -176,3 +176,96 @@ def test_scan_lan_for_updates_strictly_scopes_online_and_network():
             local_ip="192.168.0.50",
             local_mac="AA:BB:CC:DD:EE:10",
         )
+
+
+def test_assess_and_record_device_updates_respects_completed_patch_job():
+    from backend.app.models.patch_job import PatchJob
+    db = MagicMock()
+    device = Device(
+        id=665,
+        ip_address="192.168.0.10",
+        mac_address="F0:1F:AF:F2:29:0A",
+        hostname="Workstation-Office",
+        status="online",
+        device_type="computer",
+    )
+    completed_job = PatchJob(
+        id=69,
+        device_id=665,
+        hostname="Workstation-Office",
+        status="COMPLETED",
+        mac_address="F0:1F:AF:F2:29:0A",
+        ip_address="192.168.0.10",
+    )
+    mock_scalars = MagicMock()
+    mock_scalars.all.return_value = []
+    mock_scalars.first.return_value = completed_job
+    db.scalars.return_value = mock_scalars
+
+    res = assess_and_record_device_updates(
+        device=device,
+        db=db,
+        local_ip="192.168.0.1",
+        local_mac="AA:BB:CC:DD:EE:01",
+    )
+    assert res["update_status"] == "up_to_date"
+    assert res["pending_updates"] == 0
+    assert device.update_status == "up_to_date"
+    assert device.pending_updates == 0
+
+
+def test_assess_and_record_device_updates_phone_endpoints_default_up_to_date():
+    db = MagicMock()
+    phone = Device(
+        id=667,
+        ip_address="192.168.0.101",
+        mac_address="BC:D0:74:F2:29:65",
+        hostname="Phone-192-168-0-101",
+        status="online",
+        device_type="phone",
+    )
+    mock_scalars = MagicMock()
+    mock_scalars.all.return_value = []
+    mock_scalars.first.return_value = None
+    db.scalars.return_value = mock_scalars
+
+    res = assess_and_record_device_updates(
+        device=phone,
+        db=db,
+        local_ip="192.168.0.1",
+        local_mac="AA:BB:CC:DD:EE:01",
+    )
+    assert res["update_status"] == "up_to_date"
+    assert res["pending_updates"] == 0
+    assert phone.update_status == "up_to_date"
+    assert phone.pending_updates == 0
+
+
+def test_assess_and_record_device_updates_preserves_up_to_date_device():
+    db = MagicMock()
+    laptop = Device(
+        id=666,
+        ip_address="192.168.0.12",
+        mac_address="3C:52:82:F2:29:0C",
+        hostname="Host-Laptop",
+        status="online",
+        device_type="computer",
+    )
+    laptop.update_status = "up_to_date"
+    laptop.pending_updates = 0
+    mock_scalars = MagicMock()
+    mock_scalars.all.return_value = []
+    mock_scalars.first.return_value = None
+    db.scalars.return_value = mock_scalars
+
+    res = assess_and_record_device_updates(
+        device=laptop,
+        db=db,
+        local_ip="192.168.0.1",
+        local_mac="AA:BB:CC:DD:EE:01",
+    )
+    assert res["update_status"] == "up_to_date"
+    assert res["pending_updates"] == 0
+    assert laptop.update_status == "up_to_date"
+    assert laptop.pending_updates == 0
+

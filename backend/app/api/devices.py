@@ -152,6 +152,7 @@ def attach_update_information(devices: list[Device], db: Session):
 
     mac_to_update = {}
     ip_to_update = {}
+    hostname_to_update = {}
 
     for report in endpoint_updates:
         if report.mac_address:
@@ -164,18 +165,69 @@ def attach_update_information(devices: list[Device], db: Session):
         if report.ip_address and report.ip_address not in ip_to_update:
             ip_to_update[report.ip_address] = report
 
+        if report.hostname and report.hostname.strip().lower() not in hostname_to_update:
+            hostname_to_update[report.hostname.strip().lower()] = report
+
+    try:
+        completed_jobs = db.scalars(
+            select(PatchJob).where(PatchJob.status == "COMPLETED").order_by(PatchJob.completed_at.desc())
+        ).all()
+        comp_job_device_ids = {j.device_id for j in completed_jobs if isinstance(j, PatchJob) and j.device_id}
+        comp_job_macs = {j.mac_address.replace(":", "").replace("-", "").upper() for j in completed_jobs if isinstance(j, PatchJob) and j.mac_address}
+        comp_job_hosts = {j.hostname.lower() for j in completed_jobs if isinstance(j, PatchJob) and j.hostname}
+        comp_job_ips = {j.ip_address for j in completed_jobs if isinstance(j, PatchJob) and j.ip_address}
+    except Exception:
+        comp_job_device_ids = set()
+        comp_job_macs = set()
+        comp_job_hosts = set()
+        comp_job_ips = set()
+
     for device in devices:
-        matched_report = None
-        if device.mac_address:
-            norm_dev_mac = (
-                device.mac_address.replace(":", "").replace("-", "").upper()
+        norm_dev_mac = (
+            device.mac_address.replace(":", "").replace("-", "").upper()
+            if device.mac_address
+            else None
+        )
+        has_completed_job = (
+            (device.id in comp_job_device_ids)
+            or (norm_dev_mac and norm_dev_mac in comp_job_macs)
+            or (device.hostname and device.hostname.strip().lower() in comp_job_hosts)
+            or (device.ip_address and device.ip_address in comp_job_ips)
+        )
+        is_non_comp = (
+            getattr(device, "device_type", None) in (
+                "phone", "mobile", "tablet", "iot", "printer", "camera",
+                "access_point", "router", "switch", "media_player"
             )
+            or any(
+                kw in (device.hostname or "").lower()
+                for kw in ("phone", "android", "iphone", "ipad", "galaxy", "tecno", "infinix", "redmi", "oppo", "vivo", "camera", "printer", "tv")
+            )
+        )
+
+        matched_report = None
+        if norm_dev_mac:
             matched_report = mac_to_update.get(norm_dev_mac)
 
         if not matched_report and device.ip_address:
             matched_report = ip_to_update.get(device.ip_address)
 
-        if matched_report:
+        if not matched_report and device.hostname:
+            matched_report = hostname_to_update.get(device.hostname.strip().lower())
+
+        if has_completed_job or is_non_comp:
+            device.update_status = "up_to_date"
+            device.pending_updates = 0
+            device.security_updates = 0
+            if matched_report:
+                device.operating_system = matched_report.operating_system
+                device.os_version = matched_report.os_version
+                device.last_update_check = matched_report.last_checked
+            else:
+                device.operating_system = "Generic Network Device" if is_non_comp else "Windows"
+                device.os_version = "Latest"
+                device.last_update_check = getattr(device, "last_update_check", None) or datetime.now(timezone.utc)
+        elif matched_report:
             if not device.hostname and matched_report.hostname:
                 device.hostname = matched_report.hostname
             device.update_status = matched_report.update_status

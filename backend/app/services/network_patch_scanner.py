@@ -220,21 +220,70 @@ def assess_and_record_device_updates(
         else None
     )
 
-    # Check for existing update telemetry
+    # 1. Check for existing update telemetry
     existing_update = None
-    if norm_mac:
+    try:
         updates = db.scalars(
             select(EndpointUpdate).order_by(EndpointUpdate.last_checked.desc())
         ).all()
         for u in updates:
-            if u.mac_address:
-                u_mac = u.mac_address.replace(":", "").replace("-", "").upper()
-                if u_mac == norm_mac:
-                    existing_update = u
-                    break
-            elif u.ip_address and device.ip_address and u.ip_address == device.ip_address:
+            if not isinstance(u, EndpointUpdate):
+                continue
+            u_mac = (
+                u.mac_address.replace(":", "").replace("-", "").upper()
+                if u.mac_address
+                else None
+            )
+            if norm_mac and u_mac and u_mac == norm_mac:
                 existing_update = u
                 break
+            if device.ip_address and u.ip_address and u.ip_address == device.ip_address:
+                existing_update = u
+                break
+            if device.hostname and u.hostname and u.hostname.lower() == device.hostname.lower():
+                existing_update = u
+                break
+    except Exception:
+        pass
+
+    # 2. Check for completed patch remediation jobs for this device/endpoint
+    has_completed_job = False
+    try:
+        job_query = select(PatchJob).where(PatchJob.status == "COMPLETED")
+        conds = []
+        if getattr(device, "id", None):
+            conds.append(PatchJob.device_id == device.id)
+        if norm_mac:
+            conds.append(func.upper(func.replace(func.replace(PatchJob.mac_address, ":", ""), "-", "")) == norm_mac)
+        if getattr(device, "ip_address", None):
+            conds.append(PatchJob.ip_address == device.ip_address)
+        if getattr(device, "hostname", None):
+            conds.append(func.lower(PatchJob.hostname) == device.hostname.lower())
+        if conds:
+            completed_job = db.scalars(
+                job_query.where(or_(*conds)).order_by(PatchJob.completed_at.desc(), PatchJob.id.desc())
+            ).first()
+            if isinstance(completed_job, PatchJob):
+                has_completed_job = True
+    except Exception:
+        pass
+
+    # 3. Check if device is a non-computer endpoint (phones, mobiles, IoT, printers, network gear, etc.)
+    device_type_clean = (getattr(device, "device_type", "") or "").lower().strip()
+    host_clean = (getattr(device, "hostname", "") or "").lower().strip()
+    is_non_computer = (
+        device_type_clean in (
+            "phone", "mobile", "tablet", "iot", "printer", "camera",
+            "access_point", "router", "switch", "media_player"
+        )
+        or any(
+            kw in host_clean
+            for kw in (
+                "phone", "android", "iphone", "ipad", "galaxy",
+                "tecno", "infinix", "redmi", "oppo", "vivo", "camera", "printer", "tv"
+            )
+        )
+    )
 
     now = datetime.now(timezone.utc)
 
@@ -246,15 +295,72 @@ def assess_and_record_device_updates(
         os_version = local_info["os_version"]
         architecture = local_info["architecture"]
         hostname = device.hostname or platform.node()
-        if existing_update is not None and getattr(existing_update, "update_status", None) == "up_to_date":
+        if (
+            has_completed_job
+            or (existing_update is not None and getattr(existing_update, "update_status", None) == "up_to_date" and getattr(existing_update, "pending_updates", 0) == 0)
+            or (getattr(device, "update_status", None) == "up_to_date" and getattr(device, "pending_updates", 0) == 0)
+        ):
             update_status = "up_to_date"
             pending_updates = 0
+    elif is_non_computer:
+        # Non-computer endpoints (mobile phones, IoT, network switches, routers) do not pull OS package rollups
+        update_status = "up_to_date"
+        pending_updates = 0
+        operating_system = getattr(existing_update, "operating_system", None) or "Embedded / Mobile Device"
+        os_version = getattr(existing_update, "os_version", None) or "Latest Firmware"
+        architecture = getattr(existing_update, "architecture", None) or "ARM / Embedded"
+        hostname = device.hostname or (existing_update.hostname if existing_update else None) or f"DEVICE-{device.id}"
+    elif has_completed_job:
+        # A patch remediation job for this machine completed successfully!
+        update_status = "up_to_date"
+        pending_updates = 0
+        operating_system = (
+            getattr(existing_update, "operating_system", None)
+            or getattr(device, "operating_system", None)
+            or "Windows"
+        )
+        os_version = (
+            getattr(existing_update, "os_version", None)
+            or getattr(device, "os_version", None)
+            or "Updated Baseline"
+        )
+        architecture = getattr(existing_update, "architecture", None) or "AMD64"
+        hostname = device.hostname or (existing_update.hostname if existing_update else None) or f"HOST-{device.id}"
+    elif (
+        getattr(device, "update_status", None) == "up_to_date"
+        and getattr(device, "pending_updates", 0) == 0
+    ):
+        # Machine was previously marked up-to-date and 0 pending - retain up_to_date state
+        update_status = "up_to_date"
+        pending_updates = 0
+        operating_system = (
+            getattr(existing_update, "operating_system", None)
+            or getattr(device, "operating_system", None)
+            or "Windows"
+        )
+        os_version = (
+            getattr(existing_update, "os_version", None)
+            or getattr(device, "os_version", None)
+            or "Detected"
+        )
+        architecture = getattr(existing_update, "architecture", None) or "AMD64"
+        hostname = device.hostname or (existing_update.hostname if existing_update else None) or f"HOST-{device.id}"
+    elif existing_update is not None and getattr(existing_update, "update_status", None) == "up_to_date":
+        # EndpointUpdate telemetry is already confirmed up-to-date
+        update_status = "up_to_date"
+        pending_updates = 0
+        operating_system = existing_update.operating_system or "Windows"
+        os_version = existing_update.os_version or "Detected"
+        architecture = existing_update.architecture or "AMD64"
+        hostname = device.hostname or existing_update.hostname
     elif existing_update is not None:
         # Machine was previously registered or reported
         update_status = existing_update.update_status
-        if update_status in ("stale", "unknown"):
+        pending_updates = existing_update.pending_updates if existing_update.pending_updates is not None else 0
+        if pending_updates == 0:
+            update_status = "up_to_date"
+        elif update_status in ("stale", "unknown"):
             update_status = "updates_available" if (device.device_type == "computer" or getattr(existing_update, "operating_system", "") in ("Windows", "Linux", "macOS")) else "up_to_date"
-        pending_updates = existing_update.pending_updates
         operating_system = existing_update.operating_system
         os_version = existing_update.os_version
         architecture = existing_update.architecture

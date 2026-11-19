@@ -414,6 +414,20 @@ def get_endpoint_updates(
     policy = get_or_create_update_policy(db)
     enriched_results = []
 
+    try:
+        completed_jobs = db.scalars(
+            select(PatchJob).where(PatchJob.status == "COMPLETED").order_by(PatchJob.completed_at.desc())
+        ).all()
+        comp_job_device_ids = {j.device_id for j in completed_jobs if isinstance(j, PatchJob) and j.device_id}
+        comp_job_macs = {j.mac_address.replace(":", "").replace("-", "").upper() for j in completed_jobs if isinstance(j, PatchJob) and j.mac_address}
+        comp_job_hosts = {j.hostname.lower() for j in completed_jobs if isinstance(j, PatchJob) and j.hostname}
+        comp_job_ips = {j.ip_address for j in completed_jobs if isinstance(j, PatchJob) and j.ip_address}
+    except Exception:
+        comp_job_device_ids = set()
+        comp_job_macs = set()
+        comp_job_hosts = set()
+        comp_job_ips = set()
+
     for endpoint in results:
         endpoint_mac = (
             endpoint.mac_address
@@ -466,9 +480,27 @@ def get_endpoint_updates(
                     continue
             except Exception:
                 continue
+
+        has_completed_job = (
+            (device and device.id in comp_job_device_ids)
+            or (endpoint_mac and endpoint_mac in comp_job_macs)
+            or (endpoint.hostname and endpoint.hostname.strip().lower() in comp_job_hosts)
+            or (endpoint.ip_address and endpoint.ip_address in comp_job_ips)
+            or (device and device.hostname and device.hostname.strip().lower() in comp_job_hosts)
+            or (device and device.ip_address and device.ip_address in comp_job_ips)
+        )
+        is_non_computer = (
+            (device and device.device_type and device.device_type.lower() in ("phone", "mobile", "tablet", "iot", "printer", "camera", "access_point", "router", "switch", "media_player"))
+            or (endpoint.hostname and any(kw in endpoint.hostname.lower() for kw in ("phone", "android", "iphone", "ipad", "galaxy", "tecno", "infinix", "redmi", "oppo", "vivo", "camera", "printer", "tv")))
+            or (device and device.hostname and any(kw in device.hostname.lower() for kw in ("phone", "android", "iphone", "ipad", "galaxy", "tecno", "infinix", "redmi", "oppo", "vivo", "camera", "printer", "tv")))
+        )
+
         update_status = endpoint.update_status
         pending_count = endpoint.pending_updates if endpoint.pending_updates is not None else 0
-        if pending_count == 0 and update_status == "updates_available":
+        if has_completed_job or is_non_computer or (device and getattr(device, "update_status", None) == "up_to_date" and getattr(device, "pending_updates", 0) == 0):
+            update_status = "up_to_date"
+            pending_count = 0
+        elif pending_count == 0 and update_status == "updates_available":
             update_status = "up_to_date"
         elif is_online and update_status in ("stale", "unknown"):
             update_status = "updates_available" if (device and device.device_type == "computer" and pending_count > 0) else "up_to_date"
@@ -494,7 +526,7 @@ def get_endpoint_updates(
                 "os_version": endpoint.os_version,
                 "architecture": endpoint.architecture,
                 "update_status": update_status,
-                "pending_updates": endpoint.pending_updates,
+                "pending_updates": pending_count,
                 "security_updates": endpoint.security_updates,
                 "last_checked": endpoint.last_checked,
                 "is_online": is_online,
@@ -540,6 +572,17 @@ def get_endpoint_updates(
             ip_address=device.ip_address,
         )
 
+        dev_has_job = (
+            (device.id in comp_job_device_ids)
+            or (dev_mac and dev_mac in comp_job_macs)
+            or (device.hostname and device.hostname.strip().lower() in comp_job_hosts)
+            or (device.ip_address and device.ip_address in comp_job_ips)
+        )
+        is_dev_non_comp = (
+            getattr(device, "device_type", None) in ("phone", "mobile", "tablet", "iot", "printer", "camera", "access_point", "router", "switch", "media_player")
+            or any(kw in (device.hostname or "").lower() for kw in ("phone", "android", "iphone", "ipad", "galaxy", "tecno", "infinix", "redmi", "oppo", "vivo", "camera", "printer", "tv"))
+        )
+
         pend = getattr(device, "pending_updates", 0) or 0
         dev_up = getattr(device, "update_status", None)
         is_comp = (
@@ -547,7 +590,10 @@ def get_endpoint_updates(
             or not getattr(device, "device_type", None)
             or getattr(device, "device_type", None) == "unknown"
         )
-        if not dev_up or (pend == 0 and dev_up == "updates_available"):
+        if dev_has_job or is_dev_non_comp or dev_up == "up_to_date":
+            dev_up = "up_to_date"
+            pend = 0
+        elif not dev_up or (pend == 0 and dev_up == "updates_available"):
             dev_up = "updates_available" if (is_comp and pend > 0) else "up_to_date"
 
         is_online = (getattr(device, "status", None) == "online")
@@ -563,7 +609,7 @@ def get_endpoint_updates(
             "architecture": "AMD64",
             "update_status": dev_up,
             "pending_updates": pend,
-            "security_updates": 1 if is_comp else None,
+            "security_updates": 1 if is_comp and pend > 0 else None,
             "last_checked": getattr(device, "last_update_check", None) or datetime.now(timezone.utc),
             "is_online": is_online,
             "device_id": device.id,

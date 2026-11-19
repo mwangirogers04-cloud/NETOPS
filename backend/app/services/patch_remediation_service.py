@@ -477,46 +477,48 @@ def update_patch_job_status(
 def _sync_records_after_update(db: Session, job: PatchJob):
     """Mark device and endpoint update records as up-to-date following successful patch deployment."""
     now = datetime.now(timezone.utc)
-
-    # 1. Update matched Device
-    matched_device = None
-    if job.device_id:
-        matched_device = db.get(Device, job.device_id)
-
-    if not matched_device and job.mac_address:
-        norm_mac = job.mac_address.replace(":", "").replace("-", "").upper()
-        devices = db.scalars(select(Device)).all()
-        for dev in devices:
-            if dev.mac_address and dev.mac_address.replace(":", "").replace("-", "").upper() == norm_mac:
-                matched_device = dev
-                break
-
-    if matched_device:
-        matched_device.update_status = "up_to_date"
-        matched_device.pending_updates = 0
-        matched_device.last_update_check = now
-        if job.installed_updates:
-            try:
-                updates_data = json.loads(job.installed_updates) if isinstance(job.installed_updates, str) else job.installed_updates
-                if isinstance(updates_data, list):
-                    pkgs = [u.get("package_name") for u in updates_data if isinstance(u, dict) and u.get("package_name")]
-                    if pkgs:
-                        pkg_summary = f"Remotely deployed {len(pkgs)} update(s): {', '.join(pkgs[:3])}" + ("..." if len(pkgs) > 3 else "")
-                        matched_device.notes = f"{matched_device.notes or ''}\n[{now.strftime('%Y-%m-%d %H:%M')}] {pkg_summary}".strip()
-            except Exception:
-                pass
-
-    # 2. Synchronize all existing EndpointUpdate records for this machine
     norm_job_mac = (
         job.mac_address.replace(":", "").replace("-", "").upper()
         if job.mac_address
         else None
     )
+
+    # 1. Update all matched Device records
+    devices = db.scalars(select(Device)).all()
+    for dev in devices:
+        dev_norm_mac = (
+            dev.mac_address.replace(":", "").replace("-", "").upper()
+            if dev.mac_address
+            else None
+        )
+        is_match = (
+            (job.device_id and dev.id == job.device_id)
+            or (norm_job_mac and dev_norm_mac and dev_norm_mac == norm_job_mac)
+            or (job.hostname and dev.hostname and dev.hostname.lower() == job.hostname.lower())
+            or (job.ip_address and dev.ip_address and dev.ip_address == job.ip_address)
+        )
+        if is_match:
+            dev.update_status = "up_to_date"
+            dev.pending_updates = 0
+            dev.last_update_check = now
+            if job.installed_updates:
+                try:
+                    updates_data = json.loads(job.installed_updates) if isinstance(job.installed_updates, str) else job.installed_updates
+                    if isinstance(updates_data, list):
+                        pkgs = [u.get("package_name") for u in updates_data if isinstance(u, dict) and u.get("package_name")]
+                        if pkgs:
+                            pkg_summary = f"Remotely deployed {len(pkgs)} update(s): {', '.join(pkgs[:3])}" + ("..." if len(pkgs) > 3 else "")
+                            dev.notes = f"{dev.notes or ''}\n[{now.strftime('%Y-%m-%d %H:%M')}] {pkg_summary}".strip()
+                except Exception:
+                    pass
+
+    # 2. Synchronize all existing EndpointUpdate records for this machine
     all_eps = db.scalars(
         select(EndpointUpdate).order_by(EndpointUpdate.last_checked.desc())
     ).all()
     detected_os_version = None
     detected_arch = None
+    matched_any_ep = False
     for ep in all_eps:
         ep_mac = (
             ep.mac_address.replace(":", "").replace("-", "").upper()
@@ -530,6 +532,7 @@ def _sync_records_after_update(db: Session, job: PatchJob):
             or (job.ip_address and ep.ip_address and ep.ip_address == job.ip_address)
         )
         if matched:
+            matched_any_ep = True
             if not detected_os_version and ep.os_version and ep.os_version not in ("Latest", "Detected"):
                 detected_os_version = ep.os_version
             if not detected_arch and ep.architecture:
@@ -545,21 +548,22 @@ def _sync_records_after_update(db: Session, job: PatchJob):
         else:
             detected_os_version = "Latest"
 
-    # 3. Add fresh EndpointUpdate record
-    endpoint_update = EndpointUpdate(
-        hostname=job.hostname,
-        mac_address=job.mac_address,
-        ip_address=job.ip_address,
-        machine_id=job.machine_id,
-        operating_system=job.operating_system or "Linux",
-        os_version=detected_os_version,
-        architecture=detected_arch or "x86_64",
-        update_status="up_to_date",
-        pending_updates=0,
-        security_updates=0,
-        last_checked=now,
-    )
-    db.add(endpoint_update)
+    # 3. Add fresh EndpointUpdate record only if no existing record matched
+    if not matched_any_ep:
+        endpoint_update = EndpointUpdate(
+            hostname=job.hostname,
+            mac_address=job.mac_address,
+            ip_address=job.ip_address,
+            machine_id=job.machine_id or norm_job_mac or f"lan-{job.device_id or 'update'}",
+            operating_system=job.operating_system or "Windows",
+            os_version=detected_os_version,
+            architecture=detected_arch or "AMD64",
+            update_status="up_to_date",
+            pending_updates=0,
+            security_updates=0,
+            last_checked=now,
+        )
+        db.add(endpoint_update)
 
 
 def _build_installed_updates_manifest(

@@ -274,24 +274,51 @@ def run_discovery_scan(
                 }
 
         # If running in cloud VPS environment without physical broadcast domain,
-        # generate isolated simulation endpoints strictly unique to this subnet CIDR.
+        # check if real devices have already been registered by the local agent for this network
         elif not discovered_devices and (is_cloud_env or not has_physical_net or is_mock_env):
-            discovered_devices = generate_cloud_subnet_devices(
-                target_network=target_network,
-                clean_iface=clean_iface,
-                owner_id=owner_id,
-            )
-            for d in discovered_devices:
-                d["network_name"] = target_network_name
+            site_aliases = [target_network_name.lower()]
+            if target_network_name.lower() in ("home network", "current"):
+                site_aliases.extend(["home network", "current"])
+            existing_real = db.scalars(
+                select(Device).where(
+                    Device.owner_id == owner_id,
+                    or_(
+                        func.lower(Device.network_name).in_(site_aliases),
+                        Device.network_name.is_(None) if any(a in ("home network", "current") for a in site_aliases) else False,
+                    )
+                )
+            ).all()
 
-        saved_devices = save_discovered_devices(
-            discovered_devices,
-            db,
-            scanned_interface=clean_iface,
-            owner_id=owner_id,
-            network_name=target_network_name,
-            scanned_network=target_network,
-        )
+            if existing_real:
+                # Real physical devices exist! Do NOT overwrite with fake templates
+                saved_devices = existing_real
+            else:
+                discovered_devices = generate_cloud_subnet_devices(
+                    target_network=target_network,
+                    clean_iface=clean_iface,
+                    owner_id=owner_id,
+                )
+                for d in discovered_devices:
+                    d["network_name"] = target_network_name
+
+                saved_devices = save_discovered_devices(
+                    discovered_devices,
+                    db,
+                    scanned_interface=clean_iface,
+                    owner_id=owner_id,
+                    network_name=target_network_name,
+                    scanned_network=target_network,
+                    mark_missing_offline=False,
+                )
+        else:
+            saved_devices = save_discovered_devices(
+                discovered_devices,
+                db,
+                scanned_interface=clean_iface,
+                owner_id=owner_id,
+                network_name=target_network_name,
+                scanned_network=target_network,
+            )
 
         # Detect and record endpoint update posture for all active online devices
         local_ip = get_local_ip()

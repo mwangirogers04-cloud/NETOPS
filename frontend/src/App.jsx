@@ -496,11 +496,6 @@ function App() {
         }
         if (Array.isArray(data.interfaces)) {
           setDetectedInterfaces(data.interfaces);
-          const physicalIfaces = data.interfaces.filter((i) => !i.is_virtual);
-          // If the only active physical interface is wireless (e.g. wlan0), auto-focus it
-          if (physicalIfaces.length === 1 && physicalIfaces[0].is_wireless) {
-            setSelectedInterface(physicalIfaces[0].interface);
-          }
         }
       }
     } catch (err) {
@@ -540,7 +535,9 @@ function App() {
         body: JSON.stringify({
           network: targetNetwork,
           interface: targetInterface,
-          network_name: selectedNetwork === "all" ? "Remote Network" : selectedNetwork,
+          network_name: (!selectedNetwork || selectedNetwork === "all" || selectedNetwork === "current")
+            ? (targetNetwork.startsWith("192.168.0.") ? "Home Network" : "Remote Network")
+            : selectedNetwork,
         }),
         signal: controller.signal,
       });

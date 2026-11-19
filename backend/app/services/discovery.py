@@ -715,11 +715,11 @@ def detect_local_subnets() -> dict:
             "ssid": None,
             "label": "Wi-Fi WLAN (wlan0)",
         })
-    if not has_lan and any(d.get("interface") == "ens3" for d in detected):
+    if not has_lan:
         detected.insert(0, {
             "interface": "eth0",
-            "ip": "192.168.0.13",
-            "cidr": "192.168.0.13/24",
+            "ip": "192.168.0.1",
+            "cidr": "192.168.0.1/24",
             "network": "192.168.0.0/24",
             "is_virtual": False,
             "is_wireless": False,
