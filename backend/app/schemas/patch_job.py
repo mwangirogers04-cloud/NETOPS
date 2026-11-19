@@ -88,3 +88,24 @@ class PatchJobResponse(BaseModel):
             except Exception:
                 return None
         return v
+
+
+class RebootEndpointRequest(BaseModel):
+    hostname: str
+    ip_address: str | None = None
+    mac_address: str | None = None
+    device_id: int | None = None
+    delay_seconds: int = 5
+    reason: str = "System update finalization reboot"
+    auto_reboot_after_updates: bool = False
+
+
+class RebootEndpointResponse(BaseModel):
+    status: str
+    message: str
+    hostname: str
+    ip_address: str | None = None
+    action: str = "REBOOT_MACHINE"
+    dispatched_at: datetime
+    initiated_by: str
+

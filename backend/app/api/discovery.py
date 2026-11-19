@@ -2,7 +2,7 @@ import os
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, field_validator
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -490,150 +490,163 @@ def sync_agent_devices(
     Receives scan results from a remote user's client-side scan probe,
     storing and scoping them under the user's isolated account.
     """
-    if current_user:
-        owner_id = current_user.id
-    else:
-        admin_user = db.scalar(
-            select(User).where(User.role == "super_admin").order_by(User.id)
-        )
-        owner_id = admin_user.id if admin_user else 1
-
-    site_name = (request.network_name or "").strip()
-    if not site_name:
-        if "192.168.0." in request.network:
-            site_name = "Home Network"
+    try:
+        if current_user:
+            owner_id = current_user.id
         else:
-            site_name = "Remote Network"
+            admin_user = db.scalar(
+                select(User).where(User.role == "super_admin").order_by(User.id)
+            )
+            owner_id = admin_user.id if admin_user else 1
 
-    raw_devices = [d.model_dump() for d in request.devices]
-    for rd in raw_devices:
-        if not rd.get("network_name"):
-            rd["network_name"] = site_name
+        site_name = (request.network_name or "").strip()
+        if not site_name:
+            if "192.168.0." in request.network:
+                site_name = "Home Network"
+            else:
+                site_name = "Remote Network"
 
-    clean_iface = request.interface.strip() if request.interface and request.interface.strip() else None
-    saved = save_discovered_devices(
-        raw_devices,
-        db=db,
-        scanned_interface=clean_iface,
-        owner_id=owner_id,
-        network_name=site_name,
-        mark_missing_offline=False,
-    )
-    db.commit()
+        raw_devices = [d.model_dump() for d in request.devices]
+        for rd in raw_devices:
+            if not rd.get("network_name"):
+                rd["network_name"] = site_name
 
-    site_conditions = [
-        Device.owner_id == owner_id,
-        func.lower(Device.network_name) == site_name.lower(),
-    ]
-    if site_name.lower() == "home network":
-        site_conditions.append(Device.network_name.is_(None))
-    if request.network and "/" in request.network:
-        base_net = request.network.split("/")[0]
-        pts = base_net.split(".")
-        if len(pts) >= 3:
-            subnet_prefix = f"{pts[0]}.{pts[1]}.{pts[2]}."
-            site_conditions.append(Device.ip_address.like(f"{subnet_prefix}%"))
-    elif "192.168.0." in request.network:
-        site_conditions.append(Device.ip_address.like("192.168.0.%"))
-
-    site_scope = or_(*site_conditions)
-
-    # Reconcile offline status for devices missing from the agent physical sweep
-    active_macs = set()
-    for rd in raw_devices:
-        mac = (rd.get("mac_address") or "").replace(":", "").replace("-", "").upper()
-        if mac and rd.get("status") != "offline":
-            active_macs.add(mac)
-
-    existing_site_devices = db.scalars(select(Device).where(site_scope)).all()
-    status_changed = False
-    for ed in existing_site_devices:
-        ed_mac = (ed.mac_address or "").replace(":", "").replace("-", "").upper()
-        if ed_mac and ed_mac not in active_macs:
-            if ed.status == "online":
-                ed.status = "offline"
-                status_changed = True
-                create_event(
-                    db,
-                    "device_offline",
-                    f"Device {ed.hostname or ed.ip_address or ed_mac} ({ed.mac_address}) went offline / disconnected from {site_name}.",
-                    ed.id,
-                )
-    if status_changed:
+        clean_iface = request.interface.strip() if request.interface and request.interface.strip() else None
+        saved = save_discovered_devices(
+            raw_devices,
+            db=db,
+            scanned_interface=clean_iface,
+            owner_id=owner_id,
+            network_name=site_name,
+            mark_missing_offline=False,
+        )
         db.commit()
 
-    quarantine_criteria = or_(
-        Device.enforcement_status.in_(["quarantined", "isolated"]),
-        Device.approval_status.in_(["pending", "rejected"]),
-        Device.internet_access_authorized.is_(False),
-        Device.vlan_id == 90,
-    )
+        net_match = [func.lower(Device.network_name) == site_name.lower()]
+        if site_name.lower() == "home network":
+            net_match.append(Device.network_name.is_(None))
+            net_match.append(Device.ip_address.like("192.168.0.%"))
+        elif request.network and "/" in request.network:
+            base_net = request.network.split("/")[0]
+            pts = base_net.split(".")
+            if len(pts) >= 3:
+                subnet_prefix = f"{pts[0]}.{pts[1]}.{pts[2]}."
+                net_match.append(Device.ip_address.like(f"{subnet_prefix}%"))
+        elif "192.168.0." in request.network:
+            net_match.append(Device.ip_address.like("192.168.0.%"))
 
-    raw_quarantined = db.scalars(
-        select(Device).where(
-            site_scope,
-            quarantine_criteria,
-            Device.ip_address.isnot(None),
+        site_scope = and_(
+            or_(Device.owner_id == owner_id, Device.owner_id.is_(None)),
+            or_(*net_match),
         )
-    ).all()
 
-    seen_q: dict[str, dict] = {}
-    for d in raw_quarantined:
-        if not d.ip_address:
-            continue
-        ip = d.ip_address.strip()
-        if ip not in seen_q:
-            seen_q[ip] = {
-                "ip_address": ip,
-                "mac_address": d.mac_address,
-                "hostname": d.hostname,
-                "network_interface": getattr(d, "network_interface", None),
-            }
+        # Reconcile offline status for devices missing from the agent physical sweep
+        active_macs = set()
+        for rd in raw_devices:
+            mac = (rd.get("mac_address") or "").replace(":", "").replace("-", "").upper()
+            if mac and rd.get("status") != "offline":
+                active_macs.add(mac)
 
-    raw_allowed = db.scalars(
-        select(Device).where(
-            site_scope,
-            Device.approval_status == "approved",
-            Device.enforcement_status == "allowed",
-            Device.internet_access_authorized.is_(True),
-            Device.vlan_id != 90,
-            Device.ip_address.isnot(None),
+        existing_site_devices = db.scalars(select(Device).where(site_scope)).all()
+        status_changed = False
+        for ed in existing_site_devices:
+            ed_mac = (ed.mac_address or "").replace(":", "").replace("-", "").upper()
+            if ed_mac and ed_mac not in active_macs:
+                if ed.status == "online":
+                    ed.status = "offline"
+                    status_changed = True
+                    create_event(
+                        db,
+                        "device_offline",
+                        f"Device {ed.hostname or ed.ip_address or ed_mac} ({ed.mac_address}) went offline / disconnected from {site_name}.",
+                        ed.id,
+                    )
+        if status_changed:
+            db.commit()
+
+        quarantine_criteria = or_(
+            Device.enforcement_status.in_(["quarantined", "isolated"]),
+            Device.approval_status.in_(["pending", "rejected"]),
+            Device.internet_access_authorized.is_(False),
+            Device.vlan_id == 90,
         )
-    ).all()
 
-    seen_a: dict[str, dict] = {}
-    for d in raw_allowed:
-        if not d.ip_address:
-            continue
-        ip = d.ip_address.strip()
-        if ip not in seen_q and ip not in seen_a:
-            seen_a[ip] = {
-                "ip_address": ip,
-                "mac_address": d.mac_address,
-                "hostname": d.hostname,
-                "network_interface": getattr(d, "network_interface", None),
-            }
+        raw_quarantined = db.scalars(
+            select(Device).where(
+                site_scope,
+                quarantine_criteria,
+                Device.ip_address.isnot(None),
+            )
+        ).all()
 
-    def _ip_tuple(d: dict) -> tuple[int, ...]:
-        ip = d.get("ip_address") or ""
+        seen_q: dict[str, dict] = {}
+        for d in raw_quarantined:
+            if not d.ip_address:
+                continue
+            ip = d.ip_address.strip()
+            if ip not in seen_q:
+                seen_q[ip] = {
+                    "ip_address": ip,
+                    "mac_address": d.mac_address,
+                    "hostname": d.hostname,
+                    "network_interface": getattr(d, "network_interface", None),
+                }
+
+        raw_allowed = db.scalars(
+            select(Device).where(
+                site_scope,
+                Device.approval_status == "approved",
+                Device.enforcement_status == "allowed",
+                Device.internet_access_authorized.is_(True),
+                Device.vlan_id != 90,
+                Device.ip_address.isnot(None),
+            )
+        ).all()
+
+        seen_a: dict[str, dict] = {}
+        for d in raw_allowed:
+            if not d.ip_address:
+                continue
+            ip = d.ip_address.strip()
+            if ip not in seen_q and ip not in seen_a:
+                seen_a[ip] = {
+                    "ip_address": ip,
+                    "mac_address": d.mac_address,
+                    "hostname": d.hostname,
+                    "network_interface": getattr(d, "network_interface", None),
+                }
+
+        def _ip_tuple(d: dict) -> tuple[int, ...]:
+            ip = d.get("ip_address") or ""
+            try:
+                return tuple(int(p) for p in ip.strip().split(".") if p.isdigit())
+            except Exception:
+                return (999, 999, 999, 999)
+
+        quarantined_devices = sorted(seen_q.values(), key=_ip_tuple)
+        allowed_devices = sorted(seen_a.values(), key=_ip_tuple)
+
+        return {
+            "status": "completed",
+            "network": request.network,
+            "network_name": site_name,
+            "owner_id": owner_id,
+            "devices_discovered": len(raw_devices),
+            "devices_saved": len(saved),
+            "quarantined_devices": quarantined_devices,
+            "allowed_devices": allowed_devices,
+        }
+    except Exception as exc:
+        import logging
+        logging.getLogger("discovery").exception("Agent sync internal error: %s", exc)
         try:
-            return tuple(int(p) for p in ip.strip().split(".") if p.isdigit())
+            db.rollback()
         except Exception:
-            return (999, 999, 999, 999)
-
-    quarantined_devices = sorted(seen_q.values(), key=_ip_tuple)
-    allowed_devices = sorted(seen_a.values(), key=_ip_tuple)
-
-    return {
-        "status": "completed",
-        "network": request.network,
-        "network_name": site_name,
-        "owner_id": owner_id,
-        "devices_discovered": len(raw_devices),
-        "devices_saved": len(saved),
-        "quarantined_devices": quarantined_devices,
-        "allowed_devices": allowed_devices,
-    }
+            pass
+        raise HTTPException(
+            status_code=500,
+            detail=f"Agent sync failed: {exc}",
+        ) from exc
 
 
 @router.get("/probe-script")

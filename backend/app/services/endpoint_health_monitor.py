@@ -77,6 +77,8 @@ def reconcile_dual_interface_devices(devices_list: list[Device], online_devices:
     WLAN indicates 'online' and LAN indicates 'offline'.
     """
     active_local, inactive_local = get_local_active_connection()
+    if _is_cloud_host() or not active_local:
+        return
 
     local_eth0_mac = _get_sysfs_mac("eth0")
     local_wlan0_mac = _get_sysfs_mac("wlan0")

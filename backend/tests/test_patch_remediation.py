@@ -768,6 +768,46 @@ def test_endpoint_updates_zero_pending_is_not_updates_available(client, db_sessi
     assert clean_rec["update_status"] == "up_to_date"
 
 
+def test_reboot_endpoint_super_admin_success(client, db_session):
+    payload = {
+        "hostname": "REBOOT-TARGET-PC",
+        "ip_address": "192.168.0.55",
+        "mac_address": "55:55:55:55:55:55",
+        "delay_seconds": 10,
+        "reason": "Test reboot following updates",
+    }
+    res = client.post("/endpoint-updates/reboot", json=payload)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "success"
+    assert data["action"] == "REBOOT_MACHINE"
+    assert data["hostname"] == "REBOOT-TARGET-PC"
+
+
+def test_reboot_endpoint_admin_forbidden(client, db_session):
+    from backend.app.services.auth_service import create_access_token, hash_password
+    admin = User(
+        username="reboot_test_admin",
+        email="reboot_test_admin@netops.local",
+        hashed_password=hash_password("Admin@1234"),
+        role="admin",
+        is_verified=True,
+    )
+    db_session.add(admin)
+    db_session.commit()
+
+    admin_token = create_access_token({"sub": admin.username, "role": admin.role, "user_id": admin.id})
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    payload = {
+        "hostname": "REBOOT-TARGET-PC",
+        "ip_address": "192.168.0.55",
+    }
+    res = client.post("/endpoint-updates/reboot", json=payload, headers=headers)
+    assert res.status_code == 403
+
+
+
 
 
 

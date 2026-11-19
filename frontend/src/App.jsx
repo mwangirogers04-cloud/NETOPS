@@ -4429,7 +4429,7 @@ const LanScannerPage = () => {
   // Filter devices scoped to the selected interface (eth0 LAN vs wlan0 Wi-Fi vs all)
   const filteredDevices = displayedInterfaceDevices.filter((device) => {
     // Status filter
-    if (lanFilterStatus === "all" && !isDeviceActuallyOnline(device)) return false;
+    if (lanFilterStatus === "online" && !isDeviceActuallyOnline(device)) return false;
     if (lanFilterStatus === "offline" && isDeviceActuallyOnline(device)) return false;
     if (lanFilterStatus === "ip-changed" && !ipChangedDeviceIds.has(device.id)) return false;
     if (lanFilterStatus === "ip-conflict" && !conflictedDeviceIds.has(device.id)) return false;
@@ -5130,7 +5130,14 @@ const LanScannerPage = () => {
               className={lanFilterStatus === "all" ? "primary-button small" : "secondary-button small"}
               onClick={() => setLanFilterStatus("all")}
             >
-              🟢 All Online ({onlineDevices.length})
+              🌐 All Devices ({displayedInterfaceDevices.length})
+            </button>
+            <button
+              type="button"
+              className={lanFilterStatus === "online" ? "primary-button small" : "secondary-button small"}
+              onClick={() => setLanFilterStatus("online")}
+            >
+              🟢 Online ({onlineDevices.length})
             </button>
             <button
               type="button"
@@ -5192,13 +5199,6 @@ const LanScannerPage = () => {
               title="Filter online LAN devices with active schedules"
             >
               🕒 Scheduled ({displayedInterfaceDevices.filter(isDeviceScheduled).length})
-            </button>
-            <button
-              type="button"
-              className={lanFilterStatus === "registered" ? "primary-button small" : "secondary-button small"}
-              onClick={() => setLanFilterStatus("registered")}
-            >
-              All Registered ({displayedInterfaceDevices.length})
             </button>
           </div>
 

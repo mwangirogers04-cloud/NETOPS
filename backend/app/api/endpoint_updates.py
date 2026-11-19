@@ -18,6 +18,8 @@ from ..schemas.patch_job import (
     UpdatePolicyUpdateRequest,
     UpdatePolicyResponse,
     WorkingHoursCheckRequest,
+    RebootEndpointRequest,
+    RebootEndpointResponse,
 )
 from ..services.event_service import create_event
 from ..services.network_patch_scanner import scan_lan_for_updates
@@ -33,6 +35,7 @@ from ..services.patch_remediation_service import (
     check_datetime_against_working_hours,
     schedule_all_pending_off_hours,
     evaluate_auto_off_hours_policy,
+    reboot_endpoint,
 )
 
 router = APIRouter(
@@ -900,6 +903,30 @@ def run_patch_job_now(
         return resp
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/reboot", response_model=RebootEndpointResponse)
+def trigger_endpoint_reboot(
+    payload: RebootEndpointRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_super_admin),
+):
+    """
+    Dispatch an immediate remote or local reboot command to an endpoint.
+    Restricted strictly to Developers (Super Admins).
+    """
+    initiated_by_user = current_user.username if current_user else "developer"
+    res = reboot_endpoint(
+        db=db,
+        hostname=payload.hostname,
+        ip_address=payload.ip_address,
+        mac_address=payload.mac_address,
+        device_id=payload.device_id,
+        delay_seconds=payload.delay_seconds,
+        reason=payload.reason,
+        initiated_by=initiated_by_user,
+    )
+    return res
 
 
 @router.delete("/jobs/{job_id}")

@@ -1340,27 +1340,16 @@ def save_discovered_devices(
                 f"({mac_address})"
             )
             continue
-        device_conditions = [func.upper(Device.mac_address) == mac_address]
-        if owner_id is not None:
-            device_conditions.append(Device.owner_id == owner_id)
-        if clean_network_name:
-            if clean_network_name.lower() == "home network":
-                device_conditions.append(
-                    or_(
-                        func.lower(Device.network_name) == "home network",
-                        Device.network_name.is_(None),
-                    )
-                )
-            else:
-                device_conditions.append(
-                    func.lower(Device.network_name) == clean_network_name.lower()
-                )
-        existing_device = db.scalar(select(Device).where(*device_conditions))
+        # Check by MAC address first. Since mac_address is unique across the database,
+        # match this physical device regardless of previous null owner/network assignment.
+        existing_device = db.scalar(
+            select(Device).where(func.upper(Device.mac_address) == mac_address)
+        )
 
         if existing_device:
             if existing_device.mac_address != mac_address:
                 existing_device.mac_address = mac_address
-            if owner_id is not None:
+            if owner_id is not None and (existing_device.owner_id is None or existing_device.owner_id == owner_id):
                 existing_device.owner_id = owner_id
             if clean_network_name:
                 existing_device.network_name = clean_network_name

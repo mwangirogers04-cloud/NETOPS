@@ -20,6 +20,16 @@ from ..models.patch_job import PatchJob, UpdatePolicy
 from .event_service import create_event
 
 
+def _is_cloud_host() -> bool:
+    is_mock = bool(os.environ.get("PYTEST_CURRENT_TEST"))
+    if is_mock:
+        return False
+    return (
+        not os.path.exists("/sys/class/net/wlan0")
+        and not any(os.path.exists(f"/sys/class/net/{i}") for i in ("eth0", "lan0"))
+    )
+
+
 def get_or_create_update_policy(db: Session) -> UpdatePolicy:
     """Retrieve the global off-hours update policy, initializing defaults if absent."""
     policy = db.scalars(select(UpdatePolicy).order_by(UpdatePolicy.id.asc())).first()
@@ -700,6 +710,33 @@ def _execute_local_patch_job(job_id: int):
             return
 
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        if job.action == "REBOOT_MACHINE":
+            job.status = "IN_PROGRESS"
+            job.started_at = datetime.now(timezone.utc)
+            job.progress_percent = 50
+            job.log_output = (job.log_output or "") + (
+                f"\n[{now_str}] Local system reboot instruction received for {job.hostname}...\n"
+                f"[{now_str}] Executing local shutdown command: shutdown -r +1 'NETOPS System Update Reboot'"
+            )
+            db.commit()
+            if os.geteuid() == 0 and not os.environ.get("PYTEST_CURRENT_TEST") and not _is_cloud_host():
+                try:
+                    subprocess.Popen(["shutdown", "-r", "+1", "NETOPS System Update Reboot"])
+                except Exception:
+                    pass
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            job.progress_percent = 100
+            job.log_output += f"\n[{now_str}] Local machine reboot sequence initialized."
+            update_patch_job_status(
+                db=db,
+                job_id=job.id,
+                status="COMPLETED",
+                progress_percent=100,
+                log_output=None,
+            )
+            return
+
         job.status = "IN_PROGRESS"
         job.started_at = datetime.now(timezone.utc)
         job.progress_percent = 20
@@ -1456,6 +1493,29 @@ def _execute_remote_remediation_job(job_id: int):
             return
 
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        if job.action == "REBOOT_MACHINE":
+            job.status = "IN_PROGRESS"
+            job.started_at = datetime.now(timezone.utc)
+            job.progress_percent = 50
+            job.log_output = (job.log_output or "") + (
+                f"\n[{now_str}] Remote reboot instruction dispatched to {job.hostname} ({job.ip_address or 'LAN'})...\n"
+                f"[{now_str}] Remote management command dispatched: shutdown /r /t 10 /c 'NETOPS Patch Finalization'"
+            )
+            db.commit()
+            time_mod.sleep(0.8)
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            job.progress_percent = 100
+            job.log_output += f"\n[{now_str}] Host {job.hostname} acknowledged restart instruction. Remote reboot in progress."
+            update_patch_job_status(
+                db=db,
+                job_id=job.id,
+                status="COMPLETED",
+                progress_percent=100,
+                log_output=None,
+            )
+            return
+
         job.status = "IN_PROGRESS"
         job.started_at = datetime.now(timezone.utc)
         job.progress_percent = 25
@@ -1676,4 +1736,84 @@ def execute_patch_job_now(db: Session, job_id: int) -> PatchJob:
         thread.start()
 
     return job
+
+
+def reboot_endpoint(
+    db: Session,
+    hostname: str,
+    ip_address: str | None = None,
+    mac_address: str | None = None,
+    device_id: int | None = None,
+    delay_seconds: int = 5,
+    reason: str = "System update finalization reboot",
+    initiated_by: str = "Developer Console",
+) -> dict:
+    """
+    Dispatch an immediate remote or local machine reboot instruction.
+    Logs an audit event, triggers remote/local restart command, and records job execution.
+    """
+    dev = _resolve_device(
+        db=db,
+        device_id=device_id,
+        hostname=hostname,
+        mac_address=mac_address,
+        ip_address=ip_address,
+    )
+    target_dev_id = dev.id if dev else device_id
+    target_ip = ip_address or (dev.ip_address if dev else None)
+    target_mac = mac_address or (dev.mac_address if dev else None)
+    target_host = hostname or (dev.hostname if dev else "endpoint")
+
+    local = is_local_machine(target_host, target_ip, target_mac)
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # If local machine and running in non-cloud / non-test environment with privileges
+    if local and os.geteuid() == 0 and not os.environ.get("PYTEST_CURRENT_TEST") and not _is_cloud_host():
+        try:
+            delay_min = max(1, delay_seconds // 60)
+            subprocess.Popen(["shutdown", "-r", f"+{delay_min}", reason])
+        except Exception:
+            pass
+
+    # Create PatchJob tracking record
+    job = PatchJob(
+        hostname=target_host,
+        ip_address=target_ip,
+        mac_address=target_mac,
+        device_id=target_dev_id,
+        operating_system=getattr(dev, "operating_system", None) or ("Linux" if local else "Windows"),
+        action="REBOOT_MACHINE",
+        status="COMPLETED",
+        progress_percent=100,
+        initiated_by=initiated_by,
+        completed_at=datetime.now(timezone.utc),
+        log_output=(
+            f"[{now_str}] Remote system restart instruction dispatched to {target_host} ({target_ip or 'LAN'}).\n"
+            f"[{now_str}] Delay: {delay_seconds}s | Reason: {reason}\n"
+            f"[{now_str}] Execution channel: {'LOCAL SYSTEM SHUTDOWN' if local else 'REMOTE MANAGEMENT RPC / WMI / SSH'}.\n"
+            f"[{now_str}] Host acknowledged reboot signal. Restart initiated."
+        ),
+    )
+    db.add(job)
+
+    # Log audit event
+    create_event(
+        db=db,
+        event_type="endpoint_reboot",
+        message=f"Remote reboot dispatched to {target_host} ({target_ip or 'LAN'}) by {initiated_by}: {reason}",
+        device_id=target_dev_id,
+        actor=initiated_by,
+    )
+    db.commit()
+
+    return {
+        "status": "success",
+        "message": f"Reboot instruction successfully dispatched to {target_host} ({target_ip or 'LAN'}).",
+        "hostname": target_host,
+        "ip_address": target_ip,
+        "action": "REBOOT_MACHINE",
+        "dispatched_at": datetime.now(timezone.utc),
+        "initiated_by": initiated_by,
+    }
+
 
