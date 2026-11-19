@@ -807,6 +807,27 @@ def test_reboot_endpoint_admin_forbidden(client, db_session):
     assert res.status_code == 403
 
 
+def test_reboot_endpoint_mobile_rejected(client, db_session):
+    phone_dev = Device(
+        hostname="Phone-192-168-0-114",
+        ip_address="192.168.0.114",
+        mac_address="86:39:DD:44:DC:E8",
+        device_type="phone",
+        status="online",
+    )
+    db_session.add(phone_dev)
+    db_session.commit()
+
+    payload = {
+        "hostname": "Phone-192-168-0-114",
+        "ip_address": "192.168.0.114",
+        "mac_address": "86:39:DD:44:DC:E8",
+    }
+    res = client.post("/endpoint-updates/reboot", json=payload)
+    assert res.status_code == 400
+    assert "mobile device" in res.json()["detail"].lower()
+
+
 
 
 
