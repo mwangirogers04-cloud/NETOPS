@@ -5,6 +5,21 @@ import urllib.error
 import json
 from datetime import datetime
 import time
+import os
+import sys
+
+# Ensure windows agent directory is in sys.path for host_firewall
+WIN_AGENT_DIR = os.path.dirname(os.path.abspath(__file__))
+if WIN_AGENT_DIR not in sys.path:
+    sys.path.insert(0, WIN_AGENT_DIR)
+PARENT_DIR = os.path.dirname(WIN_AGENT_DIR)
+if PARENT_DIR not in sys.path:
+    sys.path.insert(0, PARENT_DIR)
+
+try:
+    import host_firewall
+except ImportError:
+    host_firewall = None
 
 def get_machine_id():
     """Return the Windows machine identifier."""
@@ -363,15 +378,26 @@ if __name__ == "__main__":
             response = send_update_status(information, target_url)
             print(response)
 
-            # Process central remediation instructions
+            # Process central remediation instructions & universal quarantine
             try:
-                resp_json = json.loads(response)
-                if isinstance(resp_json, dict) and resp_json.get("pending_command"):
-                    cmd = resp_json["pending_command"]
-                    execute_patch_job(cmd["job_id"], cmd["action"], target_url)
-                    # Refresh and send updated status
-                    fresh_info = collect_update_status()
-                    send_update_status(fresh_info, target_url)
+                resp_json = json.loads(response) if isinstance(response, str) else response
+                if isinstance(resp_json, dict) and host_firewall is not None:
+                    quarantine_target = resp_json.get("quarantined")
+                    if quarantine_target is True:
+                        if not host_firewall.is_host_quarantined():
+                            print("\n[🔒 QUARANTINE] Central console ordered internet quarantine. Locking Windows Firewall...")
+                            host_firewall.quarantine_host(target_url)
+                    elif quarantine_target is False:
+                        if host_firewall.is_host_quarantined():
+                            print("\n[🔓 RESTORE] Central console granted internet access. Releasing Windows Firewall...")
+                            host_firewall.release_host()
+
+                    if resp_json.get("pending_command"):
+                        cmd = resp_json["pending_command"]
+                        execute_patch_job(cmd["job_id"], cmd["action"], target_url)
+                        # Refresh and send updated status
+                        fresh_info = collect_update_status()
+                        send_update_status(fresh_info, target_url)
             except Exception as proc_err:
                 print(f"Instruction processing notice: {proc_err}")
 

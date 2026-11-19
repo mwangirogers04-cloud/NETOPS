@@ -17,10 +17,25 @@ PROTECTED_IPS = {
     "localhost",
     "0.0.0.0",
     "192.168.0.10",   # Sophos Firewall appliance
+    "192.168.0.2",    # Sophos Port 2 IP
+    "192.168.50.254", # Sophos Port 1 Gateway
     "192.168.0.1",    # Gateway
     "192.168.0.13",   # NETOPS server eth0
     "192.168.0.101",  # NETOPS server wlan0
 }
+
+def get_sophos_protected_ips() -> set[str]:
+    """Dynamically return all protected IPs including configured Sophos firewall URL host."""
+    ips = set(PROTECTED_IPS)
+    try:
+        url = getattr(settings, "sophos_base_url", "")
+        if url:
+            host = urlparse(url).hostname
+            if host:
+                ips.add(host)
+    except Exception:
+        pass
+    return ips
 
 GROUP_NAME = "NETOPS_Quarantined_Hosts"
 DUMMY_HOST = "NETOPS_DUMMY_HOST"
@@ -210,7 +225,7 @@ def sophos_block_device(ip_address: str, hostname: str | None = None) -> dict:
         return {"status": "skipped", "reason": "No IP address provided"}
 
     clean_ip = ip_address.strip()
-    if clean_ip in PROTECTED_IPS or is_protected(clean_ip):
+    if clean_ip in get_sophos_protected_ips() or is_protected(clean_ip):
         logger.warning(f"Blocked attempt to quarantine protected IP {clean_ip}")
         return {"status": "protected", "reason": f"{clean_ip} is a protected infrastructure IP"}
 

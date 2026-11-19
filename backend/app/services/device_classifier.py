@@ -1,32 +1,41 @@
+from .mac_vendor import is_private_mac, resolve_mac_vendor
+
+
 def classify_device(
     hostname: str | None = None,
     vendor: str | None = None,
     mac_address: str | None = None,
+    network_interface: str | None = None,
+    medium: str | None = None,
+    current_type: str | None = None,
 ) -> str:
     """
-    Classify a network device using hostname, vendor,
-    and MAC address information.
+    Thoroughly classify a network device using vendor OUI, hostname,
+    MAC address, network medium, and existing classification context.
 
     Classification order:
-        1. Local machine
-        2. IP Phones / VoIP
-        3. Access Points / Wi-Fi
-        4. Servers / Infrastructure
-        5. CCTV / surveillance
-        6. Printer
-        7. Computer
-        8. Known MAC/OUI rule
-        9. Unknown
+        1. Explicit current classification preservation (phones, VoIP)
+        2. Hostname explicit phone identification
+        3. Local machine
+        4. IP Phones / VoIP Telephony
+        5. Mobile Phones / Smartphones (Transsion, Samsung, Apple iOS, Xiaomi, etc.)
+        6. Access Points / Wi-Fi & Network Infrastructure
+        7. Servers / Datacenter Infrastructure
+        8. CCTV / Surveillance
+        9. Printers
+        10. Computers / Laptops / Workstations
+        11. Private/Randomized MAC Fallback
+        12. Unknown
 
     Returns:
-        ip_phone
-        server
-        access_point
-        computer
-        cctv
-        printer
-        unknown
+        ip_phone, phone, server, access_point, computer, cctv, printer, unknown
     """
+
+    # If vendor is missing or generic, attempt full IEEE OUI resolution from MAC
+    if (not vendor or vendor.strip().lower() in ("generic", "lan device", "unknown", "")) and mac_address:
+        resolved = resolve_mac_vendor(mac_address)
+        if resolved:
+            vendor = resolved
 
     hostname_text = (hostname or "").lower().strip()
     vendor_text = (vendor or "").lower().strip()
@@ -35,21 +44,37 @@ def classify_device(
     text = f"{hostname_text} {vendor_text}"
 
     # ---------------------------------------------------------
-    # Local Machine
+    # 1. Respect Existing Explicit Phone Classification
     # ---------------------------------------------------------
+    if current_type and current_type.lower().strip() in ("ip_phone", "phone", "voip", "smartphone", "mobile"):
+        # Unless the vendor/hostname unambiguously proves it is a physical switch/server/printer
+        infra_clues = ("cisco switch", "poweredge", "proliant", "esxi", "laserjet", "hikvision")
+        if not any(clue in text for clue in infra_clues):
+            return "phone" if current_type.lower().strip() == "phone" else "ip_phone"
 
+    # ---------------------------------------------------------
+    # 2. Hostname Explicitly Identifies as Phone
+    # ---------------------------------------------------------
+    explicit_phone_host_prefixes = (
+        "phone-", "phone_", "iphone", "ipad", "android", "galaxy", "pixel",
+        "redmi", "tecno", "infinix", "oppo", "vivo", "oneplus", "realme"
+    )
+    if any(hostname_text.startswith(p) for p in explicit_phone_host_prefixes):
+        return "phone"
+
+    # ---------------------------------------------------------
+    # 3. Local Machine
+    # ---------------------------------------------------------
     local_machine_keywords = [
         "local machine",
         "localhost",
     ]
-
     if any(keyword in text for keyword in local_machine_keywords):
         return "computer"
 
     # ---------------------------------------------------------
-    # IP Phones / VoIP Telephony & Mobile Smartphones
+    # 4. IP Phones / VoIP Telephony Hardware (VLAN 10)
     # ---------------------------------------------------------
-
     phone_keywords = [
         "ip phone",
         "ipphone",
@@ -57,7 +82,8 @@ def classify_device(
         "sip phone",
         "telephone",
         "polycom",
-        "poly",
+        "poly inc",
+        "poly com",
         "yealink",
         "grandstream",
         "snom",
@@ -67,39 +93,91 @@ def classify_device(
         "mitel",
         "gigaset",
         "audiocodes",
+        "htek",
+        "digium",
+        "sangoma",
+        "algo communication",
+        "cyberdata",
+        "spectralink",
     ]
-
     if any(keyword in text for keyword in phone_keywords):
         return "ip_phone"
 
-    mobile_keywords = [
+    # Cisco IP Phones often have vendor 'Cisco Systems' with CP/SPA/79xx/88xx in model/hostname
+    if "cisco" in vendor_text and any(m in hostname_text for m in ("cp-", "spa", "7940", "7960", "8841", "8851", "8861", "6921")):
+        return "ip_phone"
+
+    # ---------------------------------------------------------
+    # 5. Mobile Phones / Smartphones (VLAN 10)
+    # ---------------------------------------------------------
+    mobile_vendors_and_keywords = [
         "phone",
         "smartphone",
         "mobile",
         "android",
         "iphone",
         "ipad",
+        "ipod",
         "galaxy",
         "samsung",
         "pixel",
         "xiaomi",
         "redmi",
+        "poco",
+        "transsion",
         "infinix",
         "tecno",
+        "itel",
         "oppo",
         "vivo",
         "oneplus",
         "realme",
+        "meizu",
+        "honor",
         "huawei mobile",
+        "motorola mobility",
+        "motorola",
+        "moto ",
+        "hmd global",
+        "zte",
+        "nubia",
+        "nothing technology",
+        "nothing phone",
+        "blackview",
+        "ulefone",
+        "doogee",
+        "oukitel",
+        "umidigi",
+        "sony mobile",
+        "xperia",
     ]
-
-    if any(keyword in text for keyword in mobile_keywords):
+    if any(keyword in text for keyword in mobile_vendors_and_keywords):
         return "phone"
 
-    # ---------------------------------------------------------
-    # Access Points / Wireless Infrastructure
-    # ---------------------------------------------------------
+    # Apple Devices Differentiation (iPhone/iPad vs Mac):
+    # If vendor is Apple, distinguish mobile devices from Mac desktops/laptops
+    if "apple" in vendor_text:
+        mac_pc_clues = ("macbook", "imac", "mac mini", "macmini", "mac pro", "macpro", "mac studio", "macos", "os x", "darwin")
+        if any(clue in hostname_text for clue in mac_pc_clues):
+            return "computer"
+        # Overwhelming majority of Apple endpoints on Wi-Fi are iPhones/iPads
+        return "phone"
 
+    # Locally Administered / Private Wi-Fi MACs used by modern iOS and Android smartphones
+    if is_private_mac(mac_text):
+        is_wireless = bool(
+            (medium and medium.lower() == "wireless")
+            or (network_interface and network_interface.startswith(("wlan", "wl")))
+            or "private wi-fi" in vendor_text
+            or not vendor_text
+            or vendor_text in ("lan device", "unknown")
+        )
+        if is_wireless:
+            return "phone"
+
+    # ---------------------------------------------------------
+    # 6. Access Points / Wireless & Network Infrastructure
+    # ---------------------------------------------------------
     ap_keywords = [
         "access point",
         "accesspoint",
@@ -126,14 +204,12 @@ def classify_device(
         "wap",
         "wireless ap",
     ]
-
     if any(keyword in text for keyword in ap_keywords):
         return "access_point"
 
     # ---------------------------------------------------------
-    # Servers / Datacenter Infrastructure
+    # 7. Servers / Datacenter Infrastructure
     # ---------------------------------------------------------
-
     server_keywords = [
         "server",
         "srv-",
@@ -160,18 +236,17 @@ def classify_device(
         "gateway",
         "cisco switch",
     ]
-
     if any(keyword in text for keyword in server_keywords):
         return "server"
 
     # ---------------------------------------------------------
-    # CCTV / Surveillance
+    # 8. CCTV / Surveillance
     # ---------------------------------------------------------
-
     cctv_keywords = [
         "hikvision",
         "dahua",
         "axis communications",
+        "axis ",
         "hanwha",
         "uniview",
         "camera",
@@ -182,14 +257,12 @@ def classify_device(
         "ipcam",
         "ip camera",
     ]
-
     if any(keyword in text for keyword in cctv_keywords):
         return "cctv"
 
     # ---------------------------------------------------------
-    # Printers
+    # 9. Printers
     # ---------------------------------------------------------
-
     printer_keywords = [
         "printer",
         "print",
@@ -207,14 +280,12 @@ def classify_device(
         "kyocera",
         "konica minolta",
     ]
-
     if any(keyword in text for keyword in printer_keywords):
         return "printer"
 
     # ---------------------------------------------------------
-    # Computers
+    # 10. Computers / Laptops / Workstations
     # ---------------------------------------------------------
-
     computer_keywords = [
         "windows",
         "microsoft",
@@ -232,9 +303,12 @@ def classify_device(
         "lenovo",
         "asus",
         "acer",
-        "apple",
         "macbook",
         "imac",
+        "mac mini",
+        "macmini",
+        "mac pro",
+        "macpro",
         "intel",
         "amd",
         "thinkpad",
@@ -244,47 +318,22 @@ def classify_device(
         "inspiron",
         "surface",
         "toshiba",
-        "sony",
+        "sony vaio",
     ]
-
     if any(keyword in text for keyword in computer_keywords):
         return "computer"
 
     # ---------------------------------------------------------
-    # Known MAC/OUI Rules
+    # 11. Known MAC/OUI Fallback
     # ---------------------------------------------------------
-    #
-    # Only verified OUI rules should be placed here.
-    #
-    # Simulated prefixes such as AA:BB:CC are intentionally
-    # excluded.
-    # ---------------------------------------------------------
-
     known_mac_prefixes = {
-        # Example:
-        # "XX:XX:XX": "computer",
+        # Verified explicit OUI mappings can be placed here if needed
     }
-
     mac_prefix = mac_text[:8]
-
     if mac_prefix in known_mac_prefixes:
         return known_mac_prefixes[mac_prefix]
 
     # ---------------------------------------------------------
-    # Smartphone Randomized / Private Wi-Fi MAC Detection
-    # In IEEE 802, bit 1 of octet 0 indicates Locally Administered Address (LAA).
-    # Modern iOS and Android smartphones default to Private Wi-Fi MACs.
+    # 12. Unknown
     # ---------------------------------------------------------
-    if len(mac_text) == 17 and ":" in mac_text:
-        try:
-            first_byte = int(mac_text.split(":")[0], 16)
-            if (first_byte & 0x02) != 0:
-                return "phone"
-        except Exception:
-            pass
-
-    # ---------------------------------------------------------
-    # Unknown
-    # ---------------------------------------------------------
-
     return "unknown"

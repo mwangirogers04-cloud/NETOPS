@@ -13,7 +13,7 @@ from ..models.device import Device
 from ..models.event import Event
 from .event_service import create_event
 from .device_classifier import classify_device
-from .l2_quarantine import quarantine_device_l2, PROTECTED_IPS, _is_cloud_host
+from .l2_quarantine import quarantine_device_l2, PROTECTED_IPS, _is_cloud_host, is_valid_quarantine_ip
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +92,7 @@ def process_sniffed_packet(data: bytes, iface: str) -> None:
             arp_payload = data[14:42]
             spa = arp_payload[14:18]
             cand_ip = socket.inet_ntoa(spa)
-            if cand_ip != "0.0.0.0" and cand_ip.startswith("192.168.0."):
+            if cand_ip != "0.0.0.0" and is_valid_quarantine_ip(cand_ip):
                 src_ip = cand_ip
         except Exception:
             pass
@@ -102,7 +102,7 @@ def process_sniffed_packet(data: bytes, iface: str) -> None:
         try:
             ip_header = data[14:34]
             cand_ip = socket.inet_ntoa(ip_header[12:16])
-            if cand_ip != "0.0.0.0" and cand_ip.startswith("192.168.0."):
+            if cand_ip != "0.0.0.0" and is_valid_quarantine_ip(cand_ip):
                 src_ip = cand_ip
 
             # Check if this is a DHCP Discover/Request (UDP port 67/68)

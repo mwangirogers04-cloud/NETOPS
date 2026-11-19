@@ -1,4 +1,5 @@
 import glob
+import ipaddress
 import logging
 import os
 import socket
@@ -8,6 +9,22 @@ import threading
 import time
 
 logger = logging.getLogger(__name__)
+
+def is_valid_quarantine_ip(ip_address: str | None) -> bool:
+    """Return True if an IP is a valid private IPv4 host eligible for local network quarantine."""
+    if not ip_address:
+        return False
+    try:
+        obj = ipaddress.ip_address(ip_address.strip())
+        return (
+            obj.version == 4
+            and obj.is_private
+            and not obj.is_loopback
+            and not obj.is_unspecified
+            and not obj.is_link_local
+        )
+    except Exception:
+        return False
 
 STATIC_PROTECTED_IPS = {
     "127.0.0.1",
@@ -342,24 +359,18 @@ def _get_active_gateways() -> list[dict]:
     except Exception:
         pass
 
-    # Deduplicate gateways by gw_ip to prevent cross-interface ARP storms.
-    # Discard any gateway interface that has no carrier / link down.
-    deduped: dict[str, dict] = {}
+    # Keep all active interfaces with operational link carrier (both eth0 and wlan0)
+    valid_gateways: list[dict] = []
+    seen_ifaces: set[str] = set()
     for gw in gateways:
-        gw_ip = gw["gw_ip"]
         iface = gw["interface"]
         if not _is_interface_carrier_up(iface):
             continue
-        if gw_ip not in deduped:
-            deduped[gw_ip] = gw
-        else:
-            curr_iface = deduped[gw_ip]["interface"]
-            if not _is_interface_carrier_up(curr_iface):
-                deduped[gw_ip] = gw
-            elif iface.startswith("eth") or iface.startswith("en"):
-                deduped[gw_ip] = gw
+        if iface not in seen_ifaces:
+            seen_ifaces.add(iface)
+            valid_gateways.append(gw)
 
-    return list(deduped.values()) or gateways
+    return valid_gateways or gateways
 
 
 def _run_iptables(args: list[str]) -> bool:
@@ -411,7 +422,7 @@ def ensure_iptables_quarantine_chain() -> None:
                         parts = line.split()
                         if len(parts) >= 4 and parts[0] in ("REJECT", "DROP"):
                             src = parts[3]
-                            if src.startswith("192.168.0."):
+                            if is_valid_quarantine_ip(src):
                                 _currently_blocked_ips.add(src)
                     break
             except Exception:
@@ -692,7 +703,7 @@ def quarantine_device_l2(
 
     clean_ip = ip_address.strip()
     clean_mac = mac_address.strip().upper()
-    if is_protected(clean_ip, clean_mac) or not clean_ip.startswith("192.168.0."):
+    if is_protected(clean_ip, clean_mac) or not is_valid_quarantine_ip(clean_ip):
         logger.info(f"[IMMUNE] Skipping L2 quarantine for protected/external device: {clean_ip} ({clean_mac})")
         return False
 

@@ -270,6 +270,46 @@ class CiscoSwitchDriver(BaseSwitchDriver):
             res["message"] += f" (Live switch {params['host']} unreachable, staged in platform configuration)"
             return res
 
+    def set_port_admin_state(
+        self,
+        port_name: str,
+        enabled: bool = True,
+    ) -> dict[str, Any]:
+        params = self._get_connection_params()
+        clean_port = port_name.strip()
+
+        if not check_switch_reachability(params["host"], params["port"]):
+            res = self.fallback.set_port_admin_state(clean_port, enabled)
+            res["message"] += f" (Live switch {params['host']} unreachable, staged in platform configuration)"
+            return res
+
+        admin_cmd = "no shutdown" if enabled else "shutdown"
+        commands = [
+            f"interface {clean_port}",
+            f" {admin_cmd}",
+            "end",
+            "write memory",
+        ]
+        try:
+            with ConnectHandler(**params) as conn:
+                conn.enable()
+                output = conn.send_config_set(commands[:-2])
+                conn.send_command("write memory", read_timeout=15)
+                self.fallback.set_port_admin_state(clean_port, enabled)
+                return {
+                    "success": True,
+                    "port": clean_port,
+                    "admin_state": "up" if enabled else "down",
+                    "message": f"Port {clean_port} administratively {'enabled' if enabled else 'disabled'} on Cisco switch {params['host']}.",
+                    "commands_applied": commands,
+                    "cli_output": output,
+                }
+        except Exception as exc:
+            logger.warning("Cisco live port admin state error (%s). Staging in simulator.", exc)
+            res = self.fallback.set_port_admin_state(clean_port, enabled)
+            res["message"] += f" (Live switch {params['host']} unreachable, staged in platform configuration)"
+            return res
+
     def _parse_vlan_brief(self, output: str) -> list[dict[str, Any]]:
         vlans = []
         for line in output.splitlines():

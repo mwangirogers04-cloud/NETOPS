@@ -4,6 +4,7 @@ from .endpoint_update import EndpointUpdate
 from .event import Event
 from .firewall_config import FirewallConfig
 from .patch_job import PatchJob, UpdatePolicy
+from .router_config import RouterConfig
 from .switch_config import SwitchConfig
 from .switch_backup import SwitchBackup
 from .device_vulnerability import DeviceVulnerability
@@ -19,6 +20,7 @@ __all__ = [
     "FirewallConfig",
     "PatchJob",
     "UpdatePolicy",
+    "RouterConfig",
     "SwitchConfig",
     "SwitchBackup",
     "User",

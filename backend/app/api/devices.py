@@ -1,12 +1,14 @@
+import ipaddress
 import subprocess
 import threading
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
+from ..services.discovery import detect_local_subnets
 from ..models.device import Device
 from ..models.device_vulnerability import DeviceVulnerability
 from ..models.endpoint_update import EndpointUpdate
@@ -35,10 +37,11 @@ from ..services.access_policy import (
 )
 from ..services.network_enforcement import enforce_device_access
 from ..services.vlan_automation import automate_vlan_assignment
+from ..services.device_classifier import classify_device
 from ..services.event_service import create_event
 from ..services.auth_service import get_optional_current_user, require_admin, require_super_admin
 from ..services.firewall.manager import get_active_firewall_driver
-from ..services.l2_quarantine import quarantine_device_l2, add_iptables_quarantine_ip, is_protected
+from ..services.l2_quarantine import quarantine_device_l2, restore_device_l2, add_iptables_quarantine_ip, is_protected
 from ..services.endpoint_health_monitor import suppress_mac_from_auto_registration
 from ..services.sophos_enforcement import is_sophos_configured, sophos_block_device
 from ..services.device_troubleshooter import run_device_diagnostics, apply_diagnostic_fix
@@ -88,16 +91,7 @@ def add_access_information(device: Device):
     else:
         device.access_decision = "quarantine"
 
-    # Once a device is disconnected, rejected, isolated, or quarantined from internet, its status indicates offline
-    if (
-        device.access_decision != "allowed"
-        or device.enforcement_status != "allowed"
-        or not getattr(device, "internet_access_authorized", False)
-        or getattr(device, "vlan_id", None) == 90
-        or getattr(device, "approval_status", None) in ("pending", "rejected")
-        or getattr(device, "status", None) in ("offline", "disconnected")
-    ):
-        device.status = "offline"
+    # Physical connection status (online/offline) is preserved from physical detection
 
     # Explain the actual access state, not just approval eligibility.
     reason = get_access_reason(
@@ -239,6 +233,7 @@ def attach_update_information(devices: list[Device], db: Session):
 def get_devices(
     scope: str | None = None,
     network_name: str | None = None,
+    subnet: str | None = None,
     current_user: User | None = Depends(get_optional_current_user),
     db: Session = Depends(get_db),
 ):
@@ -264,8 +259,8 @@ def get_devices(
         # Strict per-user network isolation for standard users
         query = query.where(Device.owner_id == current_user.id)
 
-    if network_name and network_name.strip() and network_name.strip().lower() != "all":
-        clean_net = network_name.strip().lower()
+    clean_net = (network_name or "").strip().lower()
+    if clean_net and clean_net not in ("all", "current"):
         if clean_net == "home network":
             query = query.where(
                 or_(
@@ -277,6 +272,34 @@ def get_devices(
             query = query.where(func.lower(Device.network_name) == clean_net)
 
     devices = list(db.scalars(query).all())
+
+    # If network_name is 'current' or specific subnet requested, filter strictly by IP subnet
+    if clean_net == "current" or subnet:
+        subnets_to_match = []
+        if subnet and "/" in subnet:
+            try:
+                subnets_to_match.append(ipaddress.ip_network(subnet.strip(), strict=False))
+            except Exception:
+                pass
+        if clean_net == "current":
+            try:
+                subnets_info = detect_local_subnets()
+                for if_info in subnets_info.get("interfaces", []):
+                    if not if_info.get("is_virtual") and if_info.get("network"):
+                        subnets_to_match.append(ipaddress.ip_network(if_info["network"], strict=False))
+            except Exception:
+                pass
+
+        if subnets_to_match:
+            def _in_any_subnet(ip_str: str | None) -> bool:
+                if not ip_str:
+                    return False
+                try:
+                    ip_obj = ipaddress.ip_address(ip_str)
+                    return any(ip_obj in s for s in subnets_to_match)
+                except Exception:
+                    return False
+            devices = [d for d in devices if _in_any_subnet(d.ip_address)]
 
     attach_update_information(devices, db)
 
@@ -614,9 +637,20 @@ def allow_device(
     # --------------------------------------------------------
     target_vlan = get_vlan_for_device_type(device.device_type)
     if not target_vlan or target_vlan == 90:
-        target_vlan = 20
-        if not device.device_type or device.device_type == "unknown":
-            device.device_type = "computer"
+        detected = classify_device(
+            hostname=device.hostname,
+            vendor=device.vendor,
+            mac_address=device.mac_address,
+            network_interface=getattr(device, "network_interface", None),
+            current_type=device.device_type,
+        )
+        if detected != "unknown":
+            device.device_type = detected
+            target_vlan = get_vlan_for_device_type(detected)
+        else:
+            target_vlan = 20
+            if not device.device_type or device.device_type == "unknown":
+                device.device_type = "computer"
     device.vlan_id = target_vlan
 
     # --------------------------------------------------------
@@ -637,10 +671,9 @@ def allow_device(
     if device.ip_address:
         try:
             dev_iface = getattr(device, "network_interface", None)
-            quarantine_device_l2(
+            restore_device_l2(
                 device.ip_address,
                 device.mac_address,
-                burst=5,
                 interface=dev_iface if isinstance(dev_iface, str) else None,
             )
         except Exception:
@@ -795,7 +828,7 @@ def set_device_type(
         .strip()
     )
 
-    if new_type in ("phone", "voip", "ipphone"):
+    if new_type in ("phone", "voip", "ipphone", "smartphone", "mobile"):
         new_type = "ip_phone"
     elif new_type in ("ap", "wap", "wifi_ap", "accesspoint"):
         new_type = "access_point"
@@ -804,6 +837,7 @@ def set_device_type(
 
     allowed_types = {
         "ip_phone",
+        "phone",
         "computer",
         "cctv",
         "printer",
@@ -847,7 +881,11 @@ def set_device_type(
     # Keep TYPE and VLAN section identical: auto-align device_type to the matching VLAN
     canonical_type = get_device_type_for_vlan(new_vlan)
     if canonical_type != "unknown":
-        device.device_type = canonical_type
+        if new_vlan == 10:
+            if device.device_type not in ("phone", "ip_phone", "voip"):
+                device.device_type = "ip_phone"
+        else:
+            device.device_type = canonical_type
 
     device.classification_status = "reviewed"
 
@@ -998,10 +1036,17 @@ def automate_all_devices_vlan(
         res = automate_vlan_assignment(device, db)
         if device.approval_status != "approved":
             device.approval_status = "approved"
-        device.internet_access_authorized = False
-        if device.enforcement_status != "isolated":
-            device.enforcement_status = "quarantined"
-        device.status = "offline"
+
+        # Preserve internet authorization: Auto VLAN must NOT revoke access for already authorized devices.
+        if not device.internet_access_authorized:
+            device.internet_access_authorized = False
+            if device.enforcement_status != "isolated":
+                device.enforcement_status = "quarantined"
+            device.status = "offline"
+        else:
+            if device.enforcement_status != "isolated":
+                device.enforcement_status = "allowed"
+
         enforce_device_access(device, db, force=True)
         add_access_information(device)
         updated.append({
@@ -1042,15 +1087,19 @@ def automate_device_vlan(
         db,
     )
 
-    # Auto VLAN assigns the VLAN based on classification criteria, but must NOT grant internet access.
-    # Internet access must be explicitly authorized via the "Allow Internet" action.
+    # Auto VLAN assigns the VLAN based on classification criteria, but must NOT grant internet access if unauthorized.
+    # Preserve existing internet access authorization if already granted.
     if device.approval_status != "approved":
         device.approval_status = "approved"
 
-    device.internet_access_authorized = False
-    if device.enforcement_status != "isolated":
-        device.enforcement_status = "quarantined"
-    device.status = "offline"
+    if not device.internet_access_authorized:
+        device.internet_access_authorized = False
+        if device.enforcement_status != "isolated":
+            device.enforcement_status = "quarantined"
+        device.status = "offline"
+    else:
+        if device.enforcement_status != "isolated":
+            device.enforcement_status = "allowed"
 
     enforce_device_access(
         device,
@@ -1063,7 +1112,7 @@ def automate_device_vlan(
 
     add_access_information(device)
 
-    result["internet_access_authorized"] = False
+    result["internet_access_authorized"] = device.internet_access_authorized
     result["enforcement_status"] = device.enforcement_status
     result["status"] = device.status
 
@@ -1106,7 +1155,11 @@ def set_device_vlan(
     # Keep TYPE and VLAN section identical: auto-align device_type to the matching VLAN
     canonical_type = get_device_type_for_vlan(new_vlan)
     if canonical_type != "unknown":
-        device.device_type = canonical_type
+        if new_vlan == 10:
+            if device.device_type not in ("phone", "ip_phone", "voip"):
+                device.device_type = "ip_phone"
+        else:
+            device.device_type = canonical_type
 
     # If moving to Quarantine VLAN 90, automatically disconnect internet access immediately
     if new_vlan == 90:
@@ -1320,9 +1373,20 @@ def unisolate_device(
     if device.approval_status == "approved":
         target_vlan = get_vlan_for_device_type(device.device_type)
         if not target_vlan or target_vlan == 90:
-            target_vlan = 20
-            if not device.device_type or device.device_type == "unknown":
-                device.device_type = "computer"
+            detected = classify_device(
+                hostname=device.hostname,
+                vendor=device.vendor,
+                mac_address=device.mac_address,
+                network_interface=getattr(device, "network_interface", None),
+                current_type=device.device_type,
+            )
+            if detected != "unknown":
+                device.device_type = detected
+                target_vlan = get_vlan_for_device_type(detected)
+            else:
+                target_vlan = 20
+                if not device.device_type or device.device_type == "unknown":
+                    device.device_type = "computer"
         device.vlan_id = target_vlan
     else:
         device.vlan_id = 90

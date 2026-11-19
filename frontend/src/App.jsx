@@ -342,6 +342,7 @@ function App() {
   const [newDeviceAlert, setNewDeviceAlert] = useState(null);
   const [highlightedDeviceId, setHighlightedDeviceId] =
     useState(null);
+  const highlightTimeoutRef = useRef(null);
   const [automationResult, setAutomationResult] = useState(null);
   const [accessSchedules, setAccessSchedules] = useState({});
   const [scheduleLoading, setScheduleLoading] = useState(null);
@@ -397,9 +398,9 @@ function App() {
       if (saved && saved !== "Remote Network") {
         return saved;
       }
-      return "all";
+      return "current";
     } catch {
-      return "all";
+      return "current";
     }
   });
 
@@ -492,13 +493,7 @@ function App() {
       const response = await fetch(`${API_URL}/discovery/local-subnets`);
       if (response.ok) {
         const data = await response.json();
-        let savedSubnet = null;
-        try {
-          savedSubnet = localStorage.getItem("netops_custom_subnet");
-        } catch {
-          // ignore
-        }
-        if (!savedSubnet && data.default_network) {
+        if (data.default_network) {
           setDetectedSubnet(data.default_network);
         }
         if (Array.isArray(data.interfaces)) {
@@ -558,6 +553,9 @@ function App() {
       }
       const data = await response.json();
       setLanDevicesResult(data);
+      if (data.status === "unreachable_network") {
+        setShowProbeModal(true);
+      }
       await loadDevices();
       await loadEvents();
       await loadAccessSchedules();
@@ -949,14 +947,67 @@ function App() {
     return fields.some((f) => (f || "").toString().toLowerCase().includes(q));
   };
 
+  const isDeviceOnWlan = (device) => {
+    const iface = (device.network_interface || "").toLowerCase();
+    if (iface) {
+      return iface === "wlan0" || iface.startsWith("wl");
+    }
+    return device.medium === "wireless";
+  };
+
+  const isDeviceOnEth0 = (device) => {
+    const iface = (device.network_interface || "").toLowerCase();
+    if (iface) {
+      return iface === "eth0" || iface === "lan" || iface.startsWith("eth");
+    }
+    return device.medium === "wired" || device.medium === "ethernet";
+  };
+
   const matchesSelectedInterface = (device) => {
     if (!selectedInterface || selectedInterface === "all") return true;
-    const devIface = (device.network_interface || "").toLowerCase();
-    return devIface === selectedInterface.toLowerCase();
+    if (selectedInterface === "lan" || selectedInterface === "eth0" || selectedInterface === "wired") {
+      return isDeviceOnEth0(device);
+    }
+    if (selectedInterface === "wlan0" || selectedInterface === "wireless" || selectedInterface === "wifi") {
+      return isDeviceOnWlan(device);
+    }
+    const iface = (device.network_interface || "").toLowerCase();
+    return iface === selectedInterface.toLowerCase();
+  };
+
+  const isIpInCidr = (ip, cidr) => {
+    if (!ip || !cidr || !cidr.includes("/")) return false;
+    try {
+      const [subIp, bitsStr] = cidr.split("/");
+      const bits = parseInt(bitsStr, 10);
+      if (isNaN(bits) || bits < 0 || bits > 32) return false;
+      const ipToInt = (addr) =>
+        addr.split(".").reduce((acc, oct) => (acc << 8) + parseInt(oct, 10), 0) >>> 0;
+      const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
+      return (ipToInt(ip) & mask) === (ipToInt(subIp) & mask);
+    } catch {
+      return false;
+    }
   };
 
   const matchesSelectedNetwork = (device) => {
     if (!selectedNetwork || selectedNetwork === "all") return true;
+
+    if (selectedNetwork === "current") {
+      // Strictly match devices belonging to the currently connected network subnet
+      if (detectedSubnet && device.ip_address) {
+        if (isIpInCidr(device.ip_address, detectedSubnet)) return true;
+      }
+      if (Array.isArray(detectedInterfaces) && detectedInterfaces.length > 0 && device.ip_address) {
+        for (const iface of detectedInterfaces) {
+          if (!iface.is_virtual && iface.network) {
+            if (isIpInCidr(device.ip_address, iface.network)) return true;
+          }
+        }
+      }
+      return false;
+    }
+
     const devNet = (device.network_name || "Home Network").toLowerCase();
     const selNet = selectedNetwork.toLowerCase();
     if (selNet === "home network") {
@@ -966,6 +1017,10 @@ function App() {
   };
 
   const siteScopedDevices = devices.filter(matchesSelectedNetwork);
+
+  const lanScopedCount = siteScopedDevices.filter(isDeviceOnEth0).length;
+
+  const wlanScopedCount = siteScopedDevices.filter(isDeviceOnWlan).length;
 
   const scopedDevices = (selectedInterface && selectedInterface !== "all")
     ? siteScopedDevices.filter(matchesSelectedInterface).slice().sort((a, b) => compareIpAddresses(a.ip_address, b.ip_address))
@@ -998,6 +1053,9 @@ function App() {
       }
       if (net && net !== "all") {
         params.set("network_name", net);
+      }
+      if (net === "current" && detectedSubnet) {
+        params.set("subnet", detectedSubnet);
       }
       const response = await fetch(`${API_URL}/devices/?${params.toString()}`, {
         headers: getAuthHeaders(),
@@ -1365,8 +1423,58 @@ const loadEvents = async () => {
         if (row) row.scrollIntoView({ behavior: "smooth", block: "center" });
       }, delay)
     );
-    setTimeout(() => setHighlightedDeviceId(null), 15000);
+    setTimeout(() => setHighlightedDeviceId(null), 8000);
   };
+
+  const viewDeviceInInventory = (deviceId) => {
+    if (!deviceId) return;
+    if (highlightTimeoutRef.current) {
+      clearTimeout(highlightTimeoutRef.current);
+    }
+    setHighlightedDeviceId(deviceId);
+    setDeviceFilter("all");
+    setActivePage("devices");
+
+    [150, 400, 800].forEach((delay) =>
+      setTimeout(() => {
+        const row = document.getElementById(`device-row-${deviceId}`);
+        if (row) {
+          row.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+      }, delay)
+    );
+
+    highlightTimeoutRef.current = setTimeout(() => {
+      setHighlightedDeviceId(null);
+    }, 6000);
+  };
+
+  useEffect(() => {
+    if (!highlightedDeviceId) return;
+    if (highlightTimeoutRef.current) {
+      clearTimeout(highlightTimeoutRef.current);
+    }
+    // Highlight auto-expires after 6 seconds so it never lingers indefinitely
+    highlightTimeoutRef.current = setTimeout(() => {
+      setHighlightedDeviceId(null);
+    }, 6000);
+
+    return () => {
+      if (highlightTimeoutRef.current) {
+        clearTimeout(highlightTimeoutRef.current);
+      }
+    };
+  }, [highlightedDeviceId]);
+
+  useEffect(() => {
+    // When navigating away from inventory views, end any active highlight
+    if (activePage !== "devices" && activePage !== "lan-scanner") {
+      if (highlightTimeoutRef.current) {
+        clearTimeout(highlightTimeoutRef.current);
+      }
+      setHighlightedDeviceId(null);
+    }
+  }, [activePage]);
 
   const handleIncomingLanEvent = async (rawPayload) => {
     if (!rawPayload || rawPayload.type === "connection") return;
@@ -1743,8 +1851,13 @@ const loadEvents = async () => {
 
     if (action === "approve" || action === "reject") {
       setNewDeviceAlert((cur) => (cur && cur.device_id === deviceId ? null : cur));
-      setHighlightedDeviceId(null);
     }
+
+    // Dismiss active device highlight as soon as the user completes any action on the device
+    if (highlightTimeoutRef.current) {
+      clearTimeout(highlightTimeoutRef.current);
+    }
+    setHighlightedDeviceId(null);
 
     if (action === "delete") {
       setNewDeviceAlert((cur) => (cur && cur.device_id === deviceId ? null : cur));
@@ -2463,7 +2576,7 @@ const DevicesPage = () => {
         </div>
       )}
 
-      {/* NETWORK INTERFACE SELECTOR & SCAN BAR FOR INVENTORY */}
+      {/* NETWORK INTERFACE FILTER TABS (VIEW ETH0 VS WLAN0) */}
       <div className="panel" style={{ background: "linear-gradient(180deg, #f8fafc 0%, #ffffff 100%)", borderColor: "#334155", marginBottom: "16px", padding: "14px 18px" }}>
         <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", gap: "14px" }}>
           <div>
@@ -2475,149 +2588,161 @@ const DevicesPage = () => {
                 type="button"
                 onClick={() => setSelectedInterface("all")}
                 style={{
-                  padding: "6px 12px",
-                  borderRadius: "6px",
-                  fontSize: "12px",
-                  fontWeight: "600",
-                  background: selectedInterface === "all" ? "rgba(59, 130, 246, 0.25)" : "#f8fafc",
-                  border: selectedInterface === "all" ? "1px solid #3b82f6" : "1px solid #cbd5e1",
-                  color: selectedInterface === "all" ? "#60a5fa" : "#475569",
+                  padding: "8px 16px",
+                  borderRadius: "8px",
+                  fontSize: "13px",
+                  fontWeight: "700",
+                  background: selectedInterface === "all" ? "#2563eb" : "#f8fafc",
+                  border: selectedInterface === "all" ? "1.5px solid #1d4ed8" : "1px solid #cbd5e1",
+                  color: selectedInterface === "all" ? "#ffffff" : "#334155",
                   cursor: "pointer",
                   display: "inline-flex",
                   alignItems: "center",
-                  gap: "6px",
+                  gap: "7px",
+                  boxShadow: selectedInterface === "all" ? "0 2px 6px rgba(37, 99, 235, 0.3)" : "none",
+                  transition: "all 0.15s ease-in-out",
                 }}
+                title="View all connected devices across all network interfaces"
               >
-                <span>🌐</span> All Interfaces ({devices.length})
+                <span>🌐</span> All Devices ({siteScopedDevices.length})
               </button>
 
-              {detectedInterfaces.filter((i) => !i.is_virtual).map((iface) => {
-                const isSelected = selectedInterface === iface.interface;
-                const isWireless = Boolean(iface.is_wireless || iface.interface?.startsWith("wlan") || iface.interface?.startsWith("wl"));
-                const count = devices.filter((d) => (d.network_interface || "eth0") === iface.interface).length;
-                return (
-                  <button
-                    key={`inv-iface-${iface.interface}`}
-                    type="button"
-                    onClick={() => {
-                      setSelectedInterface(iface.interface);
-                    }}
-                    style={{
-                      padding: "6px 12px",
-                      borderRadius: "6px",
-                      fontSize: "12px",
-                      fontWeight: "700",
-                      background: isSelected ? "rgba(59, 130, 246, 0.25)" : "#f8fafc",
-                      border: isSelected ? "1px solid #3b82f6" : "1px solid #cbd5e1",
-                      color: isSelected ? "#60a5fa" : "#334155",
-                      cursor: "pointer",
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "6px",
-                    }}
-                  >
-                    <span>{isWireless ? "📶" : "🔌"}</span>
-                    {isWireless ? `WLAN0 Wi-Fi (${iface.interface} • ${iface.ip})` : `LAN Wired (${iface.interface} • ${iface.ip})`} ({count})
-                  </button>
-                );
-              })}
-            </div>
-
-            <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", marginTop: "12px" }}>
-              <span style={{ fontSize: "11px", fontWeight: "700", color: "#334155", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                🎯 Target Subnet Range:
-              </span>
-              <input
-                type="text"
-                value={detectedSubnet}
-                onChange={(e) => updateCustomSubnet(e.target.value)}
-                placeholder="e.g. 192.168.0.0/24 or 192.168.1.0/24"
+              <button
+                type="button"
+                onClick={() => setSelectedInterface("eth0")}
                 style={{
-                  padding: "5px 12px",
-                  fontSize: "12.5px",
-                  fontFamily: "monospace",
+                  padding: "8px 16px",
+                  borderRadius: "8px",
+                  fontSize: "13px",
                   fontWeight: "700",
-                  borderRadius: "6px",
-                  border: "1.5px solid #2563eb",
-                  background: "#eff6ff",
-                  color: "#1e3a8a",
-                  width: "165px",
+                  background: (selectedInterface === "eth0" || selectedInterface === "lan") ? "#1e293b" : "#f8fafc",
+                  border: (selectedInterface === "eth0" || selectedInterface === "lan") ? "1.5px solid #0f172a" : "1.5px solid #cbd5e1",
+                  color: (selectedInterface === "eth0" || selectedInterface === "lan") ? "#ffffff" : "#334155",
+                  cursor: "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "7px",
+                  boxShadow: (selectedInterface === "eth0" || selectedInterface === "lan") ? "0 2px 6px rgba(15, 23, 42, 0.3)" : "none",
+                  transition: "all 0.15s ease-in-out",
                 }}
-                title="Input any custom network range of your choice (e.g. 192.168.0.0/24, 192.168.1.0/24, 10.0.0.0/24)"
-              />
-              <div style={{ display: "inline-flex", gap: "4px", flexWrap: "wrap", alignItems: "center" }}>
-                <span style={{ fontSize: "10px", color: "#64748b", fontWeight: "600" }}>Presets:</span>
-                {["192.168.0.0/24", "192.168.1.0/24", "10.0.0.0/24", "172.16.0.0/24"].map((preset) => (
-                  <button
-                    key={`inv-preset-${preset}`}
-                    type="button"
-                    onClick={() => updateCustomSubnet(preset)}
-                    style={{
-                      padding: "3px 8px",
-                      fontSize: "11px",
-                      borderRadius: "4px",
-                      border: detectedSubnet === preset ? "1.5px solid #2563eb" : "1px solid #cbd5e1",
-                      background: detectedSubnet === preset ? "#2563eb" : "#ffffff",
-                      color: detectedSubnet === preset ? "#ffffff" : "#475569",
-                      fontWeight: detectedSubnet === preset ? "700" : "500",
-                      cursor: "pointer",
-                      fontFamily: "monospace",
-                    }}
-                    title={`Click to set target network to ${preset}`}
-                  >
-                    {preset}
-                  </button>
-                ))}
-              </div>
+                title="Filter to view all Wired LAN (eth0) connected devices"
+              >
+                <span>🔌</span> Wired LAN (eth0) ({lanScopedCount})
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSelectedInterface("wlan0")}
+                style={{
+                  padding: "8px 16px",
+                  borderRadius: "8px",
+                  fontSize: "13px",
+                  fontWeight: "700",
+                  background: (selectedInterface === "wlan0" || selectedInterface === "wireless") ? "#059669" : "#f8fafc",
+                  border: (selectedInterface === "wlan0" || selectedInterface === "wireless") ? "1.5px solid #047857" : "1.5px solid #cbd5e1",
+                  color: (selectedInterface === "wlan0" || selectedInterface === "wireless") ? "#ffffff" : "#334155",
+                  cursor: "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "7px",
+                  boxShadow: (selectedInterface === "wlan0" || selectedInterface === "wireless") ? "0 2px 6px rgba(5, 150, 105, 0.3)" : "none",
+                  transition: "all 0.15s ease-in-out",
+                }}
+                title="Filter to view all Wi-Fi (wlan0) connected devices"
+              >
+                <span>📶</span> Wi-Fi (wlan0) ({wlanScopedCount})
+              </button>
+
+              {detectedInterfaces
+                .filter((i) => !i.is_virtual && i.interface !== "eth0" && i.interface !== "wlan0")
+                .map((iface) => {
+                  const isSelected = selectedInterface === iface.interface;
+                  const count = siteScopedDevices.filter(
+                    (d) => (d.network_interface || "").toLowerCase() === iface.interface.toLowerCase()
+                  ).length;
+                  return (
+                    <button
+                      key={`inv-iface-${iface.interface}`}
+                      type="button"
+                      onClick={() => setSelectedInterface(iface.interface)}
+                      style={{
+                        padding: "8px 16px",
+                        borderRadius: "8px",
+                        fontSize: "13px",
+                        fontWeight: "700",
+                        background: isSelected ? "#475569" : "#f8fafc",
+                        border: isSelected ? "1.5px solid #334155" : "1.5px solid #cbd5e1",
+                        color: isSelected ? "#ffffff" : "#334155",
+                        cursor: "pointer",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "7px",
+                      }}
+                    >
+                      <span>🔌</span> {iface.label || iface.interface} ({count})
+                    </button>
+                  );
+                })}
             </div>
           </div>
 
-          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
-            <button
-              className="primary-button"
-              type="button"
-              onClick={() => {
-                setSelectedInterface("all");
-                scanAllLanDevices(detectedSubnet, "all");
-              }}
-              disabled={lanDevicesScanning}
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+            <div
               style={{
-                fontWeight: "700",
-                background: selectedInterface === "all" ? "#2563eb" : "#1e40af",
+                fontSize: "12.5px",
+                padding: "6px 12px",
+                borderRadius: "6px",
+                background: (selectedInterface === "eth0" || selectedInterface === "lan")
+                  ? "#f1f5f9"
+                  : (selectedInterface === "wlan0" || selectedInterface === "wireless")
+                  ? "#ecfdf5"
+                  : "#eff6ff",
+                border: (selectedInterface === "eth0" || selectedInterface === "lan")
+                  ? "1px solid #cbd5e1"
+                  : (selectedInterface === "wlan0" || selectedInterface === "wireless")
+                  ? "1px solid #a7f3d0"
+                  : "1px solid #bfdbfe",
+                color: (selectedInterface === "eth0" || selectedInterface === "lan")
+                  ? "#1e293b"
+                  : (selectedInterface === "wlan0" || selectedInterface === "wireless")
+                  ? "#065f46"
+                  : "#1e40af",
+                fontWeight: "600",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
               }}
             >
-              {lanDevicesScanning && selectedInterface === "all" ? "🔄 Scanning All Interfaces..." : "🌐 Scan All Active Interfaces"}
-            </button>
-            <button
-              className="primary-button"
-              type="button"
-              onClick={() => {
-                setSelectedInterface("wlan0");
-                scanAllLanDevices(detectedSubnet, "wlan0");
-              }}
-              disabled={lanDevicesScanning}
-              style={{
-                fontWeight: "700",
-                background: "#059669",
-                borderColor: "#10b981",
-              }}
-            >
-              {lanDevicesScanning && selectedInterface === "wlan0" ? "🔄 Scanning Wi-Fi (wlan0)..." : "📶 Scan Wi-Fi (wlan0)"}
-            </button>
-            <button
-              className="secondary-button"
-              type="button"
-              onClick={() => {
-                setSelectedInterface("eth0");
-                scanAllLanDevices(detectedSubnet, "eth0");
-              }}
-              disabled={lanDevicesScanning}
-              style={{
-                fontWeight: "700",
-              }}
-            >
-              {lanDevicesScanning && selectedInterface === "eth0" ? "🔄 Scanning eth0..." : "🔌 Scan Wired (eth0)"}
-            </button>
+              <span>
+                {(selectedInterface === "eth0" || selectedInterface === "lan")
+                  ? "🔌"
+                  : (selectedInterface === "wlan0" || selectedInterface === "wireless")
+                  ? "📶"
+                  : "🌐"}
+              </span>
+              <span>
+                {selectedInterface === "all"
+                  ? `Showing all ${siteScopedDevices.length} devices across all interfaces`
+                  : `Showing ${scopedDevices.length} of ${siteScopedDevices.length} devices on ${
+                      (selectedInterface === "eth0" || selectedInterface === "lan")
+                        ? "Wired LAN (eth0)"
+                        : (selectedInterface === "wlan0" || selectedInterface === "wireless")
+                        ? "Wi-Fi (wlan0)"
+                        : selectedInterface
+                    }`}
+              </span>
+            </div>
+
+            {selectedInterface !== "all" && (
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => setSelectedInterface("all")}
+                style={{ fontSize: "12px", padding: "6px 12px", fontWeight: "600" }}
+              >
+                ✕ Show All Devices
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -3392,7 +3517,21 @@ const DevicesPage = () => {
                         <React.Fragment key={device.id}>
                           <tr
                             id={`device-row-${device.id}`}
-                            style={highlightedDeviceId === device.id ? { background: "rgba(59, 130, 246, 0.18)", outline: "2px solid #3b82f6" } : {}}
+                            style={
+                              highlightedDeviceId === device.id
+                                ? {
+                                    background: "rgba(59, 130, 246, 0.16)",
+                                    outline: "2px solid #3b82f6",
+                                    transition: "background 0.4s ease, outline 0.4s ease",
+                                  }
+                                : { transition: "background 0.4s ease, outline 0.4s ease" }
+                            }
+                            onClick={() => {
+                              if (highlightedDeviceId === device.id) {
+                                if (highlightTimeoutRef.current) clearTimeout(highlightTimeoutRef.current);
+                                setHighlightedDeviceId(null);
+                              }
+                            }}
                           >
                             {isAdmin && (
                               <td style={{ textAlign: "center" }}>
@@ -3416,10 +3555,10 @@ const DevicesPage = () => {
                               </td>
                             )}
                     <td>
-                      <div className="device-primary">
+                      <div className="device-primary" style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: "6px" }}>
                         <span
                           style={{
-                            marginRight: "8px",
+                            marginRight: "4px",
                             fontSize: "18px",
                           }}
                         >
@@ -3428,8 +3567,36 @@ const DevicesPage = () => {
                           )}
                         </span>
 
-                        {device.hostname ||
-                          "Unknown Device"}
+                        <span>{device.hostname || "Unknown Device"}</span>
+
+                        {highlightedDeviceId === device.id && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (highlightTimeoutRef.current) clearTimeout(highlightTimeoutRef.current);
+                              setHighlightedDeviceId(null);
+                            }}
+                            style={{
+                              marginLeft: "6px",
+                              padding: "2px 8px",
+                              fontSize: "10.5px",
+                              fontWeight: "700",
+                              borderRadius: "4px",
+                              background: "#2563eb",
+                              color: "#ffffff",
+                              border: "none",
+                              cursor: "pointer",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "3px",
+                              boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
+                            }}
+                            title="Finished viewing • Click to dismiss highlight"
+                          >
+                            ✕ Done Viewing
+                          </button>
+                        )}
                       </div>
 
                       <div className="device-secondary">
@@ -3487,10 +3654,10 @@ const DevicesPage = () => {
                     </td>
 
                     <td>
-                      {!isTypeAndVlanMatching(device) ? (
+                      {isDeviceActuallyOnline(device) ? (
                         <div style={{ display: "inline-flex", flexDirection: "column", gap: "4px", alignItems: "flex-start" }}>
                           <span
-                            className="status-badge blocked"
+                            className="status-badge allowed"
                             style={{
                               display: "inline-flex",
                               alignItems: "center",
@@ -3498,46 +3665,46 @@ const DevicesPage = () => {
                               fontSize: "11px",
                               fontWeight: "700",
                               padding: "2px 8px",
-                              background: "rgba(245, 158, 11, 0.15)",
-                              color: "#b45309",
-                              border: "1px solid #f59e0b",
                             }}
-                            title={`Device type '${device.device_type}' requires VLAN ${getExpectedVlanForType(device.device_type)}, but assigned VLAN is ${device.vlan_id || 90}. For a device to be connected it must be same in TYPE and VLAN section.`}
                           >
-                            ⚠️ DISCONNECTED (Type &amp; VLAN Mismatch)
+                            <span className="status-dot online" /> ONLINE ({getDeviceInternetStatus(device).isWireless ? "📶 Wi-Fi" : "🔌 Wired"})
                           </span>
-                          {isAdmin && (
-                            <button
-                              type="button"
-                              className="primary-button small"
-                              style={{
-                                fontSize: "10px",
-                                padding: "2px 6px",
-                                background: "#f59e0b",
-                                borderColor: "#d97706",
-                                cursor: "pointer",
-                              }}
-                              onClick={() => deviceAction(device.id, "vlan", getExpectedVlanForType(device.device_type))}
-                              title={`Synchronize device to VLAN ${getExpectedVlanForType(device.device_type)} to match type '${device.device_type}' and restore connectivity`}
-                            >
-                              🔄 Sync to VLAN {getExpectedVlanForType(device.device_type)}
-                            </button>
+                          {!isTypeAndVlanMatching(device) && device.vlan_id !== 90 && device.enforcement_status !== "quarantined" && device.access_decision !== "quarantine" && (
+                            <div style={{ display: "inline-flex", alignItems: "center", gap: "4px", marginTop: "2px" }}>
+                              <span
+                                className="status-badge warning"
+                                style={{
+                                  fontSize: "10px",
+                                  padding: "1px 6px",
+                                  background: "rgba(245, 158, 11, 0.15)",
+                                  color: "#b45309",
+                                  border: "1px solid #f59e0b",
+                                  fontWeight: "700",
+                                }}
+                                title={`Device type '${device.device_type}' requires VLAN ${getExpectedVlanForType(device.device_type)}, but assigned VLAN is ${device.vlan_id || 90}.`}
+                              >
+                                ⚠️ VLAN Mismatch (VLAN {device.vlan_id})
+                              </span>
+                              {isAdmin && (
+                                <button
+                                  type="button"
+                                  className="primary-button small"
+                                  style={{
+                                    fontSize: "10px",
+                                    padding: "1px 5px",
+                                    background: "#f59e0b",
+                                    borderColor: "#d97706",
+                                    cursor: "pointer",
+                                  }}
+                                  onClick={() => deviceAction(device.id, "vlan", getExpectedVlanForType(device.device_type))}
+                                  title={`Synchronize device to VLAN ${getExpectedVlanForType(device.device_type)}`}
+                                >
+                                  🔄 Sync
+                                </button>
+                              )}
+                            </div>
                           )}
                         </div>
-                      ) : isDeviceActuallyOnline(device) ? (
-                        <span
-                          className="status-badge allowed"
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: "5px",
-                            fontSize: "11px",
-                            fontWeight: "700",
-                            padding: "2px 8px",
-                          }}
-                        >
-                          <span className="status-dot online" /> ONLINE ({getDeviceInternetStatus(device).isWireless ? "📶 Wi-Fi" : "🔌 Wired"})
-                        </span>
                       ) : (
                         <div style={{ display: "inline-flex", flexDirection: "column", gap: "4px", alignItems: "flex-start" }}>
                           <span
@@ -3551,19 +3718,7 @@ const DevicesPage = () => {
                               padding: "2px 8px",
                             }}
                           >
-                            <span className="status-dot offline" /> OFFLINE ({
-                              device.enforcement_status === "isolated"
-                                ? "🔒 Isolated"
-                                : device.approval_status === "pending"
-                                ? "🛡️ Quarantined / Pending"
-                                : (device.enforcement_status === "quarantined" || device.vlan_id === 90)
-                                ? "🛡️ Quarantined"
-                                : !device.internet_access_authorized
-                                ? "🚫 Internet Blocked"
-                                : getDeviceInternetStatus(device).isWireless
-                                ? "📶 Wi-Fi Disconnected"
-                                : "🔌 Cable Disconnected"
-                            })
+                            <span className="status-dot offline" /> OFFLINE ({getDeviceInternetStatus(device).isWireless ? "📶 Wi-Fi Disconnected" : "🔌 Cable Disconnected"})
                           </span>
                           <button
                             type="button"
@@ -3592,8 +3747,7 @@ const DevicesPage = () => {
                     <td>
                       <select
                         value={
-                          device.device_type ||
-                          "unknown"
+                          device.device_type === "phone" ? "ip_phone" : (device.device_type || "unknown")
                         }
                         disabled={
                           actionLoading ===
@@ -3612,7 +3766,7 @@ const DevicesPage = () => {
                         </option>
 
                         <option value="ip_phone">
-                          📞 IP Phone (VLAN 10)
+                          📞 Phone / VoIP / Mobile (VLAN 10)
                         </option>
 
                         <option value="computer">
@@ -4226,15 +4380,47 @@ const LanScannerPage = () => {
   const isAllInterfaces = !selectedInterface || selectedInterface === "all";
   const displayedInterfaceDevices = isAllInterfaces
     ? interfaceDevices
-    : interfaceDevices.filter((d) => (d.network_interface || "").toLowerCase() === selectedInterface.toLowerCase());
+    : interfaceDevices.filter((d) => {
+        if (selectedInterface === "eth0" || selectedInterface === "lan") {
+          return isDeviceOnEth0(d);
+        }
+        if (selectedInterface === "wlan0" || selectedInterface === "wireless") {
+          return isDeviceOnWlan(d);
+        }
+        return (d.network_interface || "").toLowerCase() === selectedInterface.toLowerCase();
+      });
 
   const onlineDevices = displayedInterfaceDevices.filter((d) => isDeviceActuallyOnline(d));
   const offlineDevices = displayedInterfaceDevices.filter((d) => !isDeviceActuallyOnline(d));
   const ipChangedEvents = events.filter((e) => e.event_type === "ip_address_changed");
   const ipChangedDeviceIds = new Set(ipChangedEvents.map((e) => e.device_id));
 
-  const wlanDevicesCount = interfaceDevices.filter((d) => (d.network_interface || "").toLowerCase() === "wlan0").length;
-  const ethDevicesCount = interfaceDevices.filter((d) => (d.network_interface || "").toLowerCase() === "eth0").length;
+  const wlanDevicesCount = interfaceDevices.filter(isDeviceOnWlan).length;
+  const ethDevicesCount = interfaceDevices.filter(isDeviceOnEth0).length;
+
+  // Group devices by IP to detect duplicate IPs and avoid IP conflicting
+  const ipConflictMap = new Map();
+  displayedInterfaceDevices.forEach((d) => {
+    const rawIp = (d.ip_address || "").trim();
+    if (rawIp && rawIp !== "0.0.0.0" && rawIp.toLowerCase() !== "no ip assigned") {
+      if (!ipConflictMap.has(rawIp)) {
+        ipConflictMap.set(rawIp, []);
+      }
+      ipConflictMap.get(rawIp).push(d);
+    }
+  });
+
+  const duplicateIpMap = new Map();
+  ipConflictMap.forEach((devList, ip) => {
+    if (devList.length > 1) {
+      duplicateIpMap.set(ip, devList);
+    }
+  });
+  const duplicateIpsList = Array.from(duplicateIpMap.keys());
+  const conflictedDeviceIds = new Set();
+  duplicateIpMap.forEach((devList) => {
+    devList.forEach((d) => conflictedDeviceIds.add(d.id));
+  });
 
   // Filter devices scoped to the selected interface (eth0 LAN vs wlan0 Wi-Fi vs all)
   const filteredDevices = displayedInterfaceDevices.filter((device) => {
@@ -4242,7 +4428,8 @@ const LanScannerPage = () => {
     if (lanFilterStatus === "all" && !isDeviceActuallyOnline(device)) return false;
     if (lanFilterStatus === "offline" && isDeviceActuallyOnline(device)) return false;
     if (lanFilterStatus === "ip-changed" && !ipChangedDeviceIds.has(device.id)) return false;
-    if (lanFilterStatus === "allowed" && !isDeviceActuallyOnline(device)) return false;
+    if (lanFilterStatus === "ip-conflict" && !conflictedDeviceIds.has(device.id)) return false;
+    if (lanFilterStatus === "allowed" && (!isDeviceActuallyOnline(device) || device.enforcement_status !== "allowed" || !device.internet_access_authorized)) return false;
     if (lanFilterStatus === "quarantined" && (device.enforcement_status === "allowed" && device.internet_access_authorized)) return false;
     if (lanFilterStatus === "scheduled" && !isDeviceScheduled(device)) return false;
     if (lanFilterStatus === "pending" && device.approval_status !== "pending") return false;
@@ -4271,8 +4458,8 @@ const LanScannerPage = () => {
     }
   };
 
-  const allowedCount = displayedInterfaceDevices.filter((d) => isDeviceActuallyOnline(d)).length;
-  const quarantinedCount = displayedInterfaceDevices.filter((d) => !isDeviceActuallyOnline(d)).length;
+  const allowedCount = displayedInterfaceDevices.filter((d) => isDeviceActuallyOnline(d) && d.enforcement_status === "allowed" && d.internet_access_authorized).length;
+  const quarantinedCount = displayedInterfaceDevices.filter((d) => (d.enforcement_status === "quarantined" || d.vlan_id === 90 || d.access_decision === "quarantine" || d.approval_status === "pending")).length;
 
   return (
     <div className="page">
@@ -4290,67 +4477,68 @@ const LanScannerPage = () => {
         <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
           <button
             type="button"
-            className="primary-button"
-            onClick={() => scanAllLanDevices(null, "all")}
-            disabled={lanDevicesScanning}
+            className="secondary-button"
+            onClick={() => setSelectedInterface("all")}
             style={{
               fontSize: "13px",
               fontWeight: "700",
-              padding: "10px 18px",
+              padding: "9px 16px",
               display: "inline-flex",
               alignItems: "center",
               gap: "8px",
-              background: selectedInterface === "all" ? "#2563eb" : "#1e40af",
-              boxShadow: "0 4px 14px rgba(59, 130, 246, 0.3)",
-              cursor: lanDevicesScanning ? "not-allowed" : "pointer",
+              background: selectedInterface === "all" ? "#2563eb" : "#f1f5f9",
+              color: selectedInterface === "all" ? "#ffffff" : "#334155",
+              borderColor: selectedInterface === "all" ? "#1d4ed8" : "#cbd5e1",
+              cursor: "pointer",
             }}
+            title="Filter to view all devices across all interfaces without scanning"
           >
-            <span>{lanDevicesScanning && selectedInterface === "all" ? "⏳" : "🌐"}</span>
-            {lanDevicesScanning && selectedInterface === "all" ? "Scanning All Interfaces..." : "Scan All Interfaces"}
-          </button>
-
-          <button
-            type="button"
-            className="primary-button"
-            onClick={() => scanAllLanDevices(null, "wlan0")}
-            disabled={lanDevicesScanning}
-            style={{
-              fontSize: "13px",
-              fontWeight: "700",
-              padding: "10px 18px",
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "8px",
-              background: selectedInterface === "wlan0" ? "#059669" : "#047857",
-              borderColor: "#10b981",
-              boxShadow: "0 4px 14px rgba(16, 185, 129, 0.3)",
-              cursor: lanDevicesScanning ? "not-allowed" : "pointer",
-            }}
-          >
-            <span>{lanDevicesScanning && selectedInterface === "wlan0" ? "⏳" : "📶"}</span>
-            {lanDevicesScanning && selectedInterface === "wlan0" ? "Scanning Wi-Fi (wlan0)..." : "Scan Wi-Fi (wlan0)"}
+            <span>🌐</span>
+            All Interfaces ({interfaceDevices.length})
           </button>
 
           <button
             type="button"
             className="secondary-button"
-            onClick={() => scanAllLanDevices(null, "eth0")}
-            disabled={lanDevicesScanning}
+            onClick={() => setSelectedInterface("eth0")}
             style={{
               fontSize: "13px",
               fontWeight: "700",
-              padding: "10px 18px",
+              padding: "9px 16px",
               display: "inline-flex",
               alignItems: "center",
               gap: "8px",
               background: selectedInterface === "eth0" ? "#334155" : "#f1f5f9",
               color: selectedInterface === "eth0" ? "#ffffff" : "#0f172a",
-              borderColor: "#94a3b8",
-              cursor: lanDevicesScanning ? "not-allowed" : "pointer",
+              borderColor: selectedInterface === "eth0" ? "#1e293b" : "#cbd5e1",
+              cursor: "pointer",
             }}
+            title="Filter to view only devices on eth0 without scanning"
           >
-            <span>{lanDevicesScanning && selectedInterface === "eth0" ? "⏳" : "🔌"}</span>
-            {lanDevicesScanning && selectedInterface === "eth0" ? "Scanning eth0..." : "Scan Wired LAN (eth0)"}
+            <span>🔌</span>
+            Wired LAN (eth0) ({ethDevicesCount})
+          </button>
+
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => setSelectedInterface("wlan0")}
+            style={{
+              fontSize: "13px",
+              fontWeight: "700",
+              padding: "9px 16px",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "8px",
+              background: selectedInterface === "wlan0" ? "#059669" : "#f1f5f9",
+              color: selectedInterface === "wlan0" ? "#ffffff" : "#065f46",
+              borderColor: selectedInterface === "wlan0" ? "#047857" : "#cbd5e1",
+              cursor: "pointer",
+            }}
+            title="Filter to view only devices on wlan0 without scanning"
+          >
+            <span>📶</span>
+            Wi-Fi (wlan0) ({wlanDevicesCount})
           </button>
 
           <button
@@ -4428,28 +4616,52 @@ const LanScannerPage = () => {
           </div>
         </div>
 
-        <button
-          type="button"
-          className="primary-button"
-          onClick={() => scanAllLanDevices(detectedSubnet, selectedInterface || "all")}
-          disabled={lanDevicesScanning}
-          style={{
-            fontSize: "13px",
-            fontWeight: "700",
-            padding: "9px 20px",
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "8px",
-            background: selectedInterface === "wlan0" ? "#059669" : selectedInterface === "eth0" ? "#334155" : "#2563eb",
-            boxShadow: "0 4px 12px rgba(37, 99, 235, 0.25)",
-            cursor: lanDevicesScanning ? "not-allowed" : "pointer",
-          }}
-        >
-          <span>{lanDevicesScanning ? "⏳" : "🚀"}</span>
-          {lanDevicesScanning
-            ? `Scanning ${selectedInterface === "all" ? "All Interfaces" : selectedInterface}...`
-            : `Scan ${selectedInterface === "wlan0" ? "Wi-Fi (wlan0)" : selectedInterface === "eth0" ? "Wired (eth0)" : "All Devices"} Now`}
-        </button>
+        <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => setShowProbeModal(true)}
+            style={{
+              fontSize: "13px",
+              fontWeight: "600",
+              padding: "9px 16px",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+              background: "#0f172a",
+              color: "#38bdf8",
+              border: "1px solid #334155",
+              cursor: "pointer",
+              borderRadius: "6px",
+              boxShadow: "0 2px 6px rgba(0, 0, 0, 0.15)",
+            }}
+            title="Scan a remote branch or office network using the lightweight NetOps client probe"
+          >
+            <span>📡</span> Remote Probe
+          </button>
+          <button
+            type="button"
+            className="primary-button"
+            onClick={() => scanAllLanDevices(detectedSubnet, selectedInterface || "all")}
+            disabled={lanDevicesScanning}
+            style={{
+              fontSize: "13px",
+              fontWeight: "700",
+              padding: "9px 20px",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "8px",
+              background: selectedInterface === "wlan0" ? "#059669" : selectedInterface === "eth0" ? "#334155" : "#2563eb",
+              boxShadow: "0 4px 12px rgba(37, 99, 235, 0.25)",
+              cursor: lanDevicesScanning ? "not-allowed" : "pointer",
+            }}
+          >
+            <span>{lanDevicesScanning ? "⏳" : "🚀"}</span>
+            {lanDevicesScanning
+              ? `Scanning ${selectedInterface === "all" ? "All Interfaces" : selectedInterface}...`
+              : `Scan ${selectedInterface === "wlan0" ? "Wi-Fi (wlan0)" : selectedInterface === "eth0" ? "Wired (eth0)" : "All Devices"} Now`}
+          </button>
+        </div>
       </div>
 
       {/* CONTROL & SCAN PANEL */}
@@ -4674,17 +4886,29 @@ const LanScannerPage = () => {
           <div
             style={{
               marginTop: "16px",
-              padding: "10px 14px",
-              borderRadius: "6px",
-              background: "rgba(16, 185, 129, 0.12)",
-              border: "1px solid #10b981",
+              padding: "12px 16px",
+              borderRadius: "8px",
+              background: (lanDevicesResult.duplicate_ips && lanDevicesResult.duplicate_ips.length > 0) || duplicateIpsList.length > 0
+                ? "rgba(239, 68, 68, 0.08)"
+                : "rgba(16, 185, 129, 0.12)",
+              border: (lanDevicesResult.duplicate_ips && lanDevicesResult.duplicate_ips.length > 0) || duplicateIpsList.length > 0
+                ? "1.5px solid #ef4444"
+                : "1px solid #10b981",
               display: "flex",
               justifyContent: "space-between",
               alignItems: "center",
+              flexWrap: "wrap",
+              gap: "10px",
             }}
           >
-            <div style={{ fontSize: "13px", color: "#10b981" }}>
+            <div style={{ fontSize: "13px", color: (lanDevicesResult.duplicate_ips && lanDevicesResult.duplicate_ips.length > 0) || duplicateIpsList.length > 0 ? "#991b1b" : "#10b981" }}>
               ✓ <strong>Network Scan Completed ({lanDevicesResult.interface && lanDevicesResult.interface !== "all" ? lanDevicesResult.interface : "All LAN + WLAN Interfaces"}):</strong> Discovered <strong>{lanDevicesResult.devices_discovered}</strong> active device(s) on network <code>{lanDevicesResult.network}</code>. Reconciled and synced with NETOPS database.
+              {((lanDevicesResult.duplicate_ips && lanDevicesResult.duplicate_ips.length > 0) || duplicateIpsList.length > 0) && (
+                <div style={{ marginTop: "6px", fontWeight: "700", color: "#b91c1c", display: "flex", alignItems: "center", gap: "6px" }}>
+                  <span>⚠️</span>
+                  <span><strong>IP Conflict Alert:</strong> {lanDevicesResult.duplicate_ips?.length || duplicateIpsList.length} duplicate IP address(es) detected ({(lanDevicesResult.duplicate_ips?.map(d => d.ip_address) || duplicateIpsList).join(", ")}). See highlighted duplicate machines below to avoid network collision.</span>
+                </div>
+              )}
             </div>
             <button
               className="secondary-button small"
@@ -4747,6 +4971,17 @@ const LanScannerPage = () => {
           description="Devices that acquired new dynamic DHCP IP addresses."
         />
         <ReportCard
+          title="IP Conflicts / Duplicates"
+          value={conflictedDeviceIds.size}
+          description={
+            conflictedDeviceIds.size > 0
+              ? `⚠️ ${duplicateIpsList.length} duplicate IP(s) detected across ${conflictedDeviceIds.size} machines. Action required to avoid IP conflicting.`
+              : "✓ No duplicate IPs detected. Network addressing is healthy."
+          }
+          badge={conflictedDeviceIds.size > 0 ? "CONFLICT DETECTED" : "HEALTHY"}
+          badgeColor={conflictedDeviceIds.size > 0 ? "#ef4444" : "#10b981"}
+        />
+        <ReportCard
           title="Allowed Internet"
           value={allowedCount}
           description="Devices authorized and actively passing traffic through active firewall."
@@ -4757,6 +4992,130 @@ const LanScannerPage = () => {
           description="Devices dropped by active firewall quarantine policy."
         />
       </div>
+
+      {/* IP DUPLICATES & CONFLICT ALERT BANNER */}
+      {duplicateIpsList.length > 0 && (
+        <div
+          className="panel"
+          style={{
+            background: "linear-gradient(135deg, #fef2f2 0%, #fff1f2 100%)",
+            border: "2px solid #ef4444",
+            borderRadius: "10px",
+            padding: "16px 20px",
+            marginBottom: "16px",
+            boxShadow: "0 4px 14px rgba(239, 68, 68, 0.12)",
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "12px" }}>
+            <div style={{ display: "flex", alignItems: "flex-start", gap: "12px", flex: 1, minWidth: "280px" }}>
+              <div
+                style={{
+                  width: "42px",
+                  height: "42px",
+                  borderRadius: "10px",
+                  background: "#fee2e2",
+                  border: "1.5px solid #fca5a5",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: "22px",
+                  flexShrink: 0,
+                }}
+              >
+                ⚠️
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: "800", fontSize: "15px", color: "#991b1b", display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                  <span>IP Address Conflict Detected!</span>
+                  <span style={{ fontSize: "11px", padding: "2px 8px", borderRadius: "999px", background: "#dc2626", color: "#ffffff", fontWeight: "700" }}>
+                    {duplicateIpsList.length} Duplicated IP{duplicateIpsList.length > 1 ? "s" : ""}
+                  </span>
+                  <span style={{ fontSize: "11px", padding: "2px 8px", borderRadius: "999px", background: "#fef2f2", color: "#dc2626", border: "1px solid #f87171", fontWeight: "700" }}>
+                    {conflictedDeviceIds.size} Devices In Conflict
+                  </span>
+                </div>
+                <div style={{ fontSize: "12.5px", color: "#7f1d1d", marginTop: "4px", lineHeight: "1.45" }}>
+                  The LAN Scanner has detected machines claiming identical IP addresses on this network. IP conflicts cause ARP collisions, packet loss, and connection drops. Review the conflicting machines below:
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginTop: "10px" }}>
+                  {duplicateIpsList.map((dupIp) => {
+                    const conflictingDevices = duplicateIpMap.get(dupIp) || [];
+                    return (
+                      <div
+                        key={`conflict-bar-${dupIp}`}
+                        style={{
+                          background: "#ffffff",
+                          border: "1.5px solid #f87171",
+                          borderRadius: "6px",
+                          padding: "6px 12px",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          flexWrap: "wrap",
+                          gap: "8px",
+                          boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                          <span style={{ fontWeight: "800", color: "#b91c1c", fontFamily: "monospace", fontSize: "13px" }}>
+                            {dupIp}
+                          </span>
+                          <span style={{ fontSize: "11px", color: "#64748b", fontWeight: "600" }}>is shared by:</span>
+                          {conflictingDevices.map((cDev, cIdx) => (
+                            <span key={cDev.id} style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "12px" }}>
+                              {cIdx > 0 && <span style={{ color: "#ef4444", fontWeight: "800" }}>⚡</span>}
+                              <strong style={{ color: "#0f172a" }}>{cDev.hostname || `Device #${cDev.id}`}</strong>
+                              <span style={{ fontFamily: "monospace", fontSize: "11px", color: "#475569" }}>({cDev.mac_address})</span>
+                              {cDev.network_interface && (
+                                <span style={{ fontSize: "10px", padding: "1px 5px", borderRadius: "3px", background: "#f1f5f9", color: "#475569" }}>
+                                  {cDev.network_interface}
+                                </span>
+                              )}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+              <button
+                type="button"
+                className="primary-button small"
+                onClick={() => setLanFilterStatus("ip-conflict")}
+                style={{
+                  background: lanFilterStatus === "ip-conflict" ? "#991b1b" : "#dc2626",
+                  borderColor: "#b91c1c",
+                  fontWeight: "700",
+                  padding: "8px 14px",
+                  fontSize: "12px",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  cursor: "pointer",
+                }}
+              >
+                <span>🔍</span>
+                {lanFilterStatus === "ip-conflict" ? "Showing Conflicted Devices" : `View Conflicted Devices (${conflictedDeviceIds.size})`}
+              </button>
+              {lanFilterStatus === "ip-conflict" && (
+                <button
+                  type="button"
+                  className="secondary-button small"
+                  onClick={() => setLanFilterStatus("all")}
+                  style={{ fontSize: "12px", padding: "8px 12px", cursor: "pointer" }}
+                >
+                  Show All Devices
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* FILTER & SEARCH BAR */}
       <div className="panel" style={{ padding: "14px 18px", margin: "16px 0 12px" }}>
@@ -4776,6 +5135,24 @@ const LanScannerPage = () => {
               style={lanFilterStatus !== "offline" && offlineDevices.length > 0 ? { borderColor: "#ef4444", color: "#dc2626" } : {}}
             >
               🔴 Offline ({offlineDevices.length})
+            </button>
+            <button
+              type="button"
+              className={lanFilterStatus === "ip-conflict" ? "primary-button small" : "secondary-button small"}
+              onClick={() => setLanFilterStatus("ip-conflict")}
+              style={
+                lanFilterStatus === "ip-conflict"
+                  ? { background: "#dc2626", color: "#ffffff", borderColor: "#b91c1c", fontWeight: "700" }
+                  : {
+                      borderColor: conflictedDeviceIds.size > 0 ? "#ef4444" : "#cbd5e1",
+                      color: conflictedDeviceIds.size > 0 ? "#dc2626" : "#64748b",
+                      background: conflictedDeviceIds.size > 0 ? "#fef2f2" : "#ffffff",
+                      fontWeight: conflictedDeviceIds.size > 0 ? "700" : "500",
+                    }
+              }
+              title="Show devices sharing duplicate IP addresses to avoid IP conflicting"
+            >
+              ⚠️ IP Conflicts ({conflictedDeviceIds.size})
             </button>
             <button
               type="button"
@@ -4879,15 +5256,21 @@ const LanScannerPage = () => {
                   const hasIpChange = ipChangedDeviceIds.has(device.id);
                   const isAllowed = device.enforcement_status === "allowed";
                   const schedule = accessSchedules[device.id]?.[0];
+                  const hasIpConflict = conflictedDeviceIds.has(device.id);
+                  const otherConflictedDevs = hasIpConflict
+                    ? (duplicateIpMap.get((device.ip_address || "").trim()) || []).filter((d) => d.id !== device.id)
+                    : [];
 
                   return (
                     <React.Fragment key={device.id}>
                     <tr
                       id={`device-row-${device.id}`}
                       style={
-                        highlightedDeviceId === device.id || hasIpChange
-                            ? { background: "rgba(59, 130, 246, 0.08)" }
-                            : {}
+                        hasIpConflict
+                          ? { background: "rgba(239, 68, 68, 0.08)", borderLeft: "4px solid #ef4444" }
+                          : highlightedDeviceId === device.id || hasIpChange
+                          ? { background: "rgba(59, 130, 246, 0.08)" }
+                          : {}
                       }
                     >
                       {/* DEVICE / HOSTNAME */}
@@ -4900,7 +5283,7 @@ const LanScannerPage = () => {
                             <div style={{ fontWeight: "700", color: "#0f172a" }}>
                               {device.hostname || `Device #${device.id}`}
                             </div>
-                            <div style={{ display: "flex", gap: "6px", marginTop: "3px" }}>
+                            <div style={{ display: "flex", gap: "6px", marginTop: "3px", flexWrap: "wrap", alignItems: "center" }}>
                               {device.vendor && (
                                 <span
                                   style={{
@@ -4934,6 +5317,22 @@ const LanScannerPage = () => {
                               >
                                 {device.approval_status?.toUpperCase()}
                               </span>
+                              {hasIpConflict && (
+                                <span
+                                  style={{
+                                    fontSize: "10px",
+                                    padding: "1px 6px",
+                                    borderRadius: "4px",
+                                    background: "#fee2e2",
+                                    color: "#b91c1c",
+                                    border: "1px solid #f87171",
+                                    fontWeight: "800",
+                                  }}
+                                  title={`IP Collision: Duplicated with ${otherConflictedDevs.map(d => `${d.hostname || 'Device'} (${d.mac_address})`).join(', ')}`}
+                                >
+                                  ⚠️ IP CONFLICT
+                                </span>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -4941,10 +5340,10 @@ const LanScannerPage = () => {
 
                       {/* CONNECTION */}
                       <td>
-                        {!isTypeAndVlanMatching(device) ? (
+                        {isDeviceActuallyOnline(device) ? (
                           <div style={{ display: "inline-flex", flexDirection: "column", gap: "4px", alignItems: "flex-start" }}>
                             <span
-                              className="status-badge blocked"
+                              className="status-badge allowed"
                               style={{
                                 display: "inline-flex",
                                 alignItems: "center",
@@ -4952,46 +5351,46 @@ const LanScannerPage = () => {
                                 fontSize: "11px",
                                 fontWeight: "700",
                                 padding: "2px 8px",
-                                background: "rgba(245, 158, 11, 0.15)",
-                                color: "#b45309",
-                                border: "1px solid #f59e0b",
                               }}
-                              title={`Device type '${device.device_type}' requires VLAN ${getExpectedVlanForType(device.device_type)}, but assigned VLAN is ${device.vlan_id || 90}. For a device to be connected it must be same in TYPE and VLAN section.`}
                             >
-                              ⚠️ DISCONNECTED (Type &amp; VLAN Mismatch)
+                              <span className="status-dot online" /> ONLINE ({getDeviceInternetStatus(device).isWireless ? "📶 Wi-Fi" : "🔌 Wired"})
                             </span>
-                            {isAdmin && (
-                              <button
-                                type="button"
-                                className="primary-button small"
-                                style={{
-                                  fontSize: "10px",
-                                  padding: "2px 6px",
-                                  background: "#f59e0b",
-                                  borderColor: "#d97706",
-                                  cursor: "pointer",
-                                }}
-                                onClick={() => deviceAction(device.id, "vlan", getExpectedVlanForType(device.device_type))}
-                                title={`Synchronize device to VLAN ${getExpectedVlanForType(device.device_type)} to match type '${device.device_type}' and restore connectivity`}
-                              >
-                                🔄 Sync to VLAN {getExpectedVlanForType(device.device_type)}
-                              </button>
+                            {!isTypeAndVlanMatching(device) && device.vlan_id !== 90 && device.enforcement_status !== "quarantined" && device.access_decision !== "quarantine" && (
+                              <div style={{ display: "inline-flex", alignItems: "center", gap: "4px", marginTop: "2px" }}>
+                                <span
+                                  className="status-badge warning"
+                                  style={{
+                                    fontSize: "10px",
+                                    padding: "1px 6px",
+                                    background: "rgba(245, 158, 11, 0.15)",
+                                    color: "#b45309",
+                                    border: "1px solid #f59e0b",
+                                    fontWeight: "700",
+                                  }}
+                                  title={`Device type '${device.device_type}' requires VLAN ${getExpectedVlanForType(device.device_type)}, but assigned VLAN is ${device.vlan_id || 90}.`}
+                                >
+                                  ⚠️ VLAN Mismatch (VLAN {device.vlan_id})
+                                </span>
+                                {isAdmin && (
+                                  <button
+                                    type="button"
+                                    className="primary-button small"
+                                    style={{
+                                      fontSize: "10px",
+                                      padding: "1px 5px",
+                                      background: "#f59e0b",
+                                      borderColor: "#d97706",
+                                      cursor: "pointer",
+                                    }}
+                                    onClick={() => deviceAction(device.id, "vlan", getExpectedVlanForType(device.device_type))}
+                                    title={`Synchronize device to VLAN ${getExpectedVlanForType(device.device_type)}`}
+                                  >
+                                    🔄 Sync
+                                  </button>
+                                )}
+                              </div>
                             )}
                           </div>
-                        ) : isDeviceActuallyOnline(device) ? (
-                          <span
-                            className="status-badge allowed"
-                            style={{
-                              display: "inline-flex",
-                              alignItems: "center",
-                              gap: "5px",
-                              fontSize: "11px",
-                              fontWeight: "700",
-                              padding: "2px 8px",
-                            }}
-                          >
-                            <span className="status-dot online" /> ONLINE ({getDeviceInternetStatus(device).isWireless ? "📶 Wi-Fi" : "🔌 Wired"})
-                          </span>
                         ) : (
                           <div style={{ display: "inline-flex", flexDirection: "column", gap: "4px", alignItems: "flex-start" }}>
                             <span
@@ -5005,19 +5404,7 @@ const LanScannerPage = () => {
                                 padding: "2px 8px",
                               }}
                             >
-                              <span className="status-dot offline" /> OFFLINE ({
-                                device.enforcement_status === "isolated"
-                                  ? "🔒 Isolated"
-                                  : device.approval_status === "pending"
-                                  ? "🛡️ Quarantined / Pending"
-                                  : (device.enforcement_status === "quarantined" || device.vlan_id === 90)
-                                  ? "🛡️ Quarantined"
-                                  : !device.internet_access_authorized
-                                  ? "🚫 Internet Blocked"
-                                  : getDeviceInternetStatus(device).isWireless
-                                  ? "📶 Wi-Fi Disconnected"
-                                  : "🔌 Cable Disconnected"
-                              })
+                              <span className="status-dot offline" /> OFFLINE ({getDeviceInternetStatus(device).isWireless ? "📶 Wi-Fi Disconnected" : "🔌 Cable Disconnected"})
                             </span>
                             <button
                               type="button"
@@ -5046,17 +5433,36 @@ const LanScannerPage = () => {
                       {/* CURRENT IP ADDRESS */}
                       <td>
                         <div>
-                          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
                             <span
                               style={{
                                 fontSize: "14px",
                                 fontWeight: "700",
                                 fontFamily: "monospace",
-                                color: "#2563eb",
+                                color: hasIpConflict ? "#dc2626" : "#2563eb",
                               }}
                             >
                               {device.ip_address || "No IP Assigned"}
                             </span>
+                            {hasIpConflict && (
+                              <span
+                                style={{
+                                  fontSize: "10px",
+                                  padding: "2px 6px",
+                                  borderRadius: "4px",
+                                  background: "#fee2e2",
+                                  color: "#b91c1c",
+                                  border: "1px solid #f87171",
+                                  fontWeight: "800",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "3px",
+                                }}
+                                title={`IP Conflict! Duplicated with ${otherConflictedDevs.map(d => `${d.hostname || 'Device'} (${d.mac_address})`).join(', ')}`}
+                              >
+                                ⚠️ DUPLICATE IP
+                              </span>
+                            )}
                             <select
                               value={device.ip_assignment || "dhcp"}
                               onChange={(e) =>
@@ -5079,6 +5485,27 @@ const LanScannerPage = () => {
                               <option value="static">STATIC</option>
                             </select>
                           </div>
+                          {hasIpConflict && (
+                            <div
+                              style={{
+                                fontSize: "11px",
+                                color: "#b91c1c",
+                                fontWeight: "700",
+                                marginTop: "3px",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "4px",
+                              }}
+                            >
+                              <span>⚡</span>
+                              <span>
+                                In conflict with:{" "}
+                                {otherConflictedDevs
+                                  .map((d) => d.hostname || d.mac_address)
+                                  .join(", ")}
+                              </span>
+                            </div>
+                          )}
                           {hasIpChange && (
                             <div
                               style={{
@@ -10367,65 +10794,65 @@ const Dashboard = () => {
     (total, endpoint) => total + (endpoint.pending_updates || 0),
     0
   );
-  const totalDevices = devices.length;
+  const totalDevices = siteScopedDevices.length;
 
-  const onlineDevices = devices.filter(
+  const onlineDevices = siteScopedDevices.filter(
     (device) => isDeviceActuallyOnline(device)
   ).length;
 
-  const offlineDevices = devices.filter(
+  const offlineDevices = siteScopedDevices.filter(
     (device) => !isDeviceActuallyOnline(device)
   ).length;
 
-  const pendingDevices = devices.filter(
+  const pendingDevices = siteScopedDevices.filter(
     (device) => device.approval_status === "pending"
   ).length;
 
-  const approvedDevices = devices.filter(
+  const approvedDevices = siteScopedDevices.filter(
     (device) => device.approval_status === "approved"
   ).length;
 
-  const quarantinedDevices = devices.filter(
+  const quarantinedDevices = siteScopedDevices.filter(
     (device) =>
       device.enforcement_status === "quarantined" ||
       device.access_decision === "quarantine"
   ).length;
 
-  const rejectedDevices = devices.filter(
+  const rejectedDevices = siteScopedDevices.filter(
     (device) => device.approval_status === "rejected"
   ).length;
 
-  const ipPhoneDevices = devices.filter(
+  const ipPhoneDevices = siteScopedDevices.filter(
     (device) => device.device_type === "ip_phone"
   ).length;
 
-  const computerDevices = devices.filter(
+  const computerDevices = siteScopedDevices.filter(
     (device) => device.device_type === "computer"
   ).length;
 
-  const cctvDevices = devices.filter(
+  const cctvDevices = siteScopedDevices.filter(
     (device) => device.device_type === "cctv"
   ).length;
 
-  const printerDevices = devices.filter(
+  const printerDevices = siteScopedDevices.filter(
     (device) => device.device_type === "printer"
   ).length;
 
-  const serverDevices = devices.filter(
+  const serverDevices = siteScopedDevices.filter(
     (device) => device.device_type === "server"
   ).length;
 
-  const apDevices = devices.filter(
+  const apDevices = siteScopedDevices.filter(
     (device) => device.device_type === "access_point" || device.device_type === "ap" || device.device_type === "wifi_ap"
   ).length;
 
-  const unknownDevices = devices.filter(
+  const unknownDevices = siteScopedDevices.filter(
     (device) =>
       !device.device_type ||
       device.device_type === "unknown"
   ).length;
 
-  const filteredDashboardDevices = devices.filter((device) => {
+  const filteredDashboardDevices = siteScopedDevices.filter((device) => {
     if (dashboardDeviceFilter === "online") return isDeviceActuallyOnline(device);
     if (dashboardDeviceFilter === "offline") return !isDeviceActuallyOnline(device);
     if (dashboardDeviceFilter === "pending") return device.approval_status === "pending";
@@ -10663,7 +11090,42 @@ const Dashboard = () => {
               >
                 Quarantined ({quarantinedDevices})
               </button>
+              <button
+                type="button"
+                className={`secondary-button small ${dashboardDeviceFilter === "rejected" ? "active" : ""}`}
+                style={
+                  dashboardDeviceFilter === "rejected"
+                    ? { background: "#475569", color: "#ffffff", fontWeight: "700" }
+                    : { padding: "4px 9px", fontSize: "11px" }
+                }
+                onClick={() => setDashboardDeviceFilter("rejected")}
+              >
+                Rejected ({rejectedDevices})
+              </button>
             </div>
+
+            {(isAdmin || isSuperAdmin) && filteredDashboardDevices.length > 0 && dashboardDeviceFilter !== "online" && dashboardDeviceFilter !== "all" && (
+              <button
+                type="button"
+                className="secondary-button small"
+                style={{
+                  borderColor: "#ef4444",
+                  color: "#dc2626",
+                  background: "rgba(239, 68, 68, 0.08)",
+                  fontWeight: "700",
+                  fontSize: "11px",
+                  padding: "4px 10px",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "4px",
+                }}
+                disabled={bulkDeleting}
+                onClick={() => deleteBulkDevices(filteredDashboardDevices.map((d) => d.id))}
+                title={`Permanently delete all ${filteredDashboardDevices.length} ${dashboardDeviceFilter} devices from database`}
+              >
+                <span>🗑️</span> {bulkDeleting ? "Deleting..." : `Delete All ${dashboardDeviceFilter.charAt(0).toUpperCase() + dashboardDeviceFilter.slice(1)} (${filteredDashboardDevices.length})`}
+              </button>
+            )}
 
             <button
               type="button"
@@ -10712,10 +11174,85 @@ const Dashboard = () => {
           </div>
         </div>
 
+        {isAdmin && selectedDeviceIds.size > 0 && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "10px 16px",
+              background: "#fef2f2",
+              border: "1px solid #fecaca",
+              borderRadius: "8px",
+              margin: "12px 16px",
+              boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+              <span style={{ fontWeight: "700", color: "#991b1b", fontSize: "13px" }}>
+                Selected: {selectedDeviceIds.size} device(s)
+              </span>
+              <button
+                type="button"
+                className="secondary-button small"
+                style={{ fontSize: "11px", padding: "2px 8px" }}
+                onClick={() => setSelectedDeviceIds(new Set())}
+              >
+                Clear Selection
+              </button>
+            </div>
+            {(isSuperAdmin || isAdmin) && (
+              <button
+                type="button"
+                className="secondary-button small"
+                style={{
+                  background: "#dc2626",
+                  color: "#ffffff",
+                  borderColor: "#b91c1c",
+                  fontWeight: "700",
+                  padding: "6px 14px",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "5px",
+                }}
+                disabled={bulkDeleting}
+                onClick={() => deleteBulkDevices()}
+                title="Permanently delete all selected devices and their associated records"
+              >
+                {bulkDeleting ? "Deleting..." : `🗑️ Delete Selected (${selectedDeviceIds.size}) Permanently`}
+              </button>
+            )}
+          </div>
+        )}
+
         <div className="table-container">
           <table className="data-table">
             <thead>
               <tr>
+                {isAdmin && (
+                  <th style={{ width: "36px", textAlign: "center" }}>
+                    <input
+                      type="checkbox"
+                      checked={
+                        filteredDashboardDevices.length > 0 &&
+                        filteredDashboardDevices.every((d) => selectedDeviceIds.has(d.id))
+                      }
+                      onChange={() => {
+                        const allSelected =
+                          filteredDashboardDevices.length > 0 &&
+                          filteredDashboardDevices.every((d) => selectedDeviceIds.has(d.id));
+                        const next = new Set(selectedDeviceIds);
+                        if (allSelected) {
+                          filteredDashboardDevices.forEach((d) => next.delete(d.id));
+                        } else {
+                          filteredDashboardDevices.forEach((d) => next.add(d.id));
+                        }
+                        setSelectedDeviceIds(next);
+                      }}
+                      title="Select all visible devices"
+                    />
+                  </th>
+                )}
                 <th>DEVICE / HOSTNAME</th>
                 <th>IP &amp; MAC ADDRESS</th>
                 <th>INTERFACE</th>
@@ -10729,7 +11266,7 @@ const Dashboard = () => {
             <tbody>
               {filteredDashboardDevices.length === 0 ? (
                 <tr>
-                  <td colSpan="8">
+                  <td colSpan={isAdmin ? 9 : 8}>
                     <div className="empty-state" style={{ padding: "28px", textAlign: "center" }}>
                       <div style={{ fontSize: "28px", marginBottom: "6px" }}>🔍</div>
                       <strong style={{ fontSize: "14px", color: "#0f172a" }}>
@@ -10756,6 +11293,23 @@ const Dashboard = () => {
                         transition: "background-color 0.2s",
                       }}
                     >
+                      {isAdmin && (
+                        <td style={{ width: "36px", textAlign: "center" }}>
+                          <input
+                            type="checkbox"
+                            checked={selectedDeviceIds.has(device.id)}
+                            onChange={() => {
+                              const next = new Set(selectedDeviceIds);
+                              if (next.has(device.id)) {
+                                next.delete(device.id);
+                              } else {
+                                next.add(device.id);
+                              }
+                              setSelectedDeviceIds(next);
+                            }}
+                          />
+                        </td>
+                      )}
                       <td>
                         <div className="device-primary" style={{ fontWeight: "700", color: "#0f172a" }}>
                           {device.hostname || "Unknown Device"}
@@ -10854,15 +11408,31 @@ const Dashboard = () => {
                                 type="button"
                                 className="secondary-button small"
                                 style={{ padding: "3px 7px", fontSize: "11px" }}
-                                onClick={() => {
-                                  setHighlightedDeviceId(device.id);
-                                  setDeviceFilter("all");
-                                  setActivePage("devices");
-                                }}
+                                onClick={() => viewDeviceInInventory(device.id)}
                                 title="Inspect device in full inventory view"
                               >
                                 View →
                               </button>
+
+                              {(isSuperAdmin || isAdmin) && (
+                                <button
+                                  type="button"
+                                  className="secondary-button small"
+                                  style={{
+                                    borderColor: "#ef4444",
+                                    color: "#dc2626",
+                                    background: "rgba(239, 68, 68, 0.1)",
+                                    fontWeight: "700",
+                                    padding: "3px 8px",
+                                    fontSize: "11px",
+                                  }}
+                                  disabled={actionLoading === `delete-${device.id}`}
+                                  onClick={() => deleteDevicePermanently(device)}
+                                  title="Permanently delete device, purging all history. If it connects again, it is treated as a brand new machine."
+                                >
+                                  {actionLoading === `delete-${device.id}` ? "..." : "🗑️ Delete"}
+                                </button>
+                              )}
                             </>
                           ) : (
                             <span
@@ -14159,10 +14729,193 @@ const EndpointUpdatesPage = () => {
   };
 
   // ------------------------------------------------------------
-  // REMOTE CLIENT SCANNER PROBE MODAL (Disabled - Built Directly Into Project)
+  // REMOTE CLIENT SCANNER PROBE MODAL
   // ------------------------------------------------------------
   const renderProbeModal = () => {
-    return null;
+    if (!showProbeModal) return null;
+
+    const token = localStorage.getItem("netops_token") || "";
+    const siteName = selectedNetwork && selectedNetwork !== "all" ? selectedNetwork : "Remote Network";
+    const targetNet = detectedSubnet || "192.168.1.0/24";
+    const curlCmd = `curl -sSL "${API_URL}/discovery/probe-script" | python3 - --server "${API_URL}" --token "${token}" --network "${targetNet}" --network-name "${siteName}"`;
+    const winCmd = `powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-RestMethod -Uri '${API_URL}/discovery/probe-script' | python - --server '${API_URL}' --token '${token}' --network '${targetNet}' --network-name '${siteName}'"`;
+
+    return (
+      <div
+        className="modal-overlay"
+        onClick={() => setShowProbeModal(false)}
+        style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: "rgba(15, 23, 42, 0.75)",
+          backdropFilter: "blur(4px)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          zIndex: 99999,
+          padding: "16px",
+        }}
+      >
+        <div
+          className="automation-modal"
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            maxWidth: "740px",
+            width: "95%",
+            maxHeight: "90vh",
+            overflowY: "auto",
+            display: "flex",
+            flexDirection: "column",
+            background: "#0f172a",
+            color: "#f8fafc",
+            border: "1px solid #334155",
+            borderRadius: "12px",
+            boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)",
+          }}
+        >
+          {/* Header */}
+          <div
+            style={{
+              padding: "16px 20px",
+              borderBottom: "1px solid #1e293b",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
+            <div>
+              <div style={{ color: "#38bdf8", fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                REMOTE NETWORK DISCOVERY
+              </div>
+              <div style={{ fontSize: "18px", fontWeight: "700", display: "flex", alignItems: "center", gap: "8px", marginTop: "4px" }}>
+                <span>📡</span> NETOPS Remote LAN Probe
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowProbeModal(false)}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "#94a3b8",
+                fontSize: "20px",
+                cursor: "pointer",
+              }}
+            >
+              ✕
+            </button>
+          </div>
+
+          {/* Body */}
+          <div style={{ padding: "20px", display: "flex", flexDirection: "column", gap: "16px" }}>
+            <div style={{ background: "rgba(56, 189, 248, 0.08)", border: "1px solid rgba(56, 189, 248, 0.25)", borderRadius: "8px", padding: "12px 16px" }}>
+              <div style={{ fontWeight: "600", color: "#38bdf8", marginBottom: "4px", fontSize: "13px" }}>
+                Why is the remote probe required?
+              </div>
+              <div style={{ fontSize: "12px", color: "#cbd5e1", lineHeight: "1.5" }}>
+                When you are at a remote site or when the NETOPS server is hosted in the cloud, web browsers cannot directly broadcast raw Layer 2 ARP packets to remote private subnets. Running this zero-dependency Python probe from any computer at that site discovers all local devices and syncs them directly into your dashboard.
+              </div>
+            </div>
+
+            {/* Quick 1-Liner Linux / macOS */}
+            <div>
+              <div style={{ fontSize: "13px", fontWeight: "600", color: "#f1f5f9", marginBottom: "6px" }}>
+                🐧 Linux / macOS / WSL (1-Liner)
+              </div>
+              <div style={{ background: "#020617", border: "1px solid #1e293b", borderRadius: "6px", padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
+                <code style={{ fontSize: "12px", color: "#a5f3fc", wordBreak: "break-all", fontFamily: "monospace" }}>
+                  {curlCmd}
+                </code>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => {
+                    navigator.clipboard?.writeText(curlCmd);
+                    setProbeCopied(true);
+                    setTimeout(() => setProbeCopied(false), 2000);
+                  }}
+                  style={{ whiteSpace: "nowrap", padding: "5px 12px", fontSize: "12px", cursor: "pointer", flexShrink: 0 }}
+                >
+                  {probeCopied ? "✅ Copied" : "📋 Copy"}
+                </button>
+              </div>
+            </div>
+
+            {/* Quick 1-Liner Windows */}
+            <div>
+              <div style={{ fontSize: "13px", fontWeight: "600", color: "#f1f5f9", marginBottom: "6px" }}>
+                🪟 Windows PowerShell (1-Liner)
+              </div>
+              <div style={{ background: "#020617", border: "1px solid #1e293b", borderRadius: "6px", padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
+                <code style={{ fontSize: "12px", color: "#a5f3fc", wordBreak: "break-all", fontFamily: "monospace" }}>
+                  {winCmd}
+                </code>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => {
+                    navigator.clipboard?.writeText(winCmd);
+                    setProbeCopied(true);
+                    setTimeout(() => setProbeCopied(false), 2000);
+                  }}
+                  style={{ whiteSpace: "nowrap", padding: "5px 12px", fontSize: "12px", cursor: "pointer", flexShrink: 0 }}
+                >
+                  {probeCopied ? "✅ Copied" : "📋 Copy"}
+                </button>
+              </div>
+            </div>
+
+            {/* 1-Click Launchers */}
+            <div>
+              <div style={{ fontSize: "13px", fontWeight: "600", color: "#f1f5f9", marginBottom: "6px" }}>
+                📥 1-Click Launcher Scripts
+              </div>
+              <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                <a
+                  href={`${API_URL}/discovery/launcher/windows?token=${encodeURIComponent(token)}&network_name=${encodeURIComponent(siteName)}`}
+                  className="secondary-button"
+                  style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12px", padding: "8px 14px", color: "#f8fafc", background: "#1e293b", border: "1px solid #334155", borderRadius: "6px" }}
+                  download="scan_wifi.bat"
+                >
+                  <span>🪟</span> Download scan_wifi.bat (Windows)
+                </a>
+                <a
+                  href={`${API_URL}/discovery/launcher/linux-mac?token=${encodeURIComponent(token)}&network_name=${encodeURIComponent(siteName)}`}
+                  className="secondary-button"
+                  style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12px", padding: "8px 14px", color: "#f8fafc", background: "#1e293b", border: "1px solid #334155", borderRadius: "6px" }}
+                  download="scan_wifi.sh"
+                >
+                  <span>🐧</span> Download scan_wifi.sh (Linux/macOS)
+                </a>
+                <a
+                  href={`${API_URL}/discovery/probe-script`}
+                  className="secondary-button"
+                  style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12px", padding: "8px 14px", color: "#38bdf8", background: "#0f172a", border: "1px solid #0284c7", borderRadius: "6px" }}
+                  download="netops_probe.py"
+                >
+                  <span>🐍</span> Download netops_probe.py
+                </a>
+              </div>
+            </div>
+          </div>
+
+          {/* Footer */}
+          <div style={{ padding: "12px 20px", borderTop: "1px solid #1e293b", display: "flex", justifyContent: "flex-end" }}>
+            <button
+              type="button"
+              className="primary-button"
+              onClick={() => setShowProbeModal(false)}
+              style={{ padding: "7px 18px", fontSize: "13px" }}
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   };
 
 
@@ -15892,16 +16645,16 @@ const EndpointUpdatesPage = () => {
                   display: "inline-flex",
                   alignItems: "center",
                   gap: "6px",
-                  background: selectedNetwork === "Remote Network" ? "#eff6ff" : selectedNetwork === "Home Network" ? "#f0fdf4" : "#f8fafc",
-                  border: `1.5px solid ${selectedNetwork === "Remote Network" ? "#93c5fd" : selectedNetwork === "Home Network" ? "#86efac" : "#cbd5e1"}`,
+                  background: selectedNetwork === "current" ? "#f0f9ff" : selectedNetwork === "Remote Network" ? "#eff6ff" : selectedNetwork === "Home Network" ? "#f0fdf4" : "#f8fafc",
+                  border: `1.5px solid ${selectedNetwork === "current" ? "#7dd3fc" : selectedNetwork === "Remote Network" ? "#93c5fd" : selectedNetwork === "Home Network" ? "#86efac" : "#cbd5e1"}`,
                   borderRadius: "20px",
                   padding: "4px 10px",
                   boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
                 }}
-                title="Active Site / Network Scope: Switch between Remote Network and Home Network"
+                title="Active Site / Network Scope: Filter devices to the current connected network or switch between sites"
               >
                 <span style={{ fontSize: "13px" }}>
-                  {selectedNetwork === "Remote Network" ? "🌐" : selectedNetwork === "Home Network" ? "🏠" : "🌍"}
+                  {selectedNetwork === "current" ? "📡" : selectedNetwork === "Remote Network" ? "🌐" : selectedNetwork === "Home Network" ? "🏠" : "🌍"}
                 </span>
                 <span style={{ fontSize: "11px", fontWeight: "800", color: "#64748b", textTransform: "uppercase" }}>Site:</span>
                 <select
@@ -15912,14 +16665,15 @@ const EndpointUpdatesPage = () => {
                     border: "none",
                     fontSize: "12px",
                     fontWeight: "800",
-                    color: selectedNetwork === "Remote Network" ? "#1d4ed8" : selectedNetwork === "Home Network" ? "#15803d" : "#0f172a",
+                    color: selectedNetwork === "current" ? "#0284c7" : selectedNetwork === "Remote Network" ? "#1d4ed8" : selectedNetwork === "Home Network" ? "#15803d" : "#0f172a",
                     cursor: "pointer",
                     outline: "none",
                   }}
                 >
-                  <option value="all">🌍 All Networks (Global View)</option>
-                  <option value="Home Network">🏠 Home Network (Home LAN)</option>
+                  <option value="current">📡 Current Connected ({detectedSubnet || "Local Subnet"})</option>
+                  <option value="Home Network">🏠 Home Network (192.168.0.0/24)</option>
                   <option value="Remote Network">🌐 Remote Network (Remote Probe)</option>
+                  <option value="all">🌍 All Networks (Global View)</option>
                 </select>
               </div>
 
@@ -16112,16 +16866,16 @@ const EndpointUpdatesPage = () => {
                   display: "inline-flex",
                   alignItems: "center",
                   gap: "6px",
-                  background: selectedNetwork === "Remote Network" ? "#eff6ff" : selectedNetwork === "Home Network" ? "#f0fdf4" : "#f8fafc",
-                  border: `1.5px solid ${selectedNetwork === "Remote Network" ? "#93c5fd" : selectedNetwork === "Home Network" ? "#86efac" : "#cbd5e1"}`,
+                  background: selectedNetwork === "current" ? "#f0f9ff" : selectedNetwork === "Remote Network" ? "#eff6ff" : selectedNetwork === "Home Network" ? "#f0fdf4" : "#f8fafc",
+                  border: `1.5px solid ${selectedNetwork === "current" ? "#7dd3fc" : selectedNetwork === "Remote Network" ? "#93c5fd" : selectedNetwork === "Home Network" ? "#86efac" : "#cbd5e1"}`,
                   borderRadius: "20px",
                   padding: "4px 10px",
                   boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
                 }}
-                title="Active Site / Network Scope: Switch between Remote Network and Home Network"
+                title="Active Site / Network Scope: Filter devices to the current connected network or switch between sites"
               >
                 <span style={{ fontSize: "13px" }}>
-                  {selectedNetwork === "Remote Network" ? "🌐" : selectedNetwork === "Home Network" ? "🏠" : "🌍"}
+                  {selectedNetwork === "current" ? "📡" : selectedNetwork === "Remote Network" ? "🌐" : selectedNetwork === "Home Network" ? "🏠" : "🌍"}
                 </span>
                 <span style={{ fontSize: "11px", fontWeight: "800", color: "#64748b", textTransform: "uppercase" }}>Site:</span>
                 <select
@@ -16132,14 +16886,15 @@ const EndpointUpdatesPage = () => {
                     border: "none",
                     fontSize: "12px",
                     fontWeight: "800",
-                    color: selectedNetwork === "Remote Network" ? "#1d4ed8" : selectedNetwork === "Home Network" ? "#15803d" : "#0f172a",
+                    color: selectedNetwork === "current" ? "#0284c7" : selectedNetwork === "Remote Network" ? "#1d4ed8" : selectedNetwork === "Home Network" ? "#15803d" : "#0f172a",
                     cursor: "pointer",
                     outline: "none",
                   }}
                 >
-                  <option value="all">🌍 All Networks (Global View)</option>
-                  <option value="Home Network">🏠 Home Network (Home LAN)</option>
+                  <option value="current">📡 Current Connected ({detectedSubnet || "Local Subnet"})</option>
+                  <option value="Home Network">🏠 Home Network (192.168.0.0/24)</option>
                   <option value="Remote Network">🌐 Remote Network (Remote Probe)</option>
+                  <option value="all">🌍 All Networks (Global View)</option>
                 </select>
               </div>
 

@@ -4,6 +4,8 @@ export const TYPE_TO_VLAN = {
   ip_phone: 10,
   phone: 10,
   voip: 10,
+  smartphone: 10,
+  mobile: 10,
   computer: 20,
   cctv: 30,
   printer: 40,
@@ -38,46 +40,15 @@ export const isTypeAndVlanMatching = (device) => {
 };
 
 /**
- * Determines whether a device is truly online and connected.
- * If a device is quarantined or isolated (or pending or VLAN 90 or internet blocked),
- * it is considered OFFLINE with a red indicator.
+ * Determines whether a device is physically online and connected to the network.
+ * Physical presence is determined by device.status === "online" or device.is_online === true.
+ * Security policies (quarantine, pending approval, internet block) restrict internet access,
+ * but do not change the fact that the device is physically connected and detected on LAN/WLAN.
  */
 export const isDeviceActuallyOnline = (device) => {
   if (!device) return false;
   if (device.status === "offline" || device.status === "disconnected") return false;
-  if (
-    device.enforcement_status === "isolated" ||
-    device.access_decision === "isolated" ||
-    device.status === "isolated"
-  ) {
-    return false;
-  }
-  if (
-    device.enforcement_status === "quarantined" ||
-    device.vlan_id === 90 ||
-    device.access_decision === "quarantine"
-  ) {
-    return false;
-  }
-  if (
-    device.approval_status === "pending" ||
-    device.approval_status === "rejected" ||
-    (device.approval_status && device.approval_status !== "approved")
-  ) {
-    return false;
-  }
-  if (device.internet_access_authorized === false) {
-    return false;
-  }
-  const expectedVlan = getExpectedVlanForType(device.device_type);
-  if (
-    device.vlan_id !== undefined &&
-    device.vlan_id !== null &&
-    Number(device.vlan_id) !== expectedVlan
-  ) {
-    return false;
-  }
-  return device.status === "online";
+  return Boolean(device.status === "online" || device.is_online === true);
 };
 
 /**

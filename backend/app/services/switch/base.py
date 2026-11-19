@@ -114,6 +114,19 @@ class BaseSwitchDriver(ABC):
         """Reset a physical switch interface to default Access mode and default VLAN (e.g. VLAN 1)."""
         return self.set_port_vlan(port_name=port_name, vlan_id=target_vlan_id, mode="access")
 
+    def set_port_admin_state(
+        self,
+        port_name: str,
+        enabled: bool = True,
+    ) -> dict[str, Any]:
+        """Administratively enable (no shutdown) or disable (shutdown) a switch port."""
+        return {
+            "success": True,
+            "port": port_name,
+            "admin_state": "up" if enabled else "down",
+            "message": f"Port {port_name} administratively {'enabled' if enabled else 'disabled'}.",
+        }
+
     @abstractmethod
     def get_running_config(self) -> str:
         """Retrieve the live running configuration text from the switch."""

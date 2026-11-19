@@ -587,5 +587,217 @@ def test_batch_automate_vlans_assigns_without_granting_internet(monkeypatch):
     assert device2.enforcement_status == "quarantined"
 
 
+def test_auto_vlan_for_devices_specified_as_phones_gets_vlan_10(monkeypatch):
+    """
+    Ensure devices specified as phones ('phone' or 'ip_phone') always receive
+    VLAN 10 during Auto VLAN assignment, and are never misassigned to computer VLAN 20.
+    """
+    db = MagicMock()
+    monkeypatch.setattr(
+        "backend.app.services.vlan_automation.create_event",
+        MagicMock(),
+    )
+
+    # Device specified as phone
+    phone_dev = Device(
+        id=10,
+        mac_address="86:39:DD:44:DC:E8",
+        ip_address="192.168.0.114",
+        hostname="Phone-192-168-0-103",
+        vendor="Apple Inc.",
+        device_type="phone",
+        vlan_id=90,
+    )
+    result = automate_vlan_assignment(phone_dev, db)
+    assert result["vlan_id"] == 10
+    assert phone_dev.vlan_id == 10
+    assert phone_dev.device_type in ("phone", "ip_phone")
+
+
+def test_auto_vlan_for_transsion_and_samsung_mobile_phones(monkeypatch):
+    """
+    Ensure mobile phone manufacturers (Transsion, Infinix, Tecno, Samsung)
+    are recognized during Auto VLAN and assigned to VLAN 10.
+    """
+    db = MagicMock()
+    monkeypatch.setattr(
+        "backend.app.services.vlan_automation.create_event",
+        MagicMock(),
+    )
+
+    tecno_dev = Device(
+        id=11,
+        mac_address="70:12:F0:11:22:33",
+        ip_address="192.168.0.125",
+        hostname="Tecno-Spark-10",
+        vendor="Transsion Holdings (Infinix/Tecno)",
+        device_type=None,
+        vlan_id=90,
+    )
+    result_tecno = automate_vlan_assignment(tecno_dev, db)
+    assert result_tecno["vlan_id"] == 10
+    assert tecno_dev.vlan_id == 10
+
+    samsung_dev = Device(
+        id=12,
+        mac_address="58:20:B1:99:88:77",
+        ip_address="192.168.0.126",
+        hostname="Galaxy-A52",
+        vendor="Samsung Electronics",
+        device_type=None,
+        vlan_id=90,
+    )
+    result_samsung = automate_vlan_assignment(samsung_dev, db)
+    assert result_samsung["vlan_id"] == 10
+    assert samsung_dev.vlan_id == 10
+
+
+def test_auto_vlan_for_yealink_voip_desk_phone(monkeypatch):
+    """
+    Ensure VoIP desk phones (Yealink, Polycom, Grandstream) get VLAN 10.
+    """
+    db = MagicMock()
+    monkeypatch.setattr(
+        "backend.app.services.vlan_automation.create_event",
+        MagicMock(),
+    )
+
+    yealink_dev = Device(
+        id=13,
+        mac_address="80:5E:C0:11:22:33",
+        ip_address="192.168.0.155",
+        hostname="YEALINK-T46U",
+        vendor="Yealink Network Technology",
+        device_type=None,
+        vlan_id=90,
+    )
+    result = automate_vlan_assignment(yealink_dev, db)
+    assert result["vlan_id"] == 10
+    assert yealink_dev.vlan_id == 10
+    assert yealink_dev.device_type == "ip_phone"
+
+
+def test_auto_vlan_preserves_existing_authorized_internet_access(monkeypatch):
+    """
+    Ensure Auto VLAN endpoints (/devices/{id}/automate-vlan and /devices/automate-all-vlans)
+    preserve internet access authorization for devices that are already authorized,
+    and never disconnect or quarantine them.
+    """
+    from fastapi.testclient import TestClient
+    from backend.app.api import devices
+    from backend.app.database import get_db
+    from backend.app.main import app
+
+    db = MagicMock()
+
+    auth_phone = make_device("86:39:DD:44:DC:E8")
+    auth_phone.id = 55
+    auth_phone.hostname = "Phone-192-168-0-103"
+    auth_phone.vendor = "Apple Inc."
+    auth_phone.device_type = "phone"
+    auth_phone.vlan_id = 90
+    auth_phone.approval_status = "approved"
+    auth_phone.enforcement_status = "allowed"
+    auth_phone.internet_access_authorized = True
+    auth_phone.first_seen = datetime.now()
+    auth_phone.last_seen = datetime.now()
+
+    db.get.return_value = auth_phone
+
+    def override_get_db():
+        yield db
+
+    app.dependency_overrides[get_db] = override_get_db
+
+    mock_enforce = MagicMock()
+    monkeypatch.setattr(devices, "enforce_device_access", mock_enforce)
+    monkeypatch.setattr(devices, "create_event", MagicMock())
+
+    try:
+        client = TestClient(app)
+        response = client.post("/devices/55/automate-vlan")
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["vlan_id"] == 10
+    assert data["internet_access_authorized"] is True
+    assert data["enforcement_status"] == "allowed"
+
+    # Device properties verified
+    assert auth_phone.vlan_id == 10
+    assert auth_phone.approval_status == "approved"
+    assert auth_phone.internet_access_authorized is True
+    assert auth_phone.enforcement_status == "allowed"
+    mock_enforce.assert_called_once_with(auth_phone, db, force=True)
+
+
+def test_batch_auto_vlan_preserves_authorized_devices(monkeypatch):
+    """
+    Ensure batch /devices/automate-all-vlans preserves internet access for authorized
+    devices while keeping pending/unauthorized devices quarantined.
+    """
+    from fastapi.testclient import TestClient
+    from backend.app.api import devices
+    from backend.app.database import get_db
+    from backend.app.main import app
+
+    auth_dev = make_device("58:20:B1:01:00:96")
+    auth_dev.id = 61
+    auth_dev.device_type = "computer"
+    auth_dev.vlan_id = 20
+    auth_dev.approval_status = "approved"
+    auth_dev.enforcement_status = "allowed"
+    auth_dev.internet_access_authorized = True
+    auth_dev.first_seen = datetime.now()
+    auth_dev.last_seen = datetime.now()
+
+    unauth_dev = make_device("02:AA:BB:CC:DD:02")
+    unauth_dev.id = 62
+    unauth_dev.device_type = "computer"
+    unauth_dev.vlan_id = 90
+    unauth_dev.approval_status = "pending"
+    unauth_dev.enforcement_status = "quarantined"
+    unauth_dev.internet_access_authorized = False
+    unauth_dev.first_seen = datetime.now()
+    unauth_dev.last_seen = datetime.now()
+
+    db = MagicMock()
+    mock_scalars = MagicMock()
+    mock_scalars.all.return_value = [auth_dev, unauth_dev]
+    db.scalars.return_value = mock_scalars
+
+    def override_get_db():
+        yield db
+
+    app.dependency_overrides[get_db] = override_get_db
+
+    mock_enforce = MagicMock()
+    monkeypatch.setattr(devices, "enforce_device_access", mock_enforce)
+    monkeypatch.setattr(devices, "create_event", MagicMock())
+
+    try:
+        client = TestClient(app)
+        response = client.post("/devices/automate-all-vlans")
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "completed"
+    assert data["total_processed"] == 2
+
+    # Authorized device must remain authorized with internet
+    assert auth_dev.internet_access_authorized is True
+    assert auth_dev.enforcement_status == "allowed"
+
+    # Unauthorized device must remain unauthorized and quarantined
+    assert unauth_dev.internet_access_authorized is False
+    assert unauth_dev.enforcement_status == "quarantined"
+
+
+
+
 
 

@@ -225,6 +225,23 @@ def report_endpoint_update(
             "action": pending_job.action,
         }
 
+    # Calculate exact quarantine compliance state for universal host enforcement
+    is_quarantined = True
+    is_authorized = False
+    enforcement_status = "quarantined"
+    if matched_device:
+        is_authorized = bool(getattr(matched_device, "internet_access_authorized", False))
+        enforcement_status = getattr(matched_device, "enforcement_status", "quarantined")
+        approval_status = getattr(matched_device, "approval_status", "pending")
+        vlan_id = getattr(matched_device, "vlan_id", 90)
+
+        is_quarantined = (
+            not is_authorized
+            or enforcement_status in ("quarantined", "isolated")
+            or approval_status in ("pending", "rejected")
+            or vlan_id == 90
+        )
+
     return {
         "message": "Endpoint update status recorded",
         "id": endpoint_update.id,
@@ -244,6 +261,9 @@ def report_endpoint_update(
         "security_updates": endpoint_update.security_updates,
         "last_checked": endpoint_update.last_checked,
         "pending_command": pending_cmd,
+        "quarantined": is_quarantined,
+        "internet_access_authorized": is_authorized,
+        "enforcement_status": enforcement_status,
     }
 
 

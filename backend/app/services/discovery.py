@@ -6,7 +6,7 @@ import socket
 import subprocess
 import xml.etree.ElementTree as ET
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from ..models.device import Device
@@ -43,147 +43,7 @@ def is_valid_ip_address(ip_address: str | None) -> bool:
 DISCOVERY_INTERFACE = "eth0"
 
 
-COMMON_OUI_MAP = {
-    # Sophos Security Gateways
-    "7C:5A:1C": "Sophos",
-    "00:1A:8C": "Sophos",
-    # MikroTik / Routerboard
-    "2C:C8:1B": "Routerboard.com",
-    "48:8F:5A": "Routerboard.com",
-    "6C:3B:6B": "Routerboard.com",
-    "B8:69:F4": "Routerboard.com",
-    "DC:2C:6E": "Routerboard.com",
-    # Dell
-    "F0:1F:AF": "Dell Inc.",
-    "18:66:DA": "Dell Inc.",
-    "B4:B5:2F": "Dell Inc.",
-    "00:14:22": "Dell Inc.",
-    "44:A8:42": "Dell Inc.",
-    "5C:F9:DD": "Dell Inc.",
-    "D4:BE:D9": "Dell Inc.",
-    "E4:54:E8": "Dell Inc.",
-    # HP / Hewlett Packard
-    "3C:52:82": "HP Inc.",
-    "70:5A:0F": "HP Inc.",
-    "00:1E:0B": "HP Inc.",
-    "9C:B6:54": "HP Inc.",
-    "10:60:4B": "HP Inc.",
-    "B4:99:BA": "HP Inc.",
-    "C8:D3:FF": "HP Inc.",
-    # Apple
-    "BC:D0:74": "Apple Inc.",
-    "A4:83:E7": "Apple Inc.",
-    "86:39:DD": "Apple Inc.",
-    "38:F9:D3": "Apple Inc.",
-    "00:17:F2": "Apple Inc.",
-    "AC:DE:48": "Apple Inc.",
-    "F4:34:F0": "Apple Inc.",
-    "7C:04:D0": "Apple Inc.",
-    # TP-Link
-    "50:0F:F5": "TP-Link Technologies",
-    "E8:48:B8": "TP-Link Technologies",
-    "D8:0D:17": "TP-Link Technologies",
-    "00:0A:EB": "TP-Link Technologies",
-    "A0:F3:C1": "TP-Link Technologies",
-    "60:32:B1": "TP-Link Technologies",
-    "98:DA:C4": "TP-Link Technologies",
-    # Tenda
-    "04:95:E6": "Tenda Technology",
-    "C8:3A:35": "Tenda Technology",
-    "00:1E:58": "Tenda Technology",
-    # Cisco Systems
-    "00:08:E3": "Cisco Systems",
-    "00:1B:54": "Cisco Systems",
-    "00:26:99": "Cisco Systems",
-    "F4:CF:E2": "Cisco Systems",
-    # Canon
-    "70:85:C2": "Canon Inc.",
-    "00:00:85": "Canon Inc.",
-    "00:1E:8F": "Canon Inc.",
-    # Intel Corporate
-    "B4:B6:86": "Intel Corporate",
-    "00:24:D7": "Intel Corporate",
-    "00:26:55": "Intel Corporate",
-    "00:19:D1": "Intel Corporate",
-    # Realtek Semiconductor
-    "D4:6D:6D": "Realtek Semiconductor",
-    "00:E0:4C": "Realtek Semiconductor",
-    "52:54:00": "QEMU Virtual NIC",
-    # Samsung Electronics
-    "58:20:B1": "Samsung Electronics",
-    "B0:BE:76": "Samsung Electronics",
-    "AC:5F:3E": "Samsung Electronics",
-    # Raspberry Pi Foundation
-    "EC:FA:BC": "Raspberry Pi Foundation",
-    "DC:A6:32": "Raspberry Pi Foundation",
-    "B8:27:EB": "Raspberry Pi Foundation",
-    # Microsoft
-    "00:15:5D": "Microsoft Corporation",
-    "00:1A:11": "Microsoft Corporation",
-    # VMware
-    "00:0C:29": "VMware Inc.",
-    "00:50:56": "VMware Inc.",
-    # Espressif IoT (ESP32, ESP8266, smart plugs, sensors)
-    "24:0A:C4": "Espressif Inc.",
-    "30:AE:A4": "Espressif Inc.",
-    "84:F3:EB": "Espressif Inc.",
-    "A4:CF:12": "Espressif Inc.",
-    "D8:BF:C0": "Espressif Inc.",
-    # Amazon (Echo, Alexa, Fire TV, Ring)
-    "FC:65:DE": "Amazon Technologies",
-    "50:DC:E7": "Amazon Technologies",
-    "74:C2:46": "Amazon Technologies",
-    "68:37:E9": "Amazon Technologies",
-    "AC:63:BE": "Amazon Technologies",
-    # Google (Chromecast, Nest, Home)
-    "54:60:09": "Google LLC",
-    "F4:F5:D8": "Google LLC",
-    "D8:6C:63": "Google LLC",
-    "A4:77:33": "Google LLC",
-    # Ubiquiti Networks (UniFi APs, switches, routers)
-    "F0:9F:C2": "Ubiquiti Networks",
-    "B4:FB:E4": "Ubiquiti Networks",
-    "78:8A:20": "Ubiquiti Networks",
-    "24:A4:3C": "Ubiquiti Networks",
-    # Hikvision & Dahua (IP CCTV Cameras)
-    "C4:2F:90": "Hikvision Digital",
-    "44:19:B6": "Hikvision Digital",
-    "BC:BA:C2": "Dahua Technology",
-    # Brother / Epson Printers
-    "00:80:77": "Brother Industries",
-    "30:05:5C": "Brother Industries",
-    "00:26:AB": "Seiko Epson Corp.",
-    # Synology / QNAP NAS
-    "00:11:32": "Synology Inc.",
-    "00:08:9B": "QNAP Systems",
-    # Lenovo / Huawei / Xiaomi
-    "00:59:07": "Lenovo Mobile",
-    "70:72:3C": "Lenovo",
-    "00:E0:FC": "Huawei Technologies",
-    "48:46:FB": "Huawei Technologies",
-    "64:09:80": "Xiaomi Communications",
-    "78:11:DC": "Xiaomi Communications",
-}
-
-
-def resolve_mac_vendor(mac_address: str | None) -> str | None:
-    """
-    Resolve hardware vendor organization from IEEE OUI MAC prefix.
-    Detects smartphone randomized MACs and authentic manufacturer OUIs.
-    """
-    if not mac_address or len(mac_address) < 8:
-        return None
-    mac_clean = mac_address.strip().upper()
-    oui = mac_clean[:8]
-    if oui in COMMON_OUI_MAP:
-        return COMMON_OUI_MAP[oui]
-    try:
-        first_byte = int(mac_clean.split(":")[0], 16)
-        if first_byte & 0x02:
-            return "Mobile Phone (Private Wi-Fi MAC)"
-    except Exception:
-        pass
-    return None
+from .mac_vendor import COMMON_OUI_MAP, resolve_mac_vendor, is_private_mac
 
 
 def find_binary(name: str) -> str:
@@ -557,8 +417,8 @@ def _verify_device_liveness(ip: str, iface: str | None = None) -> bool:
     """
     Multi-mode liveness verification for a single IP address:
     1. Kernel /proc/net/arp check
-    2. arping (Layer 2)
-    3. ICMP ping (Layer 3)
+    2. arping (Layer 2) across specified and active candidate interfaces
+    3. ICMP ping (Layer 3) across specified and active candidate interfaces
     4. Fast TCP socket connection (Layer 4 - ports 80, 443, 445, 139, 22, 5357)
     Returns True if any check confirms the device is reachable.
     """
@@ -579,29 +439,50 @@ def _verify_device_liveness(ip: str, iface: str | None = None) -> bool:
         except Exception:
             pass
 
+    # Gather candidate interfaces: prioritize requested iface, then active physical ones, then default routing
+    candidate_ifaces = []
+    if iface and iface != "all":
+        candidate_ifaces.append(iface)
+    for alt in ("wlan0", "eth0"):
+        if alt not in candidate_ifaces and os.path.exists(f"/sys/class/net/{alt}"):
+            candidate_ifaces.append(alt)
+    if None not in candidate_ifaces:
+        candidate_ifaces.append(None)
+
     # 2. arping Layer 2 probe
-    try:
-        probe_cmd = ["arping", "-c", "1", "-w", "1"]
-        if iface and iface != "all":
-            probe_cmd.extend(["-i", iface])
-        probe_cmd.append(ip)
-        res = subprocess.run(probe_cmd, capture_output=True, check=False, timeout=1.2)
-        if res.returncode == 0:
-            return True
-    except Exception:
-        pass
+    for cand in candidate_ifaces:
+        try:
+            if cand:
+                carrier_file = f"/sys/class/net/{cand}/carrier"
+                if os.path.exists(carrier_file):
+                    try:
+                        with open(carrier_file, "r") as cf:
+                            if cf.read().strip() == "0":
+                                continue
+                    except Exception:
+                        pass
+            probe_cmd = ["arping", "-c", "1", "-w", "1"]
+            if cand:
+                probe_cmd.extend(["-i", cand])
+            probe_cmd.append(ip)
+            res = subprocess.run(probe_cmd, capture_output=True, check=False, timeout=1.2)
+            if res.returncode == 0:
+                return True
+        except Exception:
+            pass
 
     # 3. ICMP ping
-    try:
-        p_cmd = ["ping", "-c", "1", "-W", "1"]
-        if iface and iface != "all":
-            p_cmd.extend(["-I", iface])
-        p_cmd.append(ip)
-        res = subprocess.run(p_cmd, capture_output=True, check=False, timeout=1.0)
-        if res.returncode == 0:
-            return True
-    except Exception:
-        pass
+    for cand in candidate_ifaces:
+        try:
+            p_cmd = ["ping", "-c", "1", "-W", "1"]
+            if cand:
+                p_cmd.extend(["-I", cand])
+            p_cmd.append(ip)
+            res = subprocess.run(p_cmd, capture_output=True, check=False, timeout=1.0)
+            if res.returncode == 0:
+                return True
+        except Exception:
+            pass
 
     # 4. Fast TCP connect probe
     for port in (80, 443, 445, 139, 22, 5357):
@@ -1249,12 +1130,18 @@ def discover_devices(network: str, interface: str | None = None):
     return list(discovered_by_mac.values())
 
 
+# In-memory debounce tracking to prevent flapping on transient missed sweeps
+_discovery_consecutive_misses: dict[str, int] = {}
+
+
 def save_discovered_devices(
     devices: list[dict],
     db: Session,
     scanned_interface: str | None = None,
     owner_id: int | None = None,
     network_name: str | None = None,
+    mark_missing_offline: bool = True,
+    scanned_network: str | None = None,
 ):
     """
     Save discovered devices and update their state.
@@ -1302,18 +1189,40 @@ def save_discovered_devices(
     # 2. The scan returned zero devices (inconclusive / failed scan, or interface unattached).
     # 3. The scanned interface does not physically exist on this machine.
     can_verify_offline = (
-        is_mock_env or (
-            not is_cloud_host
-            and (not scanned_interface or scanned_interface == "all" or os.path.exists(f"/sys/class/net/{scanned_interface}"))
+        mark_missing_offline
+        and (
+            is_mock_env or (
+                not is_cloud_host
+                and (not scanned_interface or scanned_interface == "all" or os.path.exists(f"/sys/class/net/{scanned_interface}"))
+            )
         )
     )
 
     if can_verify_offline:
         for existing_device in existing_devices:
-            # If performing a single-interface scan (e.g. wlan0 or eth0), NEVER mark devices on other interfaces offline
+            # If performing a single-interface scan (e.g. wlan0 or eth0), do not mark devices on other interfaces offline
+            # UNLESS:
+            # 1. The device's assigned interface is currently down / NO-CARRIER (e.g. eth0 unplugged), OR
+            # 2. The device's IP belongs to the subnet being scanned.
             if scanned_interface and scanned_interface != "all":
-                if (existing_device.network_interface or "").lower() != scanned_interface.lower():
-                    continue
+                dev_iface = (existing_device.network_interface or "").lower()
+                if dev_iface and dev_iface != scanned_interface.lower():
+                    dev_iface_carrier = False
+                    carrier_path = f"/sys/class/net/{dev_iface}/carrier"
+                    if os.path.exists(carrier_path):
+                        try:
+                            with open(carrier_path, "r") as cf:
+                                dev_iface_carrier = (cf.read().strip() == "1")
+                        except Exception:
+                            pass
+                    ip_in_scanned = False
+                    if scanned_network and existing_device.ip_address:
+                        try:
+                            ip_in_scanned = ipaddress.ip_address(existing_device.ip_address) in ipaddress.ip_network(scanned_network, strict=False)
+                        except Exception:
+                            pass
+                    if dev_iface_carrier and not ip_in_scanned:
+                        continue
 
             dev_mac = (
                 existing_device.mac_address.replace(":", "").replace("-", "").upper()
@@ -1338,6 +1247,27 @@ def save_discovered_devices(
                 existing_device.status == "online"
                 and dev_mac not in discovered_macs
             ):
+                # Debounce in live environments: require consecutive missed sweeps before marking offline.
+                # BUT if device has not been seen for > 10 minutes, do NOT debounce: mark offline immediately!
+                is_stale_seen = False
+                if existing_device.last_seen:
+                    try:
+                        ls = existing_device.last_seen
+                        if ls.tzinfo is None:
+                            ls = ls.replace(tzinfo=timezone.utc)
+                        if (datetime.now(timezone.utc) - ls).total_seconds() > 600:
+                            is_stale_seen = True
+                    except Exception:
+                        pass
+                else:
+                    is_stale_seen = True
+
+                if not is_mock_env and not is_stale_seen:
+                    miss_count = _discovery_consecutive_misses.get(dev_mac, 0) + 1
+                    _discovery_consecutive_misses[dev_mac] = miss_count
+                    if miss_count < 2:
+                        continue
+
                 # Verify if device is actually unreachable before marking offline
                 is_still_reachable = False
                 if existing_device.ip_address:
@@ -1360,7 +1290,9 @@ def save_discovered_devices(
                             existing_device.network_interface,
                         )
 
-                if not is_still_reachable and existing_device.status == "online":
+                if is_still_reachable:
+                    _discovery_consecutive_misses[dev_mac] = 0
+                elif existing_device.status == "online":
                     existing_device.status = "offline"
                     last_ev = db.scalar(
                         select(Event)
@@ -1402,11 +1334,22 @@ def save_discovered_devices(
                 f"({mac_address})"
             )
             continue
-        existing_device = db.scalar(
-            select(Device).where(
-                func.upper(Device.mac_address) == mac_address
-            )
-        )
+        device_conditions = [func.upper(Device.mac_address) == mac_address]
+        if owner_id is not None:
+            device_conditions.append(Device.owner_id == owner_id)
+        if clean_network_name:
+            if clean_network_name.lower() == "home network":
+                device_conditions.append(
+                    or_(
+                        func.lower(Device.network_name) == "home network",
+                        Device.network_name.is_(None),
+                    )
+                )
+            else:
+                device_conditions.append(
+                    func.lower(Device.network_name) == clean_network_name.lower()
+                )
+        existing_device = db.scalar(select(Device).where(*device_conditions))
 
         if existing_device:
             if existing_device.mac_address != mac_address:
@@ -1471,17 +1414,34 @@ def save_discovered_devices(
         # -----------------------------------------------------
 
         if existing_device:
+            norm_m = mac_address.replace(":", "").replace("-", "").upper() if mac_address else ""
+            if norm_m:
+                _discovery_consecutive_misses[norm_m] = 0
+
             old_ip = existing_device.ip_address
             new_ip = discovered.get("ip_address")
             ip_changed = bool(new_ip and old_ip and old_ip != new_ip)
 
             if new_ip:
-                other_devices = db.scalars(
-                    select(Device).where(
-                        Device.ip_address == new_ip,
-                        func.upper(Device.mac_address) != mac_address,
-                    )
-                ).all()
+                dup_conditions = [
+                    Device.ip_address == new_ip,
+                    func.upper(Device.mac_address) != mac_address,
+                ]
+                if clean_network_name:
+                    if clean_network_name.lower() == "home network":
+                        dup_conditions.append(
+                            or_(
+                                func.lower(Device.network_name) == "home network",
+                                Device.network_name.is_(None),
+                            )
+                        )
+                    else:
+                        dup_conditions.append(
+                            func.lower(Device.network_name) == clean_network_name.lower()
+                        )
+                if owner_id is not None:
+                    dup_conditions.append(Device.owner_id == owner_id)
+                other_devices = db.scalars(select(Device).where(*dup_conditions)).all()
                 for other in other_devices:
                     other.ip_address = None
 
@@ -1769,12 +1729,25 @@ def save_discovered_devices(
         else:
             new_ip = discovered.get("ip_address")
             if new_ip:
-                other_devices = db.scalars(
-                    select(Device).where(
-                        Device.ip_address == new_ip,
-                        func.upper(Device.mac_address) != mac_address,
-                    )
-                ).all()
+                dup_conditions = [
+                    Device.ip_address == new_ip,
+                    func.upper(Device.mac_address) != mac_address,
+                ]
+                if clean_network_name:
+                    if clean_network_name.lower() == "home network":
+                        dup_conditions.append(
+                            or_(
+                                func.lower(Device.network_name) == "home network",
+                                Device.network_name.is_(None),
+                            )
+                        )
+                    else:
+                        dup_conditions.append(
+                            func.lower(Device.network_name) == clean_network_name.lower()
+                        )
+                if owner_id is not None:
+                    dup_conditions.append(Device.owner_id == owner_id)
+                other_devices = db.scalars(select(Device).where(*dup_conditions)).all()
                 for other in other_devices:
                     other.ip_address = None
 

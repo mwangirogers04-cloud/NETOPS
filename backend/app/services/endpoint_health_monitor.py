@@ -11,13 +11,13 @@ from ..models.event import Event
 from .event_service import create_event
 from .firewall.manager import get_active_firewall_driver
 from .sophos_enforcement import is_sophos_configured, sophos_allow_device
-from .l2_quarantine import restore_device_l2, is_protected, get_all_protected_macs, _is_cloud_host
+from .l2_quarantine import restore_device_l2, is_protected, get_all_protected_macs, _is_cloud_host, is_target_quarantined
 from .network_enforcement import enforce_device_access
-from .vlan_policy import get_vlan_for_device_type
+from .vlan_policy import get_vlan_for_device_type, is_type_and_vlan_matching
 
 
 STALE_AFTER_MINUTES = 15
-CHECK_INTERVAL_SECONDS = 4
+CHECK_INTERVAL_SECONDS = 5
 
 # In-memory debounce tracking to prevent flapping on transient ARP packet drops
 _consecutive_misses: dict[str, int] = {}
@@ -281,8 +281,8 @@ async def endpoint_health_monitor_loop():
                     res = subprocess.run(["ip", "neigh", "show"], capture_output=True, text=True, check=False, timeout=3)
                     for line in res.stdout.splitlines():
                         parts = line.strip().split()
-                        # Valid neighbour states include REACHABLE and PERMANENT
-                        if any(st in parts for st in ("REACHABLE", "PERMANENT")):
+                        # Valid neighbour states include REACHABLE, PERMANENT, STALE, DELAY, PROBE
+                        if any(st in parts for st in ("REACHABLE", "PERMANENT", "STALE", "DELAY", "PROBE")):
                             if len(parts) >= 1:
                                 active_ips.add(parts[0].strip())
                             if "lladdr" in parts:
@@ -302,6 +302,35 @@ async def endpoint_health_monitor_loop():
                                             "vendor": "LAN Device",
                                             "interface": dev_iface,
                                         }
+                except Exception:
+                    pass
+
+                # Also inspect kernel ARP table directly to catch any active resolved neighbors
+                try:
+                    if os.path.exists("/proc/net/arp"):
+                        with open("/proc/net/arp", "r", encoding="utf-8") as f:
+                            next(f, None)
+                            for line in f:
+                                fields = line.strip().split()
+                                if len(fields) >= 6:
+                                    ip_entry = fields[0]
+                                    flags_entry = fields[2]
+                                    mac_entry = fields[3].replace(":", "").replace("-", "").upper()
+                                    dev_entry = fields[5]
+                                    try:
+                                        flag_val = int(flags_entry, 16)
+                                    except ValueError:
+                                        flag_val = 0
+                                    if (flag_val & 0x2) and mac_entry not in ("000000000000", ""):
+                                        active_ips.add(ip_entry)
+                                        active_macs.add(mac_entry)
+                                        if mac_entry not in live_by_mac:
+                                            live_by_mac[mac_entry] = {
+                                                "ip_address": ip_entry,
+                                                "mac_address": fields[3].upper(),
+                                                "vendor": "LAN Device",
+                                                "interface": dev_entry,
+                                            }
                 except Exception:
                     pass
 
@@ -339,8 +368,10 @@ async def endpoint_health_monitor_loop():
                             or getattr(d, "vlan_id", None) == 90
                         )
                         if is_quarantined_or_blocked:
-                            # Skip active broadcast arping for unapproved/quarantined devices
-                            pass
+                            # Skip active broadcast arping for unapproved/quarantined devices.
+                            # If actively registered in L2 quarantine, the target host is present on the network.
+                            if is_target_quarantined(d.ip_address, d.mac_address):
+                                is_active = True
                         else:
                             # Prioritize the device's recorded interface, then fall back to others
                             preferred_iface = getattr(d, "network_interface", None) or "eth0"
@@ -528,7 +559,7 @@ async def endpoint_health_monitor_loop():
                         if expected_status == "online":
                             online_devices.append(d)
                     else:
-                        if is_cloud_host:
+                        if is_cloud_env:
                             # A cloud management server does not have physical LAN/WLAN interfaces (eth0/wlan0),
                             # so it cannot sweep remote broadcast domains directly. Retain the device's recorded online status!
                             if d.status == "online":
@@ -536,10 +567,21 @@ async def endpoint_health_monitor_loop():
                             continue
 
                         if d.status == "online":
+                            is_stale_seen = False
+                            if d.last_seen:
+                                try:
+                                    ls = d.last_seen
+                                    if ls.tzinfo is None:
+                                        ls = ls.replace(tzinfo=timezone.utc)
+                                    if (datetime.now(timezone.utc) - ls).total_seconds() > 900:
+                                        is_stale_seen = True
+                                except Exception:
+                                    pass
+
                             misses = _consecutive_misses.get(d_key, 0) + 1
                             _consecutive_misses[d_key] = misses
-                            if misses < 3:
-                                # Debounce: retain online status for 2 misses (~8s) to absorb transient ARP/Wi-Fi jitter
+                            if misses < 6 and not is_stale_seen:
+                                # Debounce: retain online status for 6 misses (~30s) to absorb transient ARP/Wi-Fi jitter
                                 online_devices.append(d)
                             else:
                                 d.status = "offline"

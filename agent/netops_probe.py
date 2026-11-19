@@ -30,6 +30,16 @@ import sys
 import urllib.request
 import urllib.error
 
+# Ensure agent directory is on sys.path for host_firewall
+PROBE_DIR = os.path.dirname(os.path.abspath(__file__))
+if PROBE_DIR not in sys.path:
+    sys.path.insert(0, PROBE_DIR)
+
+try:
+    import host_firewall
+except ImportError:
+    host_firewall = None
+
 
 COMMON_OUI_MAP = {
     # Sophos Security Gateways
@@ -496,6 +506,30 @@ def sync_to_netops(server_url, token, network, devices, network_name="Remote Net
         with urllib.request.urlopen(req, timeout=15) as resp:
             res_body = json.loads(resp.read().decode())
             print(f"[✓] Synchronization successful! Saved {res_body.get('devices_saved', len(devices))} devices under your account.")
+
+            # Universal Host Firewall Quarantine check
+            if host_firewall is not None:
+                q_devs = res_body.get("quarantined_devices", [])
+                q_ips = {d.get("ip_address") for d in q_devs if d.get("ip_address")}
+                a_devs = res_body.get("allowed_devices", [])
+                a_ips = {d.get("ip_address") for d in a_devs if d.get("ip_address")}
+
+                local_ips = set()
+                try:
+                    for item in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+                        local_ips.add(item[4][0])
+                except Exception:
+                    pass
+
+                if any(lip in q_ips for lip in local_ips):
+                    if not host_firewall.is_host_quarantined():
+                        print("[🔒 HOST QUARANTINE] Device is quarantined in NETOPS. Engaging OS Host Firewall...")
+                        host_firewall.quarantine_host(server_url)
+                elif any(lip in a_ips for lip in local_ips):
+                    if host_firewall.is_host_quarantined():
+                        print("[🔓 HOST RESTORE] Device is allowed in NETOPS. Releasing OS Host Firewall...")
+                        host_firewall.release_host()
+
             return True
     except urllib.error.HTTPError as e:
         print(f"[!] Server returned error: HTTP {e.code} - {e.read().decode()}")

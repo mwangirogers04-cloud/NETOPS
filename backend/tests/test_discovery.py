@@ -248,3 +248,40 @@ def test_save_discovered_devices_marks_disconnected_device_offline(db_session):
     assert evt is not None
     assert "went offline / disconnected from the LAN" in evt.message
 
+
+def test_save_discovered_devices_marks_offline_when_scanned_on_wlan0_for_eth0_device_in_subnet(db_session):
+    from backend.app.models.device import Device
+    from backend.app.models.event import Event
+    from backend.app.services.discovery import save_discovered_devices
+
+    device_eth0 = Device(
+        mac_address="7C:5A:1C:A4:0B:10",
+        ip_address="192.168.0.10",
+        hostname="LAN-DEVICE-344",
+        network_interface="eth0",
+        vendor="Intel",
+        device_type="computer",
+        approval_status="approved",
+        status="online",
+    )
+    db_session.add(device_eth0)
+    db_session.commit()
+
+    # Scan on wlan0 for subnet 192.168.0.0/24 discovers empty list
+    saved = save_discovered_devices(
+        [],
+        db_session,
+        scanned_interface="wlan0",
+        scanned_network="192.168.0.0/24",
+    )
+
+    db_session.refresh(device_eth0)
+    assert device_eth0.status == "offline"
+
+    evt = db_session.query(Event).filter(
+        Event.device_id == device_eth0.id,
+        Event.event_type == "device_offline",
+    ).first()
+    assert evt is not None
+    assert "went offline / disconnected from the LAN" in evt.message
+

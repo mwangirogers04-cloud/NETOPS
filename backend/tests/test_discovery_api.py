@@ -236,3 +236,77 @@ def test_http_scan_with_wlan0_interface(monkeypatch):
     discover_mock.assert_called_once_with("192.168.0.0/24", interface="wlan0")
     save_mock.assert_called_once()
 
+
+def test_http_scan_detects_duplicate_ip_conflicts(monkeypatch):
+    dev1 = MagicMock()
+    dev1.id = 10
+    dev1.ip_address = "192.168.0.55"
+    dev1.mac_address = "AA:11:22:33:44:55"
+    dev1.hostname = "DEVICE-A"
+    dev1.vendor = "VendorA"
+    dev1.device_type = "computer"
+    dev1.classification_status = "normal"
+    dev1.vlan_id = 20
+    dev1.approval_status = "approved"
+    dev1.status = "online"
+
+    dev2 = MagicMock()
+    dev2.id = 11
+    dev2.ip_address = "192.168.0.55"
+    dev2.mac_address = "BB:11:22:33:44:55"
+    dev2.hostname = "DEVICE-B"
+    dev2.vendor = "VendorB"
+    dev2.device_type = "phone"
+    dev2.classification_status = "normal"
+    dev2.vlan_id = 20
+    dev2.approval_status = "approved"
+    dev2.status = "online"
+
+    monkeypatch.setattr(discovery, "discover_devices", MagicMock(return_value=[]))
+    monkeypatch.setattr(discovery, "save_discovered_devices", MagicMock(return_value=[dev1, dev2]))
+
+    response = client.post(
+        "/discovery/scan",
+        json={"network": "192.168.0.0/24", "interface": "wlan0"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ip_conflicts_count"] == 1
+    assert len(data["duplicate_ips"]) == 1
+    assert data["duplicate_ips"][0]["ip_address"] == "192.168.0.55"
+    assert data["duplicate_ips"][0]["count"] == 2
+
+
+def test_http_scan_unreachable_network_returns_informative_status(monkeypatch):
+    monkeypatch.setattr(discovery, "discover_devices", MagicMock(return_value=[]))
+    monkeypatch.setattr(
+        discovery,
+        "detect_local_subnets",
+        MagicMock(
+            return_value={
+                "interfaces": [
+                    {"interface": "eth0", "ip": "192.168.0.111", "network": "192.168.0.0/24"}
+                ],
+                "default_network": "192.168.0.0/24",
+            }
+        ),
+    )
+    monkeypatch.setattr("os.path.exists", lambda path: True if "sys/class/net" in path else False)
+
+    # Disable mock/test bypass flag inside run_discovery_scan to test bare-metal physical host behavior
+    with monkeypatch.context() as m:
+        m.setenv("PYTEST_CURRENT_TEST", "")
+        response = client.post(
+            "/discovery/scan",
+            json={"network": "10.50.0.0/24", "network_name": "Branch Office"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "unreachable_network"
+        assert "cannot be directly reached" in data["message"]
+        assert data["devices_discovered"] == 0
+        assert "probe_command" in data
+        assert "10.50.0.0/24" in data["probe_command"]
+
+
+

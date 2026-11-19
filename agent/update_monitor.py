@@ -9,6 +9,16 @@ import time
 import os
 import sys
 
+# Ensure agent directory is in sys.path for host_firewall import
+AGENT_DIR = os.path.dirname(os.path.abspath(__file__))
+if AGENT_DIR not in sys.path:
+    sys.path.insert(0, AGENT_DIR)
+
+try:
+    import host_firewall
+except ImportError:
+    host_firewall = None
+
 def get_default_interface():
     """Determine the active default gateway network interface or fallback."""
     try:
@@ -335,7 +345,7 @@ def execute_patch_job(job_id, action, server_url=None):
 
 
 if __name__ == "__main__":
-    REPORT_INTERVAL = 300
+    REPORT_INTERVAL = int(os.environ.get("NETOPS_AGENT_INTERVAL", 15))
     run_once = "--once" in sys.argv
 
     while True:
@@ -352,15 +362,26 @@ if __name__ == "__main__":
         response = send_update_status(information, target_url)
         print(response)
 
-        # Process any pending central remediation instructions
+        # Process universal router-agnostic quarantine enforcement & patch commands
         try:
-            resp_json = json.loads(response)
-            if isinstance(resp_json, dict) and resp_json.get("pending_command"):
-                cmd = resp_json["pending_command"]
-                execute_patch_job(cmd["job_id"], cmd["action"], target_url)
-                # Immediately send refreshed compliance report
-                fresh_info = collect_update_status()
-                send_update_status(fresh_info, target_url)
+            resp_json = json.loads(response) if isinstance(response, str) else response
+            if isinstance(resp_json, dict) and host_firewall is not None:
+                quarantine_target = resp_json.get("quarantined")
+                if quarantine_target is True:
+                    if not host_firewall.is_host_quarantined():
+                        print("\n[🔒 QUARANTINE] Central console ordered internet quarantine. Locking host firewall...")
+                        host_firewall.quarantine_host(target_url)
+                elif quarantine_target is False:
+                    if host_firewall.is_host_quarantined():
+                        print("\n[🔓 RESTORE] Central console granted internet access. Releasing host firewall...")
+                        host_firewall.release_host()
+
+                if resp_json.get("pending_command"):
+                    cmd = resp_json["pending_command"]
+                    execute_patch_job(cmd["job_id"], cmd["action"], target_url)
+                    # Immediately send refreshed compliance report
+                    fresh_info = collect_update_status()
+                    send_update_status(fresh_info, target_url)
         except Exception as proc_err:
             print(f"Instruction processing notice: {proc_err}")
 
@@ -368,8 +389,7 @@ if __name__ == "__main__":
             break
 
         print(
-            f"\nNext update check in "
-            f"{REPORT_INTERVAL // 60} minutes..."
+            f"\nNext check in {REPORT_INTERVAL}s..."
         )
 
         time.sleep(REPORT_INTERVAL)

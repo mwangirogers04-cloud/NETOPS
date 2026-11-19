@@ -39,12 +39,21 @@ from backend.app.services.l2_quarantine import (
     restore_device_l2,
     is_protected,
     is_target_quarantined,
+    is_valid_quarantine_ip,
 )
+try:
+    from . import host_firewall
+except ImportError:
+    try:
+        import host_firewall
+    except ImportError:
+        host_firewall = None
 from backend.app.services.sophos_enforcement import (
     is_sophos_configured,
     sophos_block_device,
     sophos_allow_device,
 )
+from backend.app.services.router.manager import get_active_router_driver
 
 logging.basicConfig(
     level=logging.INFO,
@@ -127,7 +136,7 @@ def _get_quick_kernel_devices() -> list[dict]:
                 ip = parts[0]
                 mac = parts[parts.index("lladdr") + 1].upper()
                 iface = parts[parts.index("dev") + 1]
-                if mac and len(mac) == 17 and mac not in seen and ip.startswith("192.168.0."):
+                if mac and len(mac) == 17 and mac not in seen and is_valid_quarantine_ip(ip):
                     seen.add(mac)
                     devices.append({
                         "ip_address": ip,
@@ -149,7 +158,7 @@ def _get_quick_kernel_devices() -> list[dict]:
                 parts = line.split()
                 if len(parts) >= 6:
                     ip, mac, iface = parts[0], parts[3].upper(), parts[5]
-                    if len(mac) == 17 and mac != "00:00:00:00:00:00" and mac not in seen and ip.startswith("192.168.0."):
+                    if len(mac) == 17 and mac != "00:00:00:00:00:00" and mac not in seen and is_valid_quarantine_ip(ip):
                         seen.add(mac)
                         devices.append({
                             "ip_address": ip,
@@ -168,6 +177,8 @@ def _get_quick_kernel_devices() -> list[dict]:
 _cached_devices: list[dict] = []
 _devices_lock = threading.Lock()
 _locally_quarantined_ips: set[str] = set()
+_synced_router_quarantined_ips: set[str] = set()
+_synced_router_allowed_ips: set[str] = set()
 _enforcement_initialized: bool = False
 
 
@@ -224,6 +235,28 @@ def sync_to_cloud(server_url: str, devices: list, token: str | None = None, netw
                 if d.get("ip_address") and d.get("mac_address") and d.get("ip_address") not in current_quarantined_ips
             }
 
+            # 0. Universal Host Firewall Enforcement (Router-Agnostic for this machine)
+            if host_firewall is not None:
+                local_ips = set()
+                try:
+                    res = subprocess.run(["ip", "-4", "-o", "addr", "show"], capture_output=True, text=True, check=False)
+                    for l in res.stdout.splitlines():
+                        pts = l.split()
+                        if len(pts) >= 4 and "/" in pts[3]:
+                            local_ips.add(pts[3].split("/")[0])
+                except Exception:
+                    pass
+
+                should_quarantine_self = any(lip in current_quarantined_ips for lip in local_ips)
+                if should_quarantine_self:
+                    if not host_firewall.is_host_quarantined():
+                        logger.info("[🔒 HOST QUARANTINE] Central console quarantined this host. Engaging host firewall...")
+                        host_firewall.quarantine_host(server_url)
+                else:
+                    if host_firewall.is_host_quarantined():
+                        logger.info("[🔓 HOST RESTORE] Central console allowed this host. Releasing host firewall...")
+                        host_firewall.release_host()
+
             # 1. Immediate Layer-2 Restoration for allowed devices (unblock + authentic GARP restoration)
             for ip, dev in current_allowed_map.items():
                 if ip in current_quarantined_ips:
@@ -259,30 +292,57 @@ def sync_to_cloud(server_url: str, devices: list, token: str | None = None, netw
                 )
                 _enforcement_initialized = True
 
-            # 3. Synchronize external hardware firewall (Sophos) asynchronously
-            def _sync_sophos_async(q_list, a_list):
-                if not is_sophos_configured():
-                    return
-                for d in q_list:
-                    ip_d = d.get("ip_address")
-                    if ip_d:
-                        try:
-                            sophos_block_device(ip_d)
-                        except Exception:
-                            pass
-                for d in a_list:
-                    ip_d = d.get("ip_address")
-                    if ip_d:
-                        try:
-                            sophos_allow_device(ip_d)
-                        except Exception:
-                            pass
+            # 3. Synchronize external hardware firewall (Sophos) & local router asynchronously
+            def _sync_hardware_async(q_list, a_list):
+                global _synced_router_quarantined_ips, _synced_router_allowed_ips
+                # A. Router-level enforcement (Tenda, TP-Link, MikroTik, Universal Engine)
+                try:
+                    router_drv = get_active_router_driver()
+                    for d in q_list:
+                        ip_d = d.get("ip_address")
+                        mac_d = d.get("mac_address")
+                        if ip_d and mac_d and ip_d not in _synced_router_quarantined_ips:
+                            try:
+                                router_drv.block_device(ip_d, mac_d)
+                                _synced_router_quarantined_ips.add(ip_d)
+                                _synced_router_allowed_ips.discard(ip_d)
+                            except Exception:
+                                pass
+                    for d in a_list:
+                        ip_d = d.get("ip_address")
+                        mac_d = d.get("mac_address")
+                        if ip_d and mac_d and ip_d not in _synced_router_allowed_ips:
+                            try:
+                                router_drv.allow_device(ip_d, mac_d)
+                                _synced_router_allowed_ips.add(ip_d)
+                                _synced_router_quarantined_ips.discard(ip_d)
+                            except Exception:
+                                pass
+                except Exception as r_err:
+                    logger.debug("Router sync notice: %s", r_err)
+
+                # B. Firewall enforcement (Sophos)
+                if is_sophos_configured():
+                    for d in q_list:
+                        ip_d = d.get("ip_address")
+                        if ip_d:
+                            try:
+                                sophos_block_device(ip_d)
+                            except Exception:
+                                pass
+                    for d in a_list:
+                        ip_d = d.get("ip_address")
+                        if ip_d:
+                            try:
+                                sophos_allow_device(ip_d)
+                            except Exception:
+                                pass
 
             threading.Thread(
-                target=_sync_sophos_async,
+                target=_sync_hardware_async,
                 args=(quarantined, allowed),
                 daemon=True,
-                name="SophosSyncWorker",
+                name="HardwareSyncWorker",
             ).start()
 
             return True

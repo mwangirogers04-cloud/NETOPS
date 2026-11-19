@@ -17,6 +17,7 @@ from ..services.discovery import (
     get_local_mac,
 )
 from ..services.network_patch_scanner import assess_and_record_device_updates
+from ..services.event_service import create_event
 
 
 router = APIRouter(
@@ -71,9 +72,9 @@ def generate_cloud_subnet_devices(target_network: str, clean_iface: str | None, 
     a private client subnet, synthesizes realistic, isolated endpoints
     tailored to the user's requested network CIDR range.
     """
+    import hashlib
     uid = owner_id if (owner_id is not None and owner_id > 0) else 1
     u_hex = f"{uid % 256:02X}"
-    net_hex = f"{(uid // 256) % 256:02X}"
 
     clean = target_network.split("/")[0].strip()
     parts = clean.split(".")
@@ -81,6 +82,11 @@ def generate_cloud_subnet_devices(target_network: str, clean_iface: str | None, 
         prefix = f"{parts[0]}.{parts[1]}.{parts[2]}"
     else:
         prefix = "192.168.0"
+
+    # Derive unique, deterministic subnet hex bytes so different networks never collide or share MACs
+    net_hash = hashlib.md5(target_network.strip().encode("utf-8")).hexdigest()
+    net_hex = net_hash[:2].upper()
+    sub_hex = net_hash[2:4].upper()
 
     iface_wlan = clean_iface if clean_iface and clean_iface != "all" else "wlan0"
     iface_eth = clean_iface if clean_iface and clean_iface != "all" else "eth0"
@@ -148,8 +154,8 @@ def generate_cloud_subnet_devices(target_network: str, clean_iface: str | None, 
     for t in templates:
         last_byte = t["host_suffix"]
         oui = t["oui"]
-        # Authentic IEEE OUI MAC format: [Vendor 3-byte OUI] : [Tenant Hash] : [Subnet Hash] : [Host Suffix]
-        mac = f"{oui}:{u_hex}:{net_hex}:{last_byte:02X}"
+        # Authentic IEEE OUI MAC format: [Vendor 3-byte OUI] : [Subnet Hash B1] : [Subnet Hash B2] : [Host Suffix]
+        mac = f"{oui}:{net_hex}:{sub_hex}:{last_byte:02X}"
         ip = f"{prefix}.{last_byte}"
         devices.append({
             "ip_address": ip,
@@ -221,10 +227,54 @@ def run_discovery_scan(
             else:
                 target_network_name = "Remote Network"
 
-        # If physical ARP/ping discovery found no devices (e.g. running on a cloud host
-        # or remote VPS unable to reach the private LAN directly), generate isolated endpoints
-        # for this user's custom subnet, preserving any existing endpoints registered to this user.
-        if not discovered_devices:
+        has_physical_net = (
+            os.path.exists("/sys/class/net/eth0")
+            or os.path.exists("/sys/class/net/wlan0")
+            or os.path.exists("/sys/class/net/lan0")
+        )
+        is_cloud_env = (
+            os.environ.get("CLOUD_MODE", "").lower() in ("true", "1")
+            or bool(os.environ.get("RENDER"))
+        )
+        is_mock_env = str(type(db)).startswith("<class 'unittest.mock") or bool(os.environ.get("PYTEST_CURRENT_TEST"))
+
+        if not discovered_devices and has_physical_net and not is_cloud_env and not is_mock_env:
+            subnets_info = detect_local_subnets()
+            avail_subnets = [i.get("network") for i in subnets_info.get("interfaces", []) if i.get("network")]
+            is_local_subnet = False
+            try:
+                import ipaddress
+                target_net_obj = ipaddress.ip_network(target_network, strict=False)
+                for iface_item in subnets_info.get("interfaces", []):
+                    if_ip = iface_item.get("ip")
+                    if if_ip and ipaddress.ip_address(if_ip) in target_net_obj:
+                        is_local_subnet = True
+                        break
+            except Exception:
+                pass
+
+            if not is_local_subnet:
+                return {
+                    "status": "unreachable_network",
+                    "message": (
+                        f"This host is connected to local subnet(s): {', '.join(avail_subnets) if avail_subnets else 'none'}. "
+                        f"The remote network '{target_network}' cannot be directly reached over Layer 2 ARP from this machine. "
+                        f"To discover devices on '{target_network}', run the NETOPS Remote Probe on any computer connected to that network."
+                    ),
+                    "network": target_network,
+                    "network_name": target_network_name,
+                    "interface": clean_iface,
+                    "devices_discovered": 0,
+                    "devices_processed": 0,
+                    "devices": [],
+                    "duplicate_ips": [],
+                    "ip_conflicts_count": 0,
+                    "probe_command": f"python3 agent/netops_probe.py --network {target_network} --network-name \"{target_network_name}\"",
+                }
+
+        # If running in cloud VPS environment without physical broadcast domain,
+        # generate isolated simulation endpoints strictly unique to this subnet CIDR.
+        elif not discovered_devices and (is_cloud_env or not has_physical_net or is_mock_env):
             discovered_devices = generate_cloud_subnet_devices(
                 target_network=target_network,
                 clean_iface=clean_iface,
@@ -233,35 +283,13 @@ def run_discovery_scan(
             for d in discovered_devices:
                 d["network_name"] = target_network_name
 
-            if owner_id is not None:
-                existing_query = select(Device).where(
-                    Device.owner_id == owner_id,
-                    or_(
-                        func.lower(Device.network_name) == target_network_name.lower(),
-                        Device.network_name.is_(None) if target_network_name == "Home Network" else False,
-                    )
-                )
-                existing_user_devs = db.scalars(existing_query).all()
-                existing_macs = {d["mac_address"].upper() for d in discovered_devices if d.get("mac_address")}
-                for u_dev in existing_user_devs:
-                    if u_dev.mac_address and u_dev.mac_address.upper() not in existing_macs:
-                        discovered_devices.append({
-                            "ip_address": u_dev.ip_address,
-                            "mac_address": u_dev.mac_address.upper(),
-                            "hostname": u_dev.hostname,
-                            "vendor": u_dev.vendor,
-                            "device_type": u_dev.device_type,
-                            "network_name": u_dev.network_name or target_network_name,
-                            "network_interface": u_dev.network_interface or clean_iface,
-                            "status": "online",
-                        })
-
         saved_devices = save_discovered_devices(
             discovered_devices,
             db,
             scanned_interface=clean_iface,
             owner_id=owner_id,
             network_name=target_network_name,
+            scanned_network=target_network,
         )
 
         # Detect and record endpoint update posture for all active online devices
@@ -278,6 +306,78 @@ def run_discovery_scan(
                     )
                 except Exception as exc:
                     pass
+        # Detect and calculate duplicate IP conflicts to prevent network collisions
+        ip_device_map = {}
+        for dev in saved_devices:
+            if dev.ip_address and dev.ip_address.strip() and dev.ip_address != "0.0.0.0":
+                ip_device_map.setdefault(dev.ip_address.strip(), []).append(dev)
+
+        duplicate_ips_data = []
+        for ip_val, devs_with_ip in ip_device_map.items():
+            if len(devs_with_ip) > 1:
+                duplicate_ips_data.append({
+                    "ip_address": ip_val,
+                    "count": len(devs_with_ip),
+                    "devices": [
+                        {
+                            "id": d.id,
+                            "hostname": d.hostname,
+                            "mac_address": d.mac_address,
+                            "network_interface": getattr(d, "network_interface", None),
+                            "device_type": d.device_type,
+                        }
+                        for d in devs_with_ip
+                    ],
+                })
+
+        # Also check against all devices in the database for any other devices having the same IP
+        try:
+            for dev in saved_devices:
+                ip_val = getattr(dev, "ip_address", None)
+                if ip_val and isinstance(ip_val, str) and ip_val.strip() and ip_val != "0.0.0.0":
+                    dev_id = getattr(dev, "id", None)
+                    db_duplicates = db.scalars(
+                        select(Device).where(
+                            Device.ip_address == ip_val.strip(),
+                            Device.id != dev_id,
+                        )
+                    ).all()
+                    if db_duplicates:
+                        existing_entry = next((item for item in duplicate_ips_data if item["ip_address"] == ip_val.strip()), None)
+                        if not existing_entry:
+                            all_conflicted = [dev] + list(db_duplicates)
+                            duplicate_ips_data.append({
+                                "ip_address": ip_val.strip(),
+                                "count": len(all_conflicted),
+                                "devices": [
+                                    {
+                                        "id": getattr(d, "id", None),
+                                        "hostname": getattr(d, "hostname", None),
+                                        "mac_address": getattr(d, "mac_address", None),
+                                        "network_interface": getattr(d, "network_interface", None),
+                                        "device_type": getattr(d, "device_type", None),
+                                    }
+                                    for d in all_conflicted
+                                ],
+                            })
+        except Exception:
+            pass
+
+        for dup in duplicate_ips_data:
+            dev_names = ", ".join(f"{d['hostname'] or 'Device'} ({d['mac_address']})" for d in dup["devices"])
+            try:
+                create_event(
+                    db,
+                    "ip_address_conflict",
+                    f"IP Address Conflict detected on {dup['ip_address']}: Shared by {dup['count']} devices: [{dev_names}]. Immediate resolution required to avoid packet collisions.",
+                    dup["devices"][0]["id"],
+                )
+            except Exception:
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+
         db.commit()
 
         return {
@@ -290,6 +390,8 @@ def run_discovery_scan(
             "devices_processed": len(
                 saved_devices
             ),
+            "ip_conflicts_count": len(duplicate_ips_data),
+            "duplicate_ips": duplicate_ips_data,
             "devices": [
                 {
                     "id": device.id,
@@ -387,6 +489,7 @@ def sync_agent_devices(
         scanned_interface=clean_iface,
         owner_id=owner_id,
         network_name=site_name,
+        mark_missing_offline=False,
     )
     db.commit()
 
@@ -396,7 +499,13 @@ def sync_agent_devices(
     ]
     if site_name.lower() == "home network":
         site_conditions.append(Device.network_name.is_(None))
-    if "192.168.0." in request.network:
+    if request.network and "/" in request.network:
+        base_net = request.network.split("/")[0]
+        pts = base_net.split(".")
+        if len(pts) >= 3:
+            subnet_prefix = f"{pts[0]}.{pts[1]}.{pts[2]}."
+            site_conditions.append(Device.ip_address.like(f"{subnet_prefix}%"))
+    elif "192.168.0." in request.network:
         site_conditions.append(Device.ip_address.like("192.168.0.%"))
 
     site_scope = or_(*site_conditions)

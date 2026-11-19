@@ -366,6 +366,30 @@ class SimulationSwitchDriver(BaseSwitchDriver):
             "commands_applied": cmds,
         }
 
+    def set_port_admin_state(
+        self,
+        port_name: str,
+        enabled: bool = True,
+    ) -> dict[str, Any]:
+        clean_port = port_name.strip()
+        new_status = "connected" if enabled else "disabled"
+        for p in self._ports_cache:
+            if (
+                p["port"].lower() == clean_port.lower()
+                or p["short_name"].lower() == clean_port.lower()
+                or clean_port.lower().endswith(p["short_name"].lower())
+            ):
+                p["status"] = new_status
+                clean_port = p["port"]
+                break
+        return {
+            "success": True,
+            "port": clean_port,
+            "admin_state": "up" if enabled else "down",
+            "status": new_status,
+            "message": f"Port {clean_port} administratively {'enabled' if enabled else 'disabled'} (simulation).",
+        }
+
     def get_running_config(self) -> str:
         """
         Generate a realistic Cisco IOS running-config representing the current state

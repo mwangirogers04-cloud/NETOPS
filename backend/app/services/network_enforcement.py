@@ -16,6 +16,8 @@ from .sophos_enforcement import (
     sophos_block_device,
     sophos_allow_device,
 )
+from .router.manager import get_active_router_driver
+from .switch_enforcement import switch_quarantine_device, switch_restore_device
 from .vlan_policy import get_vlan_for_device_type, is_type_and_vlan_matching
 
 
@@ -146,7 +148,10 @@ def enforce_device_access(
     # ---------------------------------------------------------
 
     active_driver = get_active_firewall_driver(db)
+    router_driver = get_active_router_driver(db)
     firewall_result = None
+    switch_result = None
+    router_result = None
 
     if decision == "allowed":
         action = "allow"
@@ -184,6 +189,23 @@ def enforce_device_access(
                         message += " [Sophos Firewall: Unblocked]"
                 except Exception as exc:
                     message += f" [Sophos Warning: {exc}]"
+
+        # Switch-level enforcement (Layer 2 / Layer 3 VLAN restoration)
+        try:
+            switch_result = switch_restore_device(device, db, target_vlan=device.vlan_id)
+            if switch_result.get("status") == "allowed":
+                message += f" [Switch: Port {switch_result.get('switch_port')} -> VLAN {switch_result.get('vlan_id')}]"
+        except Exception:
+            pass
+
+        # Router-level enforcement (Tenda, TP-Link, MikroTik, Universal Router Engine)
+        if (force or status_changed) and device.ip_address and device.mac_address:
+            try:
+                router_result = router_driver.allow_device(device.ip_address, device.mac_address)
+                if router_result.get("status") == "allowed":
+                    message += f" [{router_driver.get_vendor_title()}: Unblocked]"
+            except Exception:
+                pass
 
     else:
         if decision == "isolated":
@@ -231,22 +253,48 @@ def enforce_device_access(
                 except Exception as exc:
                     message += f" [Sophos Warning: {exc}]"
 
+        # Switch-level enforcement (Layer 2 / Layer 3 VLAN 90 quarantine or port shutdown)
+        try:
+            sw_method = "shutdown" if decision == "isolated" else "vlan"
+            switch_result = switch_quarantine_device(device, db, method=sw_method)
+            if switch_result.get("status") == "quarantined":
+                if sw_method == "shutdown":
+                    message += f" [Switch: Port {switch_result.get('switch_port')} Disabled]"
+                else:
+                    message += f" [Switch: Port {switch_result.get('switch_port')} -> Quarantine VLAN 90]"
+        except Exception:
+            pass
+
+        # Router-level enforcement (Tenda, TP-Link, MikroTik, Universal Router Engine)
+        if (force or status_changed) and device.ip_address and device.mac_address:
+            try:
+                router_result = router_driver.block_device(device.ip_address, device.mac_address, device.hostname or "")
+                if router_result.get("status") == "blocked":
+                    message += f" [{router_driver.get_vendor_title()}: Blocked]"
+            except Exception:
+                pass
+
     # ---------------------------------------------------------
     # Store current enforcement state.
     # Physical connection status (online/offline) is preserved.
     # ---------------------------------------------------------
 
     device.enforcement_status = enforcement_status
-    if (
-        enforcement_status in ("quarantined", "isolated")
-        or not getattr(device, "internet_access_authorized", False)
-        or device.approval_status in ("pending", "rejected")
-        or getattr(device, "vlan_id", None) == 90
-        or not is_type_and_vlan_matching(device.device_type, getattr(device, "vlan_id", None))
-    ):
-        device.status = "offline"
+    if force:
+        if (
+            enforcement_status in ("quarantined", "isolated")
+            or not getattr(device, "internet_access_authorized", False)
+            or device.approval_status in ("pending", "rejected")
+            or getattr(device, "vlan_id", None) == 90
+            or not is_type_and_vlan_matching(device.device_type, getattr(device, "vlan_id", None))
+        ):
+            device.status = "offline"
+        else:
+            device.status = "online"
     else:
-        device.status = "online"
+        # Preserve physical reachability status determined by endpoint health monitor & discovery
+        if not device.status:
+            device.status = "online"
 
     # ---------------------------------------------------------
     # Audit event.
@@ -365,4 +413,6 @@ def enforce_device_access(
         "firewall_vendor": "sophos" if is_live_sophos else active_driver.vendor,
         "firewall_result": firewall_result,
         "sophos_result": firewall_result,
+        "switch_result": switch_result,
+        "router_result": router_result,
     }

@@ -5,6 +5,7 @@ from .device_classifier import classify_device
 from .event_service import create_event
 from .vlan_policy import get_vlan_for_device_type
 from .switch_mapping import identify_switch_port
+from .mac_vendor import resolve_mac_vendor, is_private_mac
 
 
 def automate_vlan_assignment(
@@ -34,19 +35,44 @@ def automate_vlan_assignment(
     # 1. Determine Device Type and VLAN from Vendor / MAC
     # =========================================================
 
-    valid_types = {"ip_phone", "phone", "voip", "computer", "cctv", "printer", "server", "access_point"}
-    if not device.device_type or device.device_type == "unknown" or device.device_type not in valid_types:
+    # If vendor is missing or generic, resolve via IEEE OUI database
+    if (not device.vendor or device.vendor.strip().lower() in ("generic", "lan device", "unknown", "")) and device.mac_address:
+        resolved = resolve_mac_vendor(device.mac_address)
+        if resolved:
+            device.vendor = resolved
+
+    valid_operational_types = {"ip_phone", "phone", "voip", "computer", "cctv", "printer", "server", "access_point"}
+
+    # If device was already specified as a valid type, check whether it's a computer that is actually a phone
+    if device.device_type in valid_operational_types and device.device_type != "unknown":
+        if device.device_type == "computer":
+            cand = classify_device(
+                hostname=device.hostname,
+                vendor=device.vendor,
+                mac_address=device.mac_address,
+                network_interface=getattr(device, "network_interface", None),
+                medium=getattr(device, "medium", None),
+            )
+            if cand in ("ip_phone", "phone", "voip"):
+                device.device_type = cand
+    else:
+        # Thorough check across vendor OUI, hostname, MAC, and network medium
         classified_type = classify_device(
             hostname=device.hostname,
             vendor=device.vendor,
             mac_address=device.mac_address,
+            network_interface=getattr(device, "network_interface", None),
+            medium=getattr(device, "medium", None),
+            current_type=device.device_type,
         )
 
         if classified_type != "unknown":
             device.device_type = classified_type
-        elif not device.device_type or device.device_type == "unknown":
-            # If device has an active IP on the LAN/WLAN, default to standard workstation (VLAN 20)
-            device.device_type = "computer"
+        else:
+            if is_private_mac(device.mac_address) or (device.hostname and "phone" in device.hostname.lower()):
+                device.device_type = "phone"
+            else:
+                device.device_type = "computer"
 
     vlan_id = get_vlan_for_device_type(
         device.device_type

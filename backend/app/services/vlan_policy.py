@@ -2,6 +2,8 @@ VLAN_POLICY = {
     "ip_phone": 10,
     "phone": 10,
     "voip": 10,
+    "smartphone": 10,
+    "mobile": 10,
     "computer": 20,
     "cctv": 30,
     "printer": 40,
