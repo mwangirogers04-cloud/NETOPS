@@ -418,4 +418,76 @@ def test_endpoint_health_monitor_quarantined_device_remains_offline(monkeypatch)
     assert dev.status == "online"
 
 
+def test_disconnected_device_rapidly_transitions_to_offline(monkeypatch):
+    from unittest.mock import patch
+    from backend.app.models.device import Device
+
+    dev = Device(
+        id=114,
+        mac_address="86:39:DD:44:DC:E8",
+        ip_address="192.168.0.114",
+        hostname="Phone-192-168-0-103",
+        status="online",
+        approval_status="approved",
+        enforcement_status="allowed",
+        internet_access_authorized=True,
+    )
+
+    class RealDbSession:
+        def __init__(self):
+            self.committed = False
+            self.closed = False
+        def scalars(self, query):
+            mock_res = MagicMock()
+            q_str = str(query).lower()
+            if "device" in q_str:
+                mock_res.all.return_value = [dev]
+            else:
+                mock_res.all.return_value = []
+            mock_res.first.return_value = None
+            return mock_res
+        def commit(self):
+            self.committed = True
+        def close(self):
+            self.closed = True
+        def rollback(self):
+            pass
+
+    db_instance = RealDbSession()
+    monkeypatch.setattr(monitor, "SessionLocal", lambda: db_instance)
+    event_mock = MagicMock()
+    monkeypatch.setattr(monitor, "create_event", event_mock)
+
+    call_count = 0
+    async def run_two_cycles(_seconds):
+        nonlocal call_count
+        call_count += 1
+        if call_count >= 2:
+            raise RuntimeError("stop test loop")
+
+    monkeypatch.setattr(monitor.asyncio, "sleep", run_two_cycles)
+
+    # Subprocess returns empty for arp-scan and non-zero for arping/ping (device disconnected)
+    with patch("backend.app.services.endpoint_health_monitor.subprocess.run") as mock_subproc:
+        fake_res = MagicMock()
+        fake_res.stdout = ""
+        fake_res.returncode = 1
+        mock_subproc.return_value = fake_res
+
+        try:
+            asyncio.run(monitor.endpoint_health_monitor_loop())
+        except RuntimeError as err:
+            assert str(err) == "stop test loop"
+
+    # Device must transition to offline
+    assert dev.status == "offline"
+    offline_calls = [
+        c for c in event_mock.call_args_list if c.kwargs.get("event_type") == "device_offline"
+    ]
+    assert len(offline_calls) >= 1
+    assert offline_calls[0].kwargs["device_id"] == dev.id
+    assert "went offline" in offline_calls[0].kwargs["message"]
+
+
+
 

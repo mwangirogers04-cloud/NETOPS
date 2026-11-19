@@ -425,19 +425,23 @@ def _verify_device_liveness(ip: str, iface: str | None = None) -> bool:
     if not ip or not is_valid_ip_address(ip):
         return False
 
-    # 1. Kernel ARP table check
-    if os.path.exists("/proc/net/arp"):
-        try:
-            with open("/proc/net/arp", "r") as f:
-                for line in f:
-                    parts = line.split()
-                    if len(parts) >= 4 and parts[0] == ip:
-                        flags = parts[2]
-                        mac = parts[3].upper()
-                        if flags in ("0x2", "0x6", "0x4") and mac != "00:00:00:00:00:00":
-                            return True
-        except Exception:
-            pass
+    # 1. Kernel neighbor table resolution check
+    try:
+        res = subprocess.run(
+            ["ip", "-4", "neigh", "show", ip],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=1,
+        )
+        for line in res.stdout.splitlines():
+            line_upper = line.upper()
+            if "FAILED" in line_upper or "INCOMPLETE" in line_upper:
+                return False
+            if "REACHABLE" in line_upper or "PERMANENT" in line_upper:
+                return True
+    except Exception:
+        pass
 
     # Gather candidate interfaces: prioritize requested iface, then active physical ones, then default routing
     candidate_ifaces = []
@@ -1033,7 +1037,9 @@ def discover_devices(network: str, interface: str | None = None):
             if not existing.get("vendor") and k_dev.get("vendor"):
                 existing["vendor"] = k_dev["vendor"]
         else:
-            discovered_by_mac[k_mac] = k_dev
+            # Only add un-discovered kernel ARP entries if confirmed live
+            if _verify_device_liveness(k_dev["ip_address"], k_dev.get("interface")):
+                discovered_by_mac[k_mac] = k_dev
 
     # ---------------------------------------------------------
     # 5. Process Linux neighbour-table fallback (ip neigh)

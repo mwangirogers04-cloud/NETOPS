@@ -47,8 +47,9 @@ export const isTypeAndVlanMatching = (device) => {
  */
 export const isDeviceActuallyOnline = (device) => {
   if (!device) return false;
-  if (device.status === "offline" || device.status === "disconnected") return false;
-  return Boolean(device.status === "online" || device.is_online === true);
+  const s = String(device.status || "").trim().toLowerCase();
+  if (s === "offline" || s === "disconnected") return false;
+  return Boolean(s === "online" || device.is_online === true);
 };
 
 /**
@@ -121,7 +122,7 @@ export const getDeviceInternetStatus = (device) => {
     shortReason = "Offline";
     statusIcon = isWireless ? "📶⚪" : "🔌⚪";
     badgeColor = "#64748b";
-    badgeBg = "rgba(100, 116, 139, 0.15)",
+    badgeBg = "rgba(100, 116, 139, 0.15)";
     badgeBorder = "#94a3b8";
   } else if (isTypeVlanMismatch) {
     reason = `Type & VLAN Mismatch: Device type '${device.device_type || "unknown"}' requires VLAN ${expectedVlan}, but assigned VLAN ${device.vlan_id || 90}. Device must match in TYPE and VLAN section to be connected.`;

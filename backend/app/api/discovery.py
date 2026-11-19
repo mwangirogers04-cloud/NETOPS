@@ -57,6 +57,7 @@ class AgentDeviceItem(BaseModel):
     network_interface: str | None = None
     interface: str | None = None
     network_name: str | None = None
+    status: str | None = None
 
 
 class AgentSyncRequest(BaseModel):
@@ -509,6 +510,30 @@ def sync_agent_devices(
         site_conditions.append(Device.ip_address.like("192.168.0.%"))
 
     site_scope = or_(*site_conditions)
+
+    # Reconcile offline status for devices missing from the agent physical sweep
+    active_macs = set()
+    for rd in raw_devices:
+        mac = (rd.get("mac_address") or "").replace(":", "").replace("-", "").upper()
+        if mac and rd.get("status") != "offline":
+            active_macs.add(mac)
+
+    existing_site_devices = db.scalars(select(Device).where(site_scope)).all()
+    status_changed = False
+    for ed in existing_site_devices:
+        ed_mac = (ed.mac_address or "").replace(":", "").replace("-", "").upper()
+        if ed_mac and ed_mac not in active_macs:
+            if ed.status == "online":
+                ed.status = "offline"
+                status_changed = True
+                create_event(
+                    db,
+                    "device_offline",
+                    f"Device {ed.hostname or ed.ip_address or ed_mac} ({ed.mac_address}) went offline / disconnected from {site_name}.",
+                    ed.id,
+                )
+    if status_changed:
+        db.commit()
 
     quarantine_criteria = or_(
         Device.enforcement_status.in_(["quarantined", "isolated"]),

@@ -249,6 +249,8 @@ def test_save_discovered_devices_marks_disconnected_device_offline(db_session):
     assert "went offline / disconnected from the LAN" in evt.message
 
 
+
+
 def test_save_discovered_devices_marks_offline_when_scanned_on_wlan0_for_eth0_device_in_subnet(db_session):
     from backend.app.models.device import Device
     from backend.app.models.event import Event
@@ -284,4 +286,70 @@ def test_save_discovered_devices_marks_offline_when_scanned_on_wlan0_for_eth0_de
     ).first()
     assert evt is not None
     assert "went offline / disconnected from the LAN" in evt.message
+
+
+def test_agent_sync_marks_disconnected_device_offline(db_session):
+    from backend.app.models.device import Device
+    from backend.app.models.event import Event
+    from backend.app.api.discovery import sync_agent_devices, AgentSyncRequest, AgentDeviceItem
+
+    target_dev = Device(
+        mac_address="86:39:DD:44:DC:E8",
+        ip_address="192.168.0.114",
+        hostname="Phone-192-168-0-114",
+        vendor="Samsung",
+        device_type="phone",
+        network_name="Home Network",
+        owner_id=1,
+        approval_status="approved",
+        status="online",
+    )
+    other_dev = Device(
+        mac_address="50:0F:F5:98:F0:10",
+        ip_address="192.168.0.1",
+        hostname="Router",
+        vendor="TP-Link",
+        device_type="router",
+        network_name="Home Network",
+        owner_id=1,
+        approval_status="approved",
+        internet_access_authorized=True,
+        enforcement_status="allowed",
+        vlan_id=20,
+        status="online",
+    )
+    db_session.add_all([target_dev, other_dev])
+    db_session.commit()
+
+    # Agent sync reports ONLY the router (phone disconnected)
+    req = AgentSyncRequest(
+        network="192.168.0.0/24",
+        network_name="Home Network",
+        devices=[
+            AgentDeviceItem(
+                mac_address="50:0F:F5:98:F0:10",
+                ip_address="192.168.0.1",
+                hostname="Router",
+                network_name="Home Network",
+            )
+        ],
+    )
+
+    res = sync_agent_devices(request=req, current_user=None, db=db_session)
+    assert res["status"] == "completed"
+
+    db_session.refresh(target_dev)
+    db_session.refresh(other_dev)
+
+    assert other_dev.status == "online"
+    assert target_dev.status == "offline"
+
+    evt = db_session.query(Event).filter(
+        Event.device_id == target_dev.id,
+        Event.event_type == "device_offline",
+    ).first()
+    assert evt is not None
+    assert "went offline / disconnected from Home Network" in evt.message
+
+
 

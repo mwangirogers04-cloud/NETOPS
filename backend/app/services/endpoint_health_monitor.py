@@ -17,7 +17,7 @@ from .vlan_policy import get_vlan_for_device_type, is_type_and_vlan_matching
 
 
 STALE_AFTER_MINUTES = 15
-CHECK_INTERVAL_SECONDS = 5
+CHECK_INTERVAL_SECONDS = 3
 
 # In-memory debounce tracking to prevent flapping on transient ARP packet drops
 _consecutive_misses: dict[str, int] = {}
@@ -278,8 +278,8 @@ def _run_endpoint_health_cycle_sync():
                     res = subprocess.run(["ip", "neigh", "show"], capture_output=True, text=True, check=False, timeout=3)
                     for line in res.stdout.splitlines():
                         parts = line.strip().split()
-                        # Valid neighbour states include REACHABLE, PERMANENT, STALE, DELAY, PROBE
-                        if any(st in parts for st in ("REACHABLE", "PERMANENT", "STALE", "DELAY", "PROBE")):
+                        # Only confirmed REACHABLE or PERMANENT neighbour entries indicate active reachability
+                        if any(st in parts for st in ("REACHABLE", "PERMANENT")):
                             if len(parts) >= 1:
                                 active_ips.add(parts[0].strip())
                             if "lladdr" in parts:
@@ -302,7 +302,7 @@ def _run_endpoint_health_cycle_sync():
                 except Exception:
                     pass
 
-                # Also inspect kernel ARP table directly to catch any active resolved neighbors
+                # Inspect kernel ARP table for hardware/interface metadata of active devices without assuming inactive cache entries are live
                 try:
                     if os.path.exists("/proc/net/arp"):
                         with open("/proc/net/arp", "r", encoding="utf-8") as f:
@@ -319,8 +319,6 @@ def _run_endpoint_health_cycle_sync():
                                     except ValueError:
                                         flag_val = 0
                                     if (flag_val & 0x2) and mac_entry not in ("000000000000", ""):
-                                        active_ips.add(ip_entry)
-                                        active_macs.add(mac_entry)
                                         if mac_entry not in live_by_mac:
                                             live_by_mac[mac_entry] = {
                                                 "ip_address": ip_entry,
@@ -577,8 +575,8 @@ def _run_endpoint_health_cycle_sync():
 
                             misses = _consecutive_misses.get(d_key, 0) + 1
                             _consecutive_misses[d_key] = misses
-                            if misses < 6 and not is_stale_seen:
-                                # Debounce: retain online status for 6 misses (~30s) to absorb transient ARP/Wi-Fi jitter
+                            if misses < 2 and not is_stale_seen:
+                                # Rapid debounce: retain online status for 1 miss to absorb transient jitter; mark offline on 2nd consecutive miss (~3-6s)
                                 online_devices.append(d)
                             else:
                                 d.status = "offline"

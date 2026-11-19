@@ -133,6 +133,9 @@ def _get_quick_kernel_devices() -> list[dict]:
         for line in res.stdout.splitlines():
             parts = line.split()
             if len(parts) >= 5 and "lladdr" in parts and "dev" in parts:
+                state = parts[-1].upper() if len(parts) > parts.index("lladdr") + 1 else ""
+                if state in ("FAILED", "INCOMPLETE", "STALE"):
+                    continue
                 ip = parts[0]
                 mac = parts[parts.index("lladdr") + 1].upper()
                 iface = parts[parts.index("dev") + 1]
@@ -375,7 +378,31 @@ def run_sync_loop(server_url: str, interval: float = 2.0, token: str | None = No
     # 3. Fast high-frequency enforcement sync loop
     while True:
         try:
+            # Rapid neighbor table check to filter out disconnected / FAILED / INCOMPLETE devices immediately (< 5ms)
+            neigh_failed_ips = set()
+            try:
+                res = subprocess.run(
+                    ["ip", "-4", "neigh", "show"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=1,
+                )
+                for line in res.stdout.splitlines():
+                    pts = line.split()
+                    if len(pts) >= 2:
+                        state = pts[-1].upper()
+                        if state in ("FAILED", "INCOMPLETE"):
+                            neigh_failed_ips.add(pts[0])
+            except Exception:
+                pass
+
             with _devices_lock:
+                if neigh_failed_ips:
+                    _cached_devices = [
+                        d for d in _cached_devices
+                        if d.get("ip_address") not in neigh_failed_ips
+                    ]
                 devs_to_send = list(_cached_devices)
             sync_to_cloud(server_url, devs_to_send, token, network_name=network_name)
         except Exception as exc:
