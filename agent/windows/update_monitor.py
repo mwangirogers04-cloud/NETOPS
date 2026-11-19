@@ -269,9 +269,24 @@ def report_job_status(job_id, status, progress_percent=None, log_output=None, er
 
 
 def execute_patch_job(job_id, action, server_url=None):
-    """Execute Windows Update installation requested by NETOPS central console."""
+    """Execute Windows Update installation or system restart requested by NETOPS central console."""
     print(f"\n[NETOPS INSTRUCTION] Received remote update command: Job #{job_id} ({action})")
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    if action == "REBOOT_MACHINE":
+        print(f"[NETOPS] Restart command accepted. Initiating local Windows reboot sequence...")
+        report_job_status(
+            job_id=job_id,
+            status="COMPLETED",
+            progress_percent=100,
+            log_output=f"[{now_str}] Windows endpoint accepted restart instruction from NETOPS. Executing shutdown /r /t 5...",
+            server_url=server_url,
+        )
+        try:
+            subprocess.run(["shutdown", "/r", "/t", "5", "/c", "NETOPS Update Finalization Reboot"], check=False)
+        except Exception as e:
+            print(f"[NETOPS] Reboot trigger note: {e}")
+        return
 
     report_job_status(
         job_id=job_id,

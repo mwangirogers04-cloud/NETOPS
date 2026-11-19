@@ -14,6 +14,8 @@ import argparse
 import json
 import logging
 import os
+import platform
+import socket
 import subprocess
 import sys
 import threading
@@ -183,6 +185,156 @@ _locally_quarantined_ips: set[str] = set()
 _synced_router_quarantined_ips: set[str] = set()
 _synced_router_allowed_ips: set[str] = set()
 _enforcement_initialized: bool = False
+_handled_reboot_job_ids: set[int] = set()
+
+
+def _report_job_status_to_cloud(
+    server_url: str,
+    job_id: int,
+    status: str,
+    progress_percent: int = 100,
+    log_output: str | None = None,
+    error_message: str | None = None,
+    token: str | None = None,
+):
+    """Callback to report job execution progress or completion to cloud console."""
+    endpoint = f"{server_url.rstrip('/')}/endpoint-updates/jobs/{job_id}/status"
+    payload = {
+        "status": status,
+        "progress_percent": progress_percent,
+        "log_output": log_output,
+        "error_message": error_message,
+    }
+    data = json.dumps(payload).encode("utf-8")
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 NETOPS/1.0",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    try:
+        req = urllib.request.Request(endpoint, data=data, headers=headers, method="POST")
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            pass
+    except Exception as exc:
+        logger.warning(f"[RebootWorker] Could not report job #{job_id} status to cloud: {exc}")
+
+
+def _handle_reboot_commands(server_url: str, reboot_commands: list[dict], token: str | None = None):
+    """Execute pending reboot jobs for on-prem endpoints or local host."""
+    global _handled_reboot_job_ids
+    for cmd in reboot_commands:
+        job_id = cmd.get("job_id")
+        if not job_id or job_id in _handled_reboot_job_ids:
+            continue
+        _handled_reboot_job_ids.add(job_id)
+
+        target_ip = (cmd.get("ip_address") or "").strip()
+        target_mac = (cmd.get("mac_address") or "").replace(":", "").replace("-", "").upper()
+        target_host = (cmd.get("hostname") or "endpoint").strip()
+        now_str = time.strftime("%Y-%m-%d %H:%M:%S")
+
+        # Discover all IPs and MACs belonging to this host machine running the agent
+        local_ips = {"127.0.0.1", "localhost"}
+        try:
+            res = subprocess.run(["ip", "-4", "-o", "addr", "show"], capture_output=True, text=True, check=False)
+            for l in res.stdout.splitlines():
+                pts = l.split()
+                if len(pts) >= 4 and "/" in pts[3]:
+                    local_ips.add(pts[3].split("/")[0])
+        except Exception:
+            pass
+
+        local_macs = set()
+        try:
+            res = subprocess.run(["ip", "link", "show"], capture_output=True, text=True, check=False)
+            for l in res.stdout.splitlines():
+                pts = l.strip().split()
+                if len(pts) >= 2 and pts[0] == "link/ether":
+                    local_macs.add(pts[1].replace(":", "").replace("-", "").upper())
+        except Exception:
+            pass
+
+        local_hostnames = {
+            socket.gethostname().lower(),
+            platform.node().lower(),
+            "kali",
+            "localhost",
+        }
+
+        is_this_host = (
+            (target_ip and target_ip in local_ips)
+            or (target_mac and target_mac in local_macs)
+            or (target_host and target_host.lower() in local_hostnames)
+        )
+
+        if is_this_host:
+            logger.info(f"[🔄 REBOOT] Received restart command for this host ({target_host} / {target_ip}). Executing system reboot...")
+            _report_job_status_to_cloud(
+                server_url=server_url,
+                job_id=job_id,
+                status="COMPLETED",
+                progress_percent=100,
+                log_output=(
+                    f"[{now_str}] Local system restart instruction acknowledged by agent host ({target_host} / {target_ip}).\n"
+                    f"[{now_str}] Dispatching local system command: shutdown -r +1 'NETOPS System Update Reboot'"
+                ),
+                token=token,
+            )
+            try:
+                subprocess.Popen(["shutdown", "-r", "+1", "NETOPS System Update Reboot"])
+            except Exception as e:
+                logger.error(f"[!] Local reboot failed: {e}")
+        else:
+            logger.info(f"[🔄 REBOOT] Attempting remote LAN reboot for {target_host} ({target_ip})...")
+            reboot_ok = False
+            diag = None
+            if target_ip:
+                try:
+                    res = subprocess.run(
+                        ["net", "rpc", "shutdown", "-I", target_ip, "-U", "%", "-t", "5", "-f"],
+                        capture_output=True,
+                        text=True,
+                        timeout=8,
+                        check=False,
+                    )
+                    if res.returncode == 0:
+                        reboot_ok = True
+                    else:
+                        diag = res.stderr.strip() or res.stdout.strip()
+                except subprocess.TimeoutExpired:
+                    diag = "Connection timed out (Port 445/135 filtered by Windows Defender Firewall)"
+                except Exception as ex:
+                    diag = str(ex)
+
+            if reboot_ok:
+                logger.info(f"[✓] Remote reboot signal delivered to {target_host} ({target_ip}).")
+                _report_job_status_to_cloud(
+                    server_url=server_url,
+                    job_id=job_id,
+                    status="COMPLETED",
+                    progress_percent=100,
+                    log_output=f"[{now_str}] Remote endpoint {target_host} ({target_ip}) accepted reboot signal via Windows RPC.",
+                    token=token,
+                )
+            else:
+                err_msg = diag or "Endpoint rejected remote RPC shutdown"
+                guidance = (
+                    f"Remote endpoint {target_host} ({target_ip}) rejected network shutdown: {err_msg}.\n"
+                    f"To reboot remote Windows endpoints over the network:\n"
+                    f"  1. Run the NETOPS Windows Agent on that PC (python agent/windows/update_monitor.py), OR\n"
+                    f"  2. Configure Administrator credentials and allow remote RPC in Windows Defender Firewall."
+                )
+                logger.warning(f"[!] Remote reboot failed for {target_ip}: {err_msg}")
+                _report_job_status_to_cloud(
+                    server_url=server_url,
+                    job_id=job_id,
+                    status="FAILED",
+                    progress_percent=100,
+                    error_message=err_msg,
+                    log_output=f"[{now_str}] {guidance}",
+                    token=token,
+                )
 
 
 def _background_discovery_sweep(interval: float = 45.0):
@@ -347,6 +499,16 @@ def sync_to_cloud(server_url: str, devices: list, token: str | None = None, netw
                 daemon=True,
                 name="HardwareSyncWorker",
             ).start()
+
+            # 4. Handle remote & local machine reboot instructions from central console
+            reboot_commands = body.get("reboot_commands", [])
+            if reboot_commands:
+                threading.Thread(
+                    target=_handle_reboot_commands,
+                    args=(server_url, reboot_commands, token),
+                    daemon=True,
+                    name="RebootWorker",
+                ).start()
 
             return True
     except urllib.error.HTTPError as err:

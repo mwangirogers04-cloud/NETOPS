@@ -261,8 +261,8 @@ def report_job_status(job_id, status, progress_percent=None, log_output=None, er
 
 
 def execute_patch_job(job_id, action, server_url=None):
-    """Execute update installation requested by NETOPS central console."""
-    print(f"\n[NETOPS INSTRUCTION] Received remote update command: Job #{job_id} ({action})")
+    """Execute update installation or machine restart requested by NETOPS central console."""
+    print(f"\n[NETOPS INSTRUCTION] Received remote command: Job #{job_id} ({action})")
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     # Check for elevated privileges or passwordless sudo
@@ -271,6 +271,21 @@ def execute_patch_job(job_id, action, server_url=None):
         sudo_check = subprocess.run(["sudo", "-n", "true"], capture_output=True, check=False)
         if sudo_check.returncode == 0:
             cmd_prefix = ["sudo", "-n"]
+
+    if action == "REBOOT_MACHINE":
+        print(f"[NETOPS] Restart command accepted. Initiating local system restart...")
+        report_job_status(
+            job_id=job_id,
+            status="COMPLETED",
+            progress_percent=100,
+            log_output=f"[{now_str}] Endpoint accepted restart instruction from NETOPS. Executing shutdown -r +1...",
+            server_url=server_url,
+        )
+        try:
+            subprocess.Popen(cmd_prefix + ["shutdown", "-r", "+1", "NETOPS System Update Reboot"])
+        except Exception as e:
+            print(f"[NETOPS] Reboot trigger note: {e}")
+        return
 
     report_job_status(
         job_id=job_id,
