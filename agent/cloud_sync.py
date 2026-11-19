@@ -134,7 +134,7 @@ def _get_quick_kernel_devices() -> list[dict]:
             parts = line.split()
             if len(parts) >= 5 and "lladdr" in parts and "dev" in parts:
                 state = parts[-1].upper() if len(parts) > parts.index("lladdr") + 1 else ""
-                if state in ("FAILED", "INCOMPLETE", "STALE"):
+                if state in ("FAILED", "INCOMPLETE"):
                     continue
                 ip = parts[0]
                 mac = parts[parts.index("lladdr") + 1].upper()
@@ -378,8 +378,10 @@ def run_sync_loop(server_url: str, interval: float = 2.0, token: str | None = No
     # 3. Fast high-frequency enforcement sync loop
     while True:
         try:
-            # Rapid neighbor table check to filter out disconnected / FAILED / INCOMPLETE devices immediately (< 5ms)
-            neigh_failed_ips = set()
+            # Rapid neighbor table check (< 5ms)
+            quick_devs = _get_quick_kernel_devices()
+            valid_ips = {d["ip_address"] for d in quick_devs if d.get("ip_address")}
+            failed_ips = set()
             try:
                 res = subprocess.run(
                     ["ip", "-4", "neigh", "show"],
@@ -390,20 +392,28 @@ def run_sync_loop(server_url: str, interval: float = 2.0, token: str | None = No
                 )
                 for line in res.stdout.splitlines():
                     pts = line.split()
-                    if len(pts) >= 2:
-                        state = pts[-1].upper()
-                        if state in ("FAILED", "INCOMPLETE"):
-                            neigh_failed_ips.add(pts[0])
+                    if len(pts) >= 2 and pts[-1].upper() in ("FAILED", "INCOMPLETE"):
+                        failed_ips.add(pts[0])
             except Exception:
                 pass
 
+            truly_failed_ips = failed_ips - valid_ips
+
             with _devices_lock:
-                if neigh_failed_ips:
-                    _cached_devices = [
-                        d for d in _cached_devices
-                        if d.get("ip_address") not in neigh_failed_ips
-                    ]
-                devs_to_send = list(_cached_devices)
+                mac_map = {}
+                for d in _cached_devices:
+                    if d.get("mac_address") and d.get("ip_address") not in truly_failed_ips:
+                        mac_map[d["mac_address"]] = d
+                for qd in quick_devs:
+                    mac = qd.get("mac_address")
+                    if mac:
+                        if mac not in mac_map:
+                            mac_map[mac] = qd
+                        else:
+                            mac_map[mac]["status"] = "online"
+                            mac_map[mac]["ip_address"] = qd.get("ip_address") or mac_map[mac].get("ip_address")
+                devs_to_send = list(mac_map.values())
+
             sync_to_cloud(server_url, devs_to_send, token, network_name=network_name)
         except Exception as exc:
             logger.error(f"Unexpected error in sync loop: {exc}")
