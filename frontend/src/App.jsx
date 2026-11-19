@@ -895,6 +895,20 @@ function App() {
     }
     const host = endpoint.hostname || "endpoint";
     const ip = endpoint.device_ip || endpoint.ip_address || "LAN";
+    const devType = (endpoint.device_type || "").toLowerCase();
+    const osLower = (endpoint.operating_system || "").toLowerCase();
+    const isMobile =
+      devType === "phone" ||
+      devType === "mobile" ||
+      devType === "tablet" ||
+      /phone|android|iphone|ipad/i.test(host) ||
+      /android|ios/i.test(osLower);
+
+    if (isMobile) {
+      alert(`⚠️ Remote restart is not supported on mobile devices (${host}). Mobile operating systems (iOS/Android) prohibit remote network restarts for security. Please restart the mobile device manually.`);
+      return;
+    }
+
     const confirmed = window.confirm(`Are you sure you want to reboot ${host} (${ip}) now to finalize system updates?`);
     if (!confirmed) return;
 
@@ -917,7 +931,7 @@ function App() {
         throw new Error(data.detail || `Server error (${response.status})`);
       }
       const result = await response.json();
-      alert(`🔄 Success: ${result.message}`);
+      alert(`🔄 Instruction Queued: ${result.message}\nThe local sync agent / endpoint daemon will execute the system restart.`);
       await loadPatchJobs();
       await loadDevices();
       await loadEvents();
@@ -11688,6 +11702,13 @@ const Dashboard = () => {
 
                   const activeJob = getActiveJobForDevice(endpoint);
 
+                  const isMobileDevice =
+                    endpoint.device_type === "phone" ||
+                    endpoint.device_type === "mobile" ||
+                    endpoint.device_type === "tablet" ||
+                    /phone|android|iphone|ipad/i.test(endpoint.hostname || "") ||
+                    /android|ios/i.test(endpoint.operating_system || "");
+
                   return (
                     <tr key={endpoint.id}>
                       <td>{endpoint.hostname}</td>
@@ -11778,7 +11799,7 @@ const Dashboard = () => {
                                 ▶️ Continue
                               </button>
                             )}
-                            {isSuperAdmin && (
+                            {isSuperAdmin && !isMobileDevice && (
                               <button
                                 type="button"
                                 className="secondary-button small"
@@ -11814,22 +11835,24 @@ const Dashboard = () => {
                             >
                               ⚡ Deploy Updates
                             </button>
-                            <button
-                              type="button"
-                              className="secondary-button small"
-                              style={{
-                                fontSize: "11px",
-                                padding: "3px 8px",
-                                background: "#fff7ed",
-                                color: "#c2410c",
-                                borderColor: "#fdba74",
-                                fontWeight: "600",
-                              }}
-                              onClick={() => handleRestartEndpoint(endpoint)}
-                              title="Reboot / restart this machine"
-                            >
-                              🔄 Restart
-                            </button>
+                            {!isMobileDevice && (
+                              <button
+                                type="button"
+                                className="secondary-button small"
+                                style={{
+                                  fontSize: "11px",
+                                  padding: "3px 8px",
+                                  background: "#fff7ed",
+                                  color: "#c2410c",
+                                  borderColor: "#fdba74",
+                                  fontWeight: "600",
+                                }}
+                                onClick={() => handleRestartEndpoint(endpoint)}
+                                title="Reboot / restart this machine"
+                              >
+                                🔄 Restart
+                              </button>
+                            )}
                           </div>
                         ) : (
                           <span
@@ -14101,7 +14124,13 @@ const EndpointUpdatesPage = () => {
                 )}
 
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "16px" }}>
-                  {selectedJobDetails && isSuperAdmin ? (
+                  {selectedJobDetails && isSuperAdmin && !(
+                    selectedJobDetails.device_type === "phone" ||
+                    selectedJobDetails.device_type === "mobile" ||
+                    selectedJobDetails.device_type === "tablet" ||
+                    /phone|android|iphone|ipad/i.test(selectedJobDetails.hostname || "") ||
+                    /android|ios/i.test(selectedJobDetails.operating_system || "")
+                  ) ? (
                     <button
                       type="button"
                       className="secondary-button small"
