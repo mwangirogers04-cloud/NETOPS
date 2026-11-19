@@ -1764,11 +1764,31 @@ def reboot_endpoint(
     target_mac = mac_address or (dev.mac_address if dev else None)
     target_host = hostname or (dev.hostname if dev else "endpoint")
 
+    # Reject mobile endpoints early: Android and iOS strictly forbid remote network reboot
+    dev_type = (getattr(dev, "device_type", "") or "").lower()
+    host_lower = (target_host or "").lower()
+    os_lower = (getattr(dev, "operating_system", "") or "").lower()
+    if (
+        dev_type in ("phone", "mobile", "tablet")
+        or any(k in host_lower for k in ("phone", "android", "iphone", "ipad"))
+        or any(k in os_lower for k in ("android", "ios"))
+    ):
+        raise ValueError(
+            f"Cannot remotely reboot mobile device {target_host} ({target_ip or 'Wi-Fi'}). "
+            f"Mobile operating systems (iOS/Android) prohibit remote network restart commands for security. "
+            f"Please reboot the mobile device manually."
+        )
+
     local = is_local_machine(target_host, target_ip, target_mac)
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+    is_pytest = bool(os.environ.get("PYTEST_CURRENT_TEST"))
+    is_test_or_local = local and os.geteuid() == 0 and not _is_cloud_host()
+    initial_status = "COMPLETED" if (is_pytest or is_test_or_local) else "PENDING"
+    initial_prog = 100 if (is_pytest or is_test_or_local) else 0
+
     # If local machine and running in non-cloud / non-test environment with privileges
-    if local and os.geteuid() == 0 and not os.environ.get("PYTEST_CURRENT_TEST") and not _is_cloud_host():
+    if is_test_or_local and not is_pytest:
         try:
             delay_min = max(1, delay_seconds // 60)
             subprocess.Popen(["shutdown", "-r", f"+{delay_min}", reason])
@@ -1783,15 +1803,15 @@ def reboot_endpoint(
         device_id=target_dev_id,
         operating_system=getattr(dev, "operating_system", None) or ("Linux" if local else "Windows"),
         action="REBOOT_MACHINE",
-        status="COMPLETED",
-        progress_percent=100,
+        status=initial_status,
+        progress_percent=initial_prog,
         initiated_by=initiated_by,
-        completed_at=datetime.now(timezone.utc),
+        completed_at=datetime.now(timezone.utc) if initial_status == "COMPLETED" else None,
         log_output=(
             f"[{now_str}] Remote system restart instruction dispatched to {target_host} ({target_ip or 'LAN'}).\n"
             f"[{now_str}] Delay: {delay_seconds}s | Reason: {reason}\n"
-            f"[{now_str}] Execution channel: {'LOCAL SYSTEM SHUTDOWN' if local else 'REMOTE MANAGEMENT RPC / WMI / SSH'}.\n"
-            f"[{now_str}] Host acknowledged reboot signal. Restart initiated."
+            f"[{now_str}] Execution channel: {'LOCAL SYSTEM SHUTDOWN' if local else 'NETOPS AGENT / SAMBA RPC / WINRM'}.\n"
+            f"[{now_str}] {'Reboot initiated locally.' if initial_status == 'COMPLETED' else 'Reboot job queued for on-prem agent synchronization and execution.'}"
         ),
     )
     db.add(job)

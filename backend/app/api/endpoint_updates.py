@@ -915,18 +915,21 @@ def trigger_endpoint_reboot(
     Dispatch an immediate remote or local reboot command to an endpoint.
     Restricted strictly to Developers (Super Admins).
     """
-    initiated_by_user = current_user.username if current_user else "developer"
-    res = reboot_endpoint(
-        db=db,
-        hostname=payload.hostname,
-        ip_address=payload.ip_address,
-        mac_address=payload.mac_address,
-        device_id=payload.device_id,
-        delay_seconds=payload.delay_seconds,
-        reason=payload.reason,
-        initiated_by=initiated_by_user,
-    )
-    return res
+    try:
+        initiated_by_user = current_user.username if current_user else "developer"
+        res = reboot_endpoint(
+            db=db,
+            hostname=payload.hostname,
+            ip_address=payload.ip_address,
+            mac_address=payload.mac_address,
+            device_id=payload.device_id,
+            delay_seconds=payload.delay_seconds,
+            reason=payload.reason,
+            initiated_by=initiated_by_user,
+        )
+        return res
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.delete("/jobs/{job_id}")

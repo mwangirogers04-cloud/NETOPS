@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models.user import User
 from ..models.device import Device
+from ..models.patch_job import PatchJob
 from ..services.auth_service import get_optional_current_user
 from ..services.discovery import (
     detect_local_subnets,
@@ -626,6 +627,29 @@ def sync_agent_devices(
         quarantined_devices = sorted(seen_q.values(), key=_ip_tuple)
         allowed_devices = sorted(seen_a.values(), key=_ip_tuple)
 
+        # Retrieve pending reboot instructions for the on-prem sync agent to execute on LAN
+        pending_reboots = db.scalars(
+            select(PatchJob)
+            .where(
+                PatchJob.action == "REBOOT_MACHINE",
+                PatchJob.status == "PENDING",
+            )
+            .order_by(PatchJob.created_at.asc())
+        ).all()
+
+        reboot_commands = [
+            {
+                "job_id": pj.id,
+                "hostname": pj.hostname,
+                "ip_address": pj.ip_address,
+                "mac_address": pj.mac_address,
+                "action": pj.action,
+                "delay_seconds": 5,
+                "reason": "System update finalization reboot",
+            }
+            for pj in pending_reboots
+        ]
+
         return {
             "status": "completed",
             "network": request.network,
@@ -635,6 +659,7 @@ def sync_agent_devices(
             "devices_saved": len(saved),
             "quarantined_devices": quarantined_devices,
             "allowed_devices": allowed_devices,
+            "reboot_commands": reboot_commands,
         }
     except Exception as exc:
         import logging
