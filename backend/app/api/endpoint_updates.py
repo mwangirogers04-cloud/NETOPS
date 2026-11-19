@@ -450,16 +450,21 @@ def get_endpoint_updates(
         if online_only and not is_online:
             continue
 
-        # If a specific network was requested, ensure unlinked endpoints match the subnet
-        if (clean_net and clean_net not in ("all",)) and device is None:
-            if subnets_to_match and endpoint.ip_address:
-                try:
-                    ip_obj = ipaddress.ip_address(endpoint.ip_address)
-                    if not any(ip_obj in s for s in subnets_to_match):
-                        continue
-                except Exception:
+        # If a specific network was requested, strictly require matching scoped device
+        if clean_net and clean_net not in ("all",):
+            if device is None or device not in devices:
+                continue
+
+        # If subnets are to be matched, ensure IP falls strictly within the scoped subnet
+        if subnets_to_match:
+            ep_ip = endpoint.ip_address or (device.ip_address if device else None)
+            if not ep_ip:
+                continue
+            try:
+                ip_obj = ipaddress.ip_address(ep_ip)
+                if not any(ip_obj in s for s in subnets_to_match):
                     continue
-            else:
+            except Exception:
                 continue
         update_status = endpoint.update_status
         pending_count = endpoint.pending_updates if endpoint.pending_updates is not None else 0
