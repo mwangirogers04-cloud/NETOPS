@@ -887,6 +887,45 @@ function App() {
     }
   };
 
+  const handleRestartEndpoint = async (endpoint) => {
+    if (!isSuperAdmin) {
+      alert("Permission Denied: Only Developers (Super Admins) have permissions to reboot machines.");
+      return;
+    }
+    const host = endpoint.hostname || "endpoint";
+    const ip = endpoint.device_ip || endpoint.ip_address || "LAN";
+    const confirmed = window.confirm(`Are you sure you want to reboot ${host} (${ip}) now to finalize system updates?`);
+    if (!confirmed) return;
+
+    try {
+      const response = await fetch(`${API_URL}/endpoint-updates/reboot`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        body: JSON.stringify({
+          hostname: host,
+          ip_address: endpoint.device_ip || endpoint.ip_address || null,
+          mac_address: endpoint.mac_address || null,
+          device_id: endpoint.device_id || (endpoint.vlan_id !== undefined ? endpoint.id : null),
+          delay_seconds: 5,
+          reason: "System update finalization reboot",
+        }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.detail || `Server error (${response.status})`);
+      }
+      const result = await response.json();
+      alert(`🔄 Success: ${result.message}`);
+      await loadPatchJobs();
+      await loadDevices();
+      await loadEvents();
+    } catch (err) {
+      console.error("Reboot endpoint error:", err);
+      alert("Failed to reboot endpoint: " + err.message);
+    }
+  };
+
   // ------------------------------------------------------------
   // LOAD DEVICES
   // ------------------------------------------------------------
@@ -11738,23 +11777,59 @@ const Dashboard = () => {
                                 ▶️ Continue
                               </button>
                             )}
+                            {isSuperAdmin && (
+                              <button
+                                type="button"
+                                className="secondary-button small"
+                                style={{
+                                  fontSize: "11px",
+                                  padding: "3px 8px",
+                                  background: "#fff7ed",
+                                  color: "#c2410c",
+                                  borderColor: "#fdba74",
+                                  fontWeight: "600",
+                                }}
+                                onClick={() => handleRestartEndpoint(endpoint)}
+                                title="Reboot / restart this machine"
+                              >
+                                🔄 Restart
+                              </button>
+                            )}
                           </div>
                         ) : isSuperAdmin ? (
-                          <button
-                            type="button"
-                            className="primary-button small"
-                            style={{
-                              fontSize: "11px",
-                              padding: "3px 8px",
-                              background: "#10b981",
-                              borderColor: "#059669",
-                              fontWeight: "600",
-                            }}
-                            onClick={() => openDeployModal(endpoint)}
-                            title="Centrally deploy updates to this machine"
-                          >
-                            ⚡ Deploy Updates
-                          </button>
+                          <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
+                            <button
+                              type="button"
+                              className="primary-button small"
+                              style={{
+                                fontSize: "11px",
+                                padding: "3px 8px",
+                                background: "#10b981",
+                                borderColor: "#059669",
+                                fontWeight: "600",
+                              }}
+                              onClick={() => openDeployModal(endpoint)}
+                              title="Centrally deploy updates to this machine"
+                            >
+                              ⚡ Deploy Updates
+                            </button>
+                            <button
+                              type="button"
+                              className="secondary-button small"
+                              style={{
+                                fontSize: "11px",
+                                padding: "3px 8px",
+                                background: "#fff7ed",
+                                color: "#c2410c",
+                                borderColor: "#fdba74",
+                                fontWeight: "600",
+                              }}
+                              onClick={() => handleRestartEndpoint(endpoint)}
+                              title="Reboot / restart this machine"
+                            >
+                              🔄 Restart
+                            </button>
+                          </div>
                         ) : (
                           <span
                             className="status-badge"
@@ -14024,7 +14099,26 @@ const EndpointUpdatesPage = () => {
                   </div>
                 )}
 
-                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "16px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "16px" }}>
+                  {selectedJobDetails && isSuperAdmin ? (
+                    <button
+                      type="button"
+                      className="secondary-button small"
+                      style={{
+                        background: "#fff7ed",
+                        color: "#ea580c",
+                        borderColor: "#fdba74",
+                        fontWeight: "600",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "6px",
+                      }}
+                      onClick={() => handleRestartEndpoint(selectedJobDetails)}
+                      title="Reboot machine now"
+                    >
+                      🔄 Restart Machine
+                    </button>
+                  ) : <div />}
                   <button
                     type="button"
                     className="primary-button small"
