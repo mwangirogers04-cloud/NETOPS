@@ -5,7 +5,7 @@ import platform
 import socket
 import subprocess
 from datetime import datetime, timezone
-from sqlalchemy import select
+from sqlalchemy import select, or_, func
 from sqlalchemy.orm import Session
 
 from ..models.device import Device
@@ -335,20 +335,27 @@ def assess_and_record_device_updates(
     }
 
 
-def scan_lan_for_updates(network: str | None, db: Session) -> dict:
+def scan_lan_for_updates(network: str | None, db: Session, network_name: str | None = None) -> dict:
     """
     Main agentless LAN patch evaluation workflow:
-    1. Discovers all active devices on the subnet.
+    1. Discovers all active devices on the subnet at that particular time.
     2. Registers any new LAN devices.
-    3. Evaluates patch & update status for each device from the central machine.
+    3. Evaluates patch & update status strictly for machines that are ONLINE at that
+       particular time and belong to that particular network.
     4. Records results and broadcasts events.
     """
     target_network = network.strip() if network and network.strip() else get_default_network()
 
-    # Step 1: Discover devices
+    target_cidr = None
+    try:
+        target_cidr = ipaddress.ip_network(target_network, strict=False)
+    except Exception:
+        pass
+
+    # Step 1: Discover devices actively responding on this network right now
     discovered = discover_devices(target_network)
 
-    # Step 2: Save to database
+    # Step 2: Save to database (freshly discovered devices are confirmed online)
     saved_devices = save_discovered_devices(discovered, db)
 
     local_ip = get_local_ip()
@@ -358,27 +365,54 @@ def scan_lan_for_updates(network: str | None, db: Session) -> dict:
     updates_available_count = 0
     up_to_date_count = 0
 
-    # Step 3: Evaluate all devices on the network without leaving any machine behind
-    devices_to_evaluate = list(saved_devices)
+    # Step 3: Evaluate ONLY machines that are online at that particular time on this particular network
+    devices_to_evaluate = [d for d in saved_devices if getattr(d, "status", "online") == "online"]
     seen_device_ids = {d.id for d in devices_to_evaluate if getattr(d, "id", None)}
 
     try:
-        all_network_devices = db.scalars(
-            select(Device).where(
-                or_(
-                    Device.ip_address.isnot(None),
-                    Device.mac_address.isnot(None),
-                )
+        # Strictly query only ONLINE devices from the database
+        query = select(Device).where(
+            Device.status == "online",
+            or_(
+                Device.ip_address.isnot(None),
+                Device.mac_address.isnot(None),
             )
-        ).all()
-        for d in all_network_devices:
-            if isinstance(d, Device) and d.id not in seen_device_ids:
-                devices_to_evaluate.append(d)
-                seen_device_ids.add(d.id)
+        )
+        clean_net = (network_name or "").strip().lower()
+        if clean_net and clean_net not in ("all", "current"):
+            if clean_net == "home network":
+                query = query.where(
+                    or_(
+                        func.lower(Device.network_name) == "home network",
+                        Device.network_name.is_(None),
+                    )
+                )
+            else:
+                query = query.where(func.lower(Device.network_name) == clean_net)
+
+        candidate_devices = db.scalars(query).all()
+        for d in candidate_devices:
+            if not isinstance(d, Device) or d.id in seen_device_ids:
+                continue
+            # Double check online status
+            if getattr(d, "status", None) != "online":
+                continue
+            # Filter strictly by target CIDR if available
+            if target_cidr and d.ip_address:
+                try:
+                    if ipaddress.ip_address(d.ip_address) not in target_cidr:
+                        continue
+                except Exception:
+                    continue
+            devices_to_evaluate.append(d)
+            seen_device_ids.add(d.id)
     except Exception:
         pass
 
     for device in devices_to_evaluate:
+        # Strict requirement: Never scan machines that are offline
+        if getattr(device, "status", None) != "online":
+            continue
         if not getattr(device, "ip_address", None) and not getattr(device, "mac_address", None):
             continue
 
@@ -402,8 +436,8 @@ def scan_lan_for_updates(network: str | None, db: Session) -> dict:
         db=db,
         event_type="lan_patch_scan",
         message=(
-            f"Thorough LAN update scan complete for {target_network}: "
-            f"{len(evaluated_devices)} machines assessed "
+            f"Active LAN update scan complete for {target_network}: "
+            f"{len(evaluated_devices)} online machines assessed on {network_name or 'current network'} "
             f"({updates_available_count} need updates, {up_to_date_count} up to date)."
         ),
     )
@@ -412,6 +446,7 @@ def scan_lan_for_updates(network: str | None, db: Session) -> dict:
     return {
         "status": "completed",
         "network": target_network,
+        "network_name": network_name or "Current Network",
         "total_devices_scanned": len(devices_to_evaluate),
         "machines_assessed": len(evaluated_devices),
         "updates_available_count": updates_available_count,

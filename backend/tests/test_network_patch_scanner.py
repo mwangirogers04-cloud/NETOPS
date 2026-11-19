@@ -112,3 +112,67 @@ def test_scan_lan_for_updates_workflow():
         assert result["updates_available_count"] == 1
         assert result["up_to_date_count"] == 1
         assert result["machines_assessed"] == 2
+
+
+def test_scan_lan_for_updates_strictly_scopes_online_and_network():
+    db = MagicMock()
+    # 1. Online device on target subnet 192.168.0.0/24
+    dev_online_target = Device(
+        id=10,
+        ip_address="192.168.0.50",
+        mac_address="AA:BB:CC:DD:EE:10",
+        hostname="ONLINE-HOME-PC",
+        status="online",
+        network_name="Home Network",
+    )
+    # 2. Offline device on target subnet 192.168.0.0/24 (MUST BE EXCLUDED)
+    dev_offline_target = Device(
+        id=20,
+        ip_address="192.168.0.60",
+        mac_address="AA:BB:CC:DD:EE:20",
+        hostname="OFFLINE-HOME-PC",
+        status="offline",
+        network_name="Home Network",
+    )
+    # 3. Online device on completely different subnet 192.168.88.0/24 (MUST BE EXCLUDED)
+    dev_online_other = Device(
+        id=30,
+        ip_address="192.168.88.70",
+        mac_address="AA:BB:CC:DD:EE:30",
+        hostname="ONLINE-OFFICE-PC",
+        status="online",
+        network_name="Office Network",
+    )
+
+    # db.scalars().all() returns all candidate devices
+    mock_scalars = MagicMock()
+    mock_scalars.all.return_value = [dev_online_target, dev_offline_target, dev_online_other]
+    db.scalars.return_value = mock_scalars
+
+    with (
+        patch("backend.app.services.network_patch_scanner.discover_devices", return_value=[]),
+        patch("backend.app.services.network_patch_scanner.save_discovered_devices", return_value=[]),
+        patch("backend.app.services.network_patch_scanner.get_local_ip", return_value="192.168.0.50"),
+        patch("backend.app.services.network_patch_scanner.get_local_mac", return_value="AA:BB:CC:DD:EE:10"),
+        patch("backend.app.services.network_patch_scanner.assess_and_record_device_updates") as mock_assess,
+        patch("backend.app.services.network_patch_scanner.create_event"),
+    ):
+        mock_assess.return_value = {
+            "device_id": 10,
+            "hostname": "ONLINE-HOME-PC",
+            "update_status": "up_to_date",
+            "pending_updates": 0,
+        }
+
+        result = scan_lan_for_updates("192.168.0.0/24", db, network_name="Home Network")
+        assert result["status"] == "completed"
+        # Only 1 device (dev_online_target) must have been assessed!
+        assert result["machines_assessed"] == 1
+        assert len(result["devices"]) == 1
+        assert result["devices"][0]["device_id"] == 10
+        mock_assess.assert_called_once_with(
+            device=dev_online_target,
+            db=db,
+            local_ip="192.168.0.50",
+            local_mac="AA:BB:CC:DD:EE:10",
+        )

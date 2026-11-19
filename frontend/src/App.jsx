@@ -407,6 +407,7 @@ function App() {
       localStorage.setItem("netops_selected_network", netName);
     } catch (_) {}
     loadDevices(netName);
+    loadEndpointUpdates(true, netName);
   };
 
   // Device Troubleshooting & Root Cause Diagnostics
@@ -579,10 +580,14 @@ function App() {
     setLanScanLoading(true);
     setLanScanResult(null);
     try {
+      const targetSubnet = detectedSubnet || (selectedNetwork && selectedNetwork.includes("/") ? selectedNetwork : null);
       const response = await fetch(`${API_URL}/endpoint-updates/scan-lan`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...getAuthHeaders() },
-        body: JSON.stringify({}),
+        body: JSON.stringify({
+          network: targetSubnet,
+          network_name: selectedNetwork !== "all" && selectedNetwork !== "current" ? selectedNetwork : null,
+        }),
       });
       if (!response.ok) {
         throw new Error(`LAN scan failed: ${response.status}`);
@@ -590,6 +595,7 @@ function App() {
       const data = await response.json();
       setLanScanResult(data);
       await loadDevices();
+      await loadEndpointUpdates(true);
     } catch (err) {
       console.error("LAN scan error:", err);
       alert("Failed to complete LAN update scan: " + err.message);
@@ -12099,15 +12105,25 @@ const Dashboard = () => {
     });
   }, [updatePolicy]);
 
-  const loadEndpointUpdates = async (silent = false) => {
+  const loadEndpointUpdates = async (silent = false, netOverride = undefined) => {
     if (!silent) {
       setEndpointUpdatesLoading(true);
     }
     setEndpointUpdatesError("");
 
     try {
+      const net = netOverride !== undefined ? netOverride : selectedNetwork;
+      const params = new URLSearchParams();
+      if (net && net !== "all") {
+        params.set("network_name", net);
+      }
+      if (net === "current" && detectedSubnet) {
+        params.set("subnet", detectedSubnet);
+      }
+      params.set("online_only", "true");
+
       const response = await fetch(
-        `${API_URL}/endpoint-updates/`,
+        `${API_URL}/endpoint-updates/?${params.toString()}`,
         { headers: { ...getAuthHeaders() } }
       );
 
@@ -12149,7 +12165,7 @@ const Dashboard = () => {
       window.removeEventListener("netops:refresh", onSyncTrigger);
       window.removeEventListener("focus", onSyncTrigger);
     };
-  }, [currentUser]);
+  }, [currentUser, selectedNetwork, detectedSubnet]);
 
 const EndpointUpdatesPage = () => {
   const parseCheckedDate = (d) => {
@@ -12648,8 +12664,8 @@ const EndpointUpdatesPage = () => {
             </div>
 
             <div className="card-subtitle">
-              {endpointUpdates.length} endpoint
-              {endpointUpdates.length === 1 ? "" : "s"} reported
+              {endpointUpdates.length} online machine
+              {endpointUpdates.length === 1 ? "" : "s"} on {selectedNetwork === "current" ? (detectedSubnet || "Current Network") : selectedNetwork}
             </div>
           </div>
         </div>

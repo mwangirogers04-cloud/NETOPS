@@ -1,7 +1,8 @@
+import ipaddress
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, or_, func
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -269,6 +270,9 @@ def report_endpoint_update(
 
 @router.get("/")
 def get_endpoint_updates(
+    network_name: str | None = None,
+    subnet: str | None = None,
+    online_only: bool = True,
     current_user: User | None = Depends(get_optional_current_user),
     db: Session = Depends(get_db),
 ):
@@ -294,7 +298,53 @@ def get_endpoint_updates(
                 Device.network_name.isnot(None),
             )
         )
-    devices = db.scalars(device_query).all()
+
+    # Filter by online status if requested
+    if online_only:
+        device_query = device_query.where(Device.status == "online")
+
+    # Filter strictly by network_name if specified
+    clean_net = (network_name or "").strip().lower()
+    if clean_net and clean_net not in ("all", "current"):
+        if clean_net == "home network":
+            device_query = device_query.where(
+                or_(
+                    func.lower(Device.network_name) == "home network",
+                    Device.network_name.is_(None),
+                )
+            )
+        else:
+            device_query = device_query.where(func.lower(Device.network_name) == clean_net)
+
+    devices = list(db.scalars(device_query).all())
+
+    # Filter strictly by IP subnet if requested
+    subnets_to_match = []
+    if subnet and "/" in subnet:
+        try:
+            subnets_to_match.append(ipaddress.ip_network(subnet.strip(), strict=False))
+        except Exception:
+            pass
+    if clean_net == "current":
+        try:
+            from ..services.discovery import detect_local_subnets
+            subnets_info = detect_local_subnets()
+            for if_info in subnets_info.get("interfaces", []):
+                if not if_info.get("is_virtual") and if_info.get("network"):
+                    subnets_to_match.append(ipaddress.ip_network(if_info["network"], strict=False))
+        except Exception:
+            pass
+
+    if subnets_to_match:
+        def _in_any_subnet(ip_str: str | None) -> bool:
+            if not ip_str:
+                return False
+            try:
+                ip_obj = ipaddress.ip_address(ip_str)
+                return any(ip_obj in s for s in subnets_to_match)
+            except Exception:
+                return False
+        devices = [d for d in devices if _in_any_subnet(d.ip_address)]
 
     endpoint_updates = (
         db.query(EndpointUpdate)
@@ -385,7 +435,32 @@ def get_endpoint_updates(
         if current_user and not is_admin and device is None:
             continue
 
-        is_online = (device.status == "online") if device else False
+        now = datetime.now(timezone.utc)
+        if device:
+            is_online = (getattr(device, "status", None) == "online")
+        elif endpoint.last_checked:
+            lc = endpoint.last_checked
+            if lc.tzinfo is None:
+                lc = lc.replace(tzinfo=timezone.utc)
+            is_online = (now - lc).total_seconds() <= 900
+        else:
+            is_online = False
+
+        # Strictly skip offline endpoints when online_only is enabled
+        if online_only and not is_online:
+            continue
+
+        # If a specific network was requested, ensure unlinked endpoints match the subnet
+        if (clean_net and clean_net not in ("all",)) and device is None:
+            if subnets_to_match and endpoint.ip_address:
+                try:
+                    ip_obj = ipaddress.ip_address(endpoint.ip_address)
+                    if not any(ip_obj in s for s in subnets_to_match):
+                        continue
+                except Exception:
+                    continue
+            else:
+                continue
         update_status = endpoint.update_status
         pending_count = endpoint.pending_updates if endpoint.pending_updates is not None else 0
         if pending_count == 0 and update_status == "updates_available":
@@ -599,6 +674,7 @@ def schedule_all_pending_updates_off_hours(
 
 class LanScanRequest(BaseModel):
     network: str | None = None
+    network_name: str | None = None
 
 
 @router.post("/scan-lan")
@@ -607,12 +683,13 @@ def run_lan_patch_scan(
     db: Session = Depends(get_db),
 ):
     """
-    Agentless LAN scan: discovers all machines connected to the same LAN
-    and evaluates their update/patch status directly from the central machine.
+    Agentless LAN scan: discovers and evaluates update/patch status
+    strictly for machines that are online at that particular time and at that particular network.
     """
     target_net = payload.network if payload else None
+    target_net_name = payload.network_name if payload else None
     try:
-        results = scan_lan_for_updates(network=target_net, db=db)
+        results = scan_lan_for_updates(network=target_net, db=db, network_name=target_net_name)
         return results
     except Exception as exc:
         raise HTTPException(
