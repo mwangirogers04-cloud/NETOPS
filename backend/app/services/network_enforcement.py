@@ -10,7 +10,7 @@ from .access_schedule import is_access_allowed
 from .device_classifier import classify_device
 from .event_service import create_event
 from .firewall.manager import get_active_firewall_driver
-from .l2_quarantine import quarantine_device_l2, restore_device_l2
+from .l2_quarantine import quarantine_device_l2, restore_device_l2, _is_cloud_host
 from .sophos_enforcement import (
     is_sophos_configured,
     sophos_block_device,
@@ -165,7 +165,7 @@ def enforce_device_access(
         )
 
         status_changed = (old_enforcement_status != enforcement_status)
-        if (force or status_changed) and device.ip_address:
+        if not _is_cloud_host() and (force or status_changed) and device.ip_address:
             try:
                 dev_iface = getattr(device, "network_interface", None)
                 restore_device_l2(
@@ -199,7 +199,7 @@ def enforce_device_access(
             pass
 
         # Router-level enforcement (Tenda, TP-Link, MikroTik, Universal Router Engine)
-        if (force or status_changed) and device.ip_address and device.mac_address:
+        if not _is_cloud_host() and (force or status_changed) and device.ip_address and device.mac_address:
             try:
                 router_result = router_driver.allow_device(device.ip_address, device.mac_address)
                 if router_result.get("status") == "allowed":
@@ -223,7 +223,7 @@ def enforce_device_access(
         )
 
         status_changed = (old_enforcement_status != enforcement_status)
-        if (force or status_changed) and device.ip_address:
+        if not _is_cloud_host() and (force or status_changed) and device.ip_address:
             try:
                 dev_iface = getattr(device, "network_interface", None)
                 quarantine_device_l2(
@@ -266,7 +266,7 @@ def enforce_device_access(
             pass
 
         # Router-level enforcement (Tenda, TP-Link, MikroTik, Universal Router Engine)
-        if (force or status_changed) and device.ip_address and device.mac_address:
+        if not _is_cloud_host() and (force or status_changed) and device.ip_address and device.mac_address:
             try:
                 router_result = router_driver.block_device(device.ip_address, device.mac_address, device.hostname or "")
                 if router_result.get("status") == "blocked":

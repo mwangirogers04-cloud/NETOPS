@@ -8,7 +8,7 @@ import xml.etree.ElementTree as ET
 from urllib.parse import urlparse
 
 from ..config import settings
-from .l2_quarantine import is_protected
+from .l2_quarantine import is_protected, _is_cloud_host
 
 logger = logging.getLogger(__name__)
 
@@ -50,13 +50,6 @@ def _is_test_env() -> bool:
     return bool(os.environ.get("PYTEST_CURRENT_TEST"))
 
 
-def _is_cloud_host() -> bool:
-    if _is_test_env():
-        return False
-    return (
-        not os.path.exists("/sys/class/net/wlan0")
-        and not any(os.path.exists(f"/sys/class/net/{i}") for i in ("eth0", "lan0"))
-    )
 
 
 def is_sophos_configured(bypass_cooldown: bool = False) -> bool:

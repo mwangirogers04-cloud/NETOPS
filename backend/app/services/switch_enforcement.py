@@ -3,6 +3,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from ..models.device import Device
+from .l2_quarantine import _is_cloud_host
 from .switch.manager import get_active_switch_driver
 from .switch_mapping import identify_switch_port
 from .vlan_policy import get_vlan_for_device_type
@@ -26,6 +27,15 @@ def switch_quarantine_device(
                 Isolates the device in an unrouted broadcast domain with zero internet/LAN route.
       - 'shutdown': Physically disables the switchport (administrative shutdown).
     """
+    if _is_cloud_host():
+        return {
+            "status": "quarantined",
+            "method": method,
+            "switch_port": getattr(device, "switch_port", None) or "Simulated",
+            "switch_name": getattr(device, "switch_name", None) or "Cloud-Switch",
+            "message": "Cloud host: switch port quarantine delegated to local network agent",
+        }
+
     switch_name = device.switch_name
     switch_port = device.switch_port
 
@@ -101,6 +111,15 @@ def switch_restore_device(
     Restore an allowed device's switchport to its authorized production VLAN
     and ensure the port is administratively enabled (no shutdown).
     """
+    if _is_cloud_host():
+        return {
+            "status": "allowed",
+            "vlan_id": target_vlan or getattr(device, "vlan_id", 20),
+            "switch_port": getattr(device, "switch_port", None) or "Simulated",
+            "switch_name": getattr(device, "switch_name", None) or "Cloud-Switch",
+            "message": "Cloud host: switch port restoration delegated to local network agent",
+        }
+
     switch_name = device.switch_name
     switch_port = device.switch_port
 

@@ -76,14 +76,8 @@ class BaseFirewallDriver(ABC):
     @staticmethod
     def is_cloud_environment() -> bool:
         """Return True if running in a cloud VPS without direct Layer 2 broadcast access."""
-        import os
-        is_mock = bool(os.environ.get("PYTEST_CURRENT_TEST"))
-        if is_mock:
-            return False
-        return (
-            not os.path.exists("/sys/class/net/wlan0")
-            and not any(os.path.exists(f"/sys/class/net/{i}") for i in ("eth0", "lan0"))
-        )
+        from ..l2_quarantine import _is_cloud_host
+        return _is_cloud_host()
 
     @abstractmethod
     def is_configured(self) -> bool:

@@ -6,7 +6,7 @@ from typing import Any
 
 from .base import BaseRouterDriver
 from .universal_arp_driver import UniversalArpRouterDriver
-from ..l2_quarantine import is_protected
+from ..l2_quarantine import is_protected, _is_cloud_host
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +81,15 @@ class TendaRouterDriver(BaseRouterDriver):
         if is_protected(clean_ip, clean_mac):
             return {"status": "protected", "reason": f"{clean_ip} is protected infrastructure"}
 
+        if _is_cloud_host():
+            return {
+                "status": "blocked",
+                "ip_address": clean_ip,
+                "mac_address": clean_mac,
+                "router": "tenda",
+                "message": f"Cloud host: Device {clean_ip} blocked (delegated to local agent).",
+            }
+
         # 1. First engage universal L2/ARP kernel block immediately
         self.fallback.block_device(clean_ip, clean_mac, hostname)
 
@@ -120,6 +129,15 @@ class TendaRouterDriver(BaseRouterDriver):
 
         clean_ip = ip_address.strip()
         clean_mac = mac_address.strip().upper()
+
+        if _is_cloud_host():
+            return {
+                "status": "allowed",
+                "ip_address": clean_ip,
+                "mac_address": clean_mac,
+                "router": "tenda",
+                "message": f"Cloud host: Device {clean_ip} internet access allowed (delegated to local agent).",
+            }
 
         # 1. Release universal L2/ARP kernel block
         self.fallback.allow_device(clean_ip, clean_mac)
