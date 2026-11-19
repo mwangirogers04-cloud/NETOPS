@@ -1575,7 +1575,7 @@ def _purge_device_records(db: Session, device: Device):
 def delete_device_permanently(
     device_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_super_admin),
 ):
     """
     Permanently delete a device from the database and remove all its
@@ -1633,7 +1633,7 @@ def delete_device_permanently(
 def bulk_delete_devices_permanently(
     req: BulkDeleteRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_super_admin),
 ):
     """
     Bulk permanently delete multiple devices by their IDs.

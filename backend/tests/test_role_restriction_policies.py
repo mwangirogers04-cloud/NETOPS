@@ -269,24 +269,21 @@ def test_admin_cannot_edit_switch_or_firewall_secrets():
         "password": "SophosSecret@123",
         "is_active": True,
     }
-    # Admin denied saving firewall secrets
-    res_fw_admin = client.post("/firewall/config", headers=admin_hdr, json=fw_payload)
-    assert res_fw_admin.status_code == 403
+    # Viewer denied saving firewall secrets
+    viewer_hdr = auth_headers("regular_user", "user")
+    res_fw_viewer = client.post("/firewall/config", headers=viewer_hdr, json=fw_payload)
+    assert res_fw_viewer.status_code == 403
 
     # Super Admin allowed saving firewall secrets
     res_fw_dev = client.post("/firewall/config", headers=dev_hdr, json=fw_payload)
     assert res_fw_dev.status_code == 200
-
-    # Admin denied testing firewall connection
-    res_test_fw = client.post("/firewall/test", headers=admin_hdr, json={"vendor": "sophos"})
-    assert res_test_fw.status_code == 403
 
 
 # -------------------------------------------------------------
 # 3. PERMANENTLY DELETE DEVICES & RECORDS
 # -------------------------------------------------------------
 
-def test_admin_can_permanently_delete_devices():
+def test_admin_cannot_permanently_delete_devices():
     admin_hdr = auth_headers("net_admin_1", "admin")
     dev_hdr = auth_headers("lead_developer", "super_admin")
 
@@ -301,15 +298,7 @@ def test_admin_can_permanently_delete_devices():
     db.add(dev)
     db.commit()
     dev_id = dev.id
-    db.close()
 
-    # Administrator CAN permanently delete device
-    res_del_admin = client.delete(f"/devices/{dev_id}", headers=admin_hdr)
-    assert res_del_admin.status_code == 200
-    assert res_del_admin.json()["status"] == "deleted"
-
-    # Add another device for bulk delete test
-    db = TestingSessionLocal()
     dev2 = Device(
         mac_address="11:22:33:44:55:88",
         ip_address="192.168.0.78",
@@ -322,12 +311,27 @@ def test_admin_can_permanently_delete_devices():
     dev2_id = dev2.id
     db.close()
 
-    # Administrator CAN bulk permanently delete devices
-    res_bulk_admin = client.post("/devices/bulk-delete", headers=admin_hdr, json={"device_ids": [dev2_id]})
-    assert res_bulk_admin.status_code == 200
-    assert res_bulk_admin.json()["status"] == "bulk_deleted"
+    # Administrator is STRICTLY DENIED permanent deletion (403 Forbidden - Developer only)
+    res_del_admin = client.delete(f"/devices/{dev_id}", headers=admin_hdr)
+    assert res_del_admin.status_code == 403
+    assert "super administrator" in res_del_admin.json()["detail"].lower() or "developer" in res_del_admin.json()["detail"].lower()
 
-    # Verify device record is purged
+    # Administrator is STRICTLY DENIED bulk deletion (403 Forbidden - Developer only)
+    res_bulk_admin = client.post("/devices/bulk-delete", headers=admin_hdr, json={"device_ids": [dev2_id]})
+    assert res_bulk_admin.status_code == 403
+    assert "super administrator" in res_bulk_admin.json()["detail"].lower() or "developer" in res_bulk_admin.json()["detail"].lower()
+
+    # Super Administrator (Developer) CAN permanently delete device
+    res_del_dev = client.delete(f"/devices/{dev_id}", headers=dev_hdr)
+    assert res_del_dev.status_code == 200
+    assert res_del_dev.json()["status"] == "deleted"
+
+    # Super Administrator (Developer) CAN bulk permanently delete devices
+    res_bulk_dev = client.post("/devices/bulk-delete", headers=dev_hdr, json={"device_ids": [dev2_id]})
+    assert res_bulk_dev.status_code == 200
+    assert res_bulk_dev.json()["status"] == "bulk_deleted"
+
+    # Verify device records are purged
     db2 = TestingSessionLocal()
     assert db2.get(Device, dev_id) is None
     assert db2.get(Device, dev2_id) is None

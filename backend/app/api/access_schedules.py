@@ -237,6 +237,7 @@ def delete_access_schedule(
 def reset_device_schedules(
     device_id: int,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_super_admin),
 ):
     """
     Reset all access schedules for a device: deletes all active schedules,

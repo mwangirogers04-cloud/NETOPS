@@ -56,13 +56,10 @@ function App() {
   const isSuperAdmin =
     currentUser?.role === "super_admin" ||
     currentUser?.role === "developer" ||
-    currentUser?.role === "admin" ||
     isDeveloper;
   const isAdmin =
     currentUser?.role === "admin" ||
-    currentUser?.role === "super_admin" ||
-    currentUser?.role === "developer" ||
-    isDeveloper;
+    isSuperAdmin;
 
   const getAuthHeaders = (extra = {}) => {
     const token = localStorage.getItem("netops_token");
@@ -1649,6 +1646,10 @@ const loadEvents = async () => {
     alert("Permission Denied: Standard users have read-only access. Only Administrators and Super Administrators can approve devices, alter VLANs, or change Internet access.");
     return;
   }
+  if (action === "delete" && !isSuperAdmin) {
+    alert("Permission Denied: Permanent deletion of devices is strictly restricted to Developers only. Administrators do not have deletion rights for security and audit integrity.");
+    return;
+  }
   const actionKey = `${action}-${deviceId}`;
 
   try {
@@ -1933,8 +1934,8 @@ const loadEvents = async () => {
   };
 
   const deleteDevicePermanently = async (device) => {
-    if (!isAdmin && !isSuperAdmin) {
-      alert("Permission Denied: Administrator or Developer privileges required to delete devices.");
+    if (!isSuperAdmin) {
+      alert("Permission Denied: Permanent deletion of devices is strictly restricted to Developers only. Administrators do not have deletion rights for security and audit integrity.");
       return;
     }
     const name = device.hostname || device.mac_address || "this machine";
@@ -1953,8 +1954,8 @@ const loadEvents = async () => {
   };
 
   const deleteBulkDevices = async (idsToDelete = null) => {
-    if (!isAdmin && !isSuperAdmin) {
-      alert("Permission Denied: Administrator or Developer privileges required to delete devices.");
+    if (!isSuperAdmin) {
+      alert("Permission Denied: Permanent deletion of devices is strictly restricted to Developers only. Administrators do not have deletion rights for security and audit integrity.");
       return;
     }
     const ids = idsToDelete || Array.from(selectedDeviceIds);
@@ -3069,7 +3070,7 @@ const DevicesPage = () => {
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-            {(isSuperAdmin || isAdmin) && (
+            {isSuperAdmin && (
               <button
                 type="button"
                 className="secondary-button small"
@@ -3095,7 +3096,7 @@ const DevicesPage = () => {
                   deleteBulkDevices(simOrOffline.map((d) => d.id));
                 }}
                 disabled={bulkDeleting}
-                title="Permanently delete test machines created during simulations"
+                title="Permanently delete test machines created during simulations (Developer only)"
               >
                 🧹 Clean Up Simulation Machines
               </button>
@@ -4336,7 +4337,7 @@ const DevicesPage = () => {
                           </button>
                         )}
 
-                        {(isSuperAdmin || isAdmin) && (
+                        {isSuperAdmin && (
                           <button
                             type="button"
                             className="secondary-button small"
@@ -4348,7 +4349,7 @@ const DevicesPage = () => {
                             }}
                             disabled={actionLoading === `delete-${device.id}`}
                             onClick={() => deleteDevicePermanently(device)}
-                            title="Permanently delete device, purging all history. If it connects again, it is treated as a brand new machine."
+                            title="Permanently delete device, purging all history. If it connects again, it is treated as a brand new machine. (Developer only)"
                           >
                             {actionLoading === `delete-${device.id}` ? "..." : "🗑️ Delete"}
                           </button>
@@ -11104,7 +11105,7 @@ const Dashboard = () => {
               </button>
             </div>
 
-            {(isAdmin || isSuperAdmin) && filteredDashboardDevices.length > 0 && dashboardDeviceFilter !== "online" && dashboardDeviceFilter !== "all" && (
+            {isSuperAdmin && filteredDashboardDevices.length > 0 && dashboardDeviceFilter !== "online" && dashboardDeviceFilter !== "all" && (
               <button
                 type="button"
                 className="secondary-button small"
@@ -11201,7 +11202,7 @@ const Dashboard = () => {
                 Clear Selection
               </button>
             </div>
-            {(isSuperAdmin || isAdmin) && (
+            {isSuperAdmin && (
               <button
                 type="button"
                 className="secondary-button small"
@@ -11217,7 +11218,7 @@ const Dashboard = () => {
                 }}
                 disabled={bulkDeleting}
                 onClick={() => deleteBulkDevices()}
-                title="Permanently delete all selected devices and their associated records"
+                title="Permanently delete all selected devices and their associated records (Developer only)"
               >
                 {bulkDeleting ? "Deleting..." : `🗑️ Delete Selected (${selectedDeviceIds.size}) Permanently`}
               </button>
@@ -11414,7 +11415,7 @@ const Dashboard = () => {
                                 View →
                               </button>
 
-                              {(isSuperAdmin || isAdmin) && (
+                              {isSuperAdmin && (
                                 <button
                                   type="button"
                                   className="secondary-button small"
@@ -11428,7 +11429,7 @@ const Dashboard = () => {
                                   }}
                                   disabled={actionLoading === `delete-${device.id}`}
                                   onClick={() => deleteDevicePermanently(device)}
-                                  title="Permanently delete device, purging all history. If it connects again, it is treated as a brand new machine."
+                                  title="Permanently delete device, purging all history. If it connects again, it is treated as a brand new machine. (Developer only)"
                                 >
                                   {actionLoading === `delete-${device.id}` ? "..." : "🗑️ Delete"}
                                 </button>

@@ -151,10 +151,15 @@ def test_delete_device_permanently_cascades_and_removes_state():
     # 1. Standard user is DENIED permanent deletion (403 Forbidden)
     user_res = client.delete(f"/devices/{dev_id}", headers=get_auth_headers("user"))
     assert user_res.status_code == 403
-    assert "administrative privileges required" in user_res.json()["detail"].lower()
+    assert "super administrator" in user_res.json()["detail"].lower() or "developer" in user_res.json()["detail"].lower()
 
-    # 2. Administrator is ALLOWED permanent deletion (200 OK)
-    res = client.delete(f"/devices/{dev_id}", headers=get_auth_headers("admin"))
+    # 2. Administrator is STRICTLY DENIED permanent deletion (403 Forbidden - Developer only)
+    admin_res = client.delete(f"/devices/{dev_id}", headers=get_auth_headers("admin"))
+    assert admin_res.status_code == 403
+    assert "super administrator" in admin_res.json()["detail"].lower() or "developer" in admin_res.json()["detail"].lower()
+
+    # 3. Super Administrator (Developer) is ALLOWED permanent deletion (200 OK)
+    res = client.delete(f"/devices/{dev_id}", headers=get_auth_headers("super_admin"))
     assert res.status_code == 200
     data = res.json()
     assert data["status"] == "deleted"
@@ -206,10 +211,19 @@ def test_bulk_delete_devices_permanently():
     )
     assert user_res.status_code == 403
 
-    # Administrator can bulk delete (200 OK)
-    res = client.post(
+    # Administrator is STRICTLY DENIED bulk deletion (403 Forbidden - Developer only)
+    admin_res = client.post(
         "/devices/bulk-delete",
         headers=get_auth_headers("admin"),
+        json={"device_ids": [id1, id2]},
+    )
+    assert admin_res.status_code == 403
+    assert "super administrator" in admin_res.json()["detail"].lower() or "developer" in admin_res.json()["detail"].lower()
+
+    # Super Administrator (Developer) can bulk delete (200 OK)
+    res = client.post(
+        "/devices/bulk-delete",
+        headers=get_auth_headers("super_admin"),
         json={"device_ids": [id1, id2]},
     )
     assert res.status_code == 200

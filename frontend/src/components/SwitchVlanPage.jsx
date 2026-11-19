@@ -3,7 +3,12 @@ import { isTypeAndVlanMatching, getExpectedVlanForType } from "../utils/networkI
 
 export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, devices = [] }) {
   const isAdmin = currentUser?.role === "admin" || currentUser?.role === "super_admin";
-  const isSuperAdmin = currentUser?.role === "super_admin";
+  const isSuperAdmin =
+    currentUser?.role === "super_admin" ||
+    currentUser?.role === "developer" ||
+    currentUser?.username?.toLowerCase() === "developer" ||
+    currentUser?.username?.toLowerCase() === "rogers" ||
+    currentUser?.username?.toLowerCase() === "rogers mwangi";
   const [activeTab, setActiveTab] = useState("vlans"); // "vlans" | "ports" | "switch_settings"
 
   // Data states
