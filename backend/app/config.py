@@ -12,7 +12,7 @@ class Settings(BaseSettings):
         "http://127.0.0.1:5174"
     )
 
-    database_url: str
+    database_url: str = ""
 
     # Cisco switch integration
     switch_management_ip: str = ""

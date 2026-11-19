@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from ..models.switch_config import SwitchConfig
 from ..models.switch_backup import SwitchBackup
 from ..services.event_service import create_event
+from .l2_quarantine import _is_cloud_host
 from .switch.manager import create_switch_driver, get_active_switch_driver
 
 logger = logging.getLogger(__name__)
@@ -364,6 +365,15 @@ def execute_automated_backup_cycle(db: Session, triggered_by: str = "scheduler")
     Compares live running configuration against previous snapshot, records drift,
     and dispatches alerts if sensitive discrepancies are found.
     """
+    if _is_cloud_host():
+        return {
+            "status": "skipped",
+            "message": "Cloud host environment detected: Switch hardware CLI backup skipped",
+            "results": [],
+            "created_count": 0,
+            "drift_count": 0,
+        }
+
     settings = get_backup_schedule_settings()
     switches = list(db.scalars(select(SwitchConfig).where(SwitchConfig.is_active == True)).all())
     if not switches:

@@ -177,12 +177,9 @@ def get_naive_utc(value):
     return value
 
 
-async def endpoint_health_monitor_loop():
-    """Record endpoint stale and recovery transitions."""
-
-    print("NETOPS endpoint health monitor started")
-
-    while True:
+def _run_endpoint_health_cycle_sync():
+    """Execute a single sweep of endpoint health and reachability in a worker thread."""
+    for _ in (1,):
         db = SessionLocal()
 
         try:
@@ -703,4 +700,15 @@ async def endpoint_health_monitor_loop():
                 pass
             db.close()
 
-        await asyncio.sleep(CHECK_INTERVAL_SECONDS)
+
+async def endpoint_health_monitor_loop():
+    """Record endpoint stale and recovery transitions without blocking event loop."""
+    print("NETOPS endpoint health monitor started")
+    is_cloud = _is_cloud_host()
+    interval = 15 if is_cloud else CHECK_INTERVAL_SECONDS
+    while True:
+        try:
+            await asyncio.to_thread(_run_endpoint_health_cycle_sync)
+        except Exception:
+            pass
+        await asyncio.sleep(interval)

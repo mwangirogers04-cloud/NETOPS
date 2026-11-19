@@ -4,7 +4,14 @@ from sqlalchemy.orm import DeclarativeBase, sessionmaker
 from .config import settings
 
 
-db_url = str(settings.database_url).strip()
+import os
+
+db_url = (
+    str(settings.database_url or "").strip()
+    or os.environ.get("DATABASE_URL", "").strip()
+    or os.environ.get("INTERNAL_DATABASE_URL", "").strip()
+    or "sqlite:///./backend/netops.db"
+)
 
 # Normalize cloud-provided PostgreSQL connection strings (Render / Heroku / Neon use postgres:// or postgresql://)
 if db_url.startswith("postgres://"):

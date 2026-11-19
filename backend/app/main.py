@@ -28,7 +28,7 @@ from .api.firewall import router as firewall_router
 from .api.simulation import router as simulation_router
 from .api.auth import router as auth_router
 from .api.users import router as users_router
-from .services.l2_quarantine import sync_quarantined_targets_from_db
+from .services.l2_quarantine import sync_quarantined_targets_from_db, _is_cloud_host
 from .services.passive_sniffer import start_passive_sniffer, stop_passive_sniffer
 from .api.switches import router as switches_router
 from .api.notifications import router as notifications_router
@@ -140,46 +140,67 @@ def root():
 # REAL-TIME EVENT BROADCASTER
 # ---------------------------------------------------------
 
+def _fetch_new_events_sync(last_event_id: int):
+    db = SessionLocal()
+    try:
+        events = db.scalars(
+            select(Event)
+            .where(Event.id > last_event_id)
+            .order_by(Event.id)
+        ).all()
+        return [
+            {
+                "id": ev.id,
+                "event_type": ev.event_type,
+                "message": ev.message,
+                "device_id": ev.device_id,
+                "actor": ev.actor,
+                "created_at": ev.created_at.isoformat() if ev.created_at else None,
+            }
+            for ev in events
+        ]
+    finally:
+        try:
+            if db.is_active:
+                db.rollback()
+        except Exception:
+            pass
+        db.close()
+
+
 async def event_broadcaster():
     """
     Monitor the events table and broadcast new events
-    to connected WebSocket clients.
+    to connected WebSocket clients without blocking the event loop.
     """
-
     last_event_id = 0
-    try:
+    def _get_latest_id():
         init_db = SessionLocal()
         try:
             latest_ev = init_db.scalars(
                 select(Event).order_by(Event.id.desc()).limit(1)
             ).first()
-            if latest_ev:
-                last_event_id = latest_ev.id
+            return latest_ev.id if latest_ev else 0
         finally:
             init_db.close()
+
+    try:
+        last_event_id = await asyncio.to_thread(_get_latest_id)
     except Exception:
         last_event_id = 0
 
     while True:
         try:
-            db = SessionLocal()
-
-            try:
-                events = db.scalars(
-                    select(Event)
-                    .where(Event.id > last_event_id)
-                    .order_by(Event.id)
-                ).all()
-
-                for event in events:
+            # Only query DB if there are active WebSocket connections
+            if getattr(manager, "active_connections", None):
+                new_events = await asyncio.to_thread(_fetch_new_events_sync, last_event_id)
+                for event in new_events:
                     event_payload = {
-                        "id": event.id,
-                        "event_type": event.event_type,
-                        "message": event.message,
-                        "device_id": event.device_id,
-                        "created_at": (
-                            event.created_at.isoformat()
-                        ),
+                        "id": event["id"],
+                        "event_type": event["event_type"],
+                        "message": event["message"],
+                        "device_id": event["device_id"],
+                        "created_at": event["created_at"],
                     }
                     await manager.broadcast(
                         {
@@ -189,68 +210,83 @@ async def event_broadcaster():
                         }
                     )
 
-                    # Trigger real-time webhook & security alert if event matches a trigger rule
                     try:
-                        if map_event_type_to_trigger(event.event_type):
+                        if map_event_type_to_trigger(event["event_type"]):
                             dispatch_security_alert(
-                                event_type=event.event_type,
-                                message=event.message,
+                                event_type=event["event_type"],
+                                message=event["message"],
                                 details={
-                                    "device_id": event.device_id,
-                                    "actor": event.actor,
-                                    "event_id": event.id,
+                                    "device_id": event["device_id"],
+                                    "actor": event["actor"],
+                                    "event_id": event["id"],
                                 },
                                 sync=False,
                             )
                     except Exception as alert_err:
                         print(f"[ALERT] Error dispatching webhook alert: {alert_err}")
 
-                    last_event_id = event.id
-
-            finally:
-                try:
-                    if db.is_active:
-                        db.rollback()
-                except Exception:
-                    pass
-                db.close()
+                    last_event_id = event["id"]
 
         except Exception as error:
-            print(
-                f"[WEBSOCKET] Event broadcaster error: {error}"
-            )
+            print(f"[WEBSOCKET] Event broadcaster note: {error}")
 
         await asyncio.sleep(2)
 
 
 # ---------------------------------------------------------
-# START EVENT BROADCASTER
+# SCHEDULED PATCH & SWITCH TASKS
 # ---------------------------------------------------------
+
+def _run_patch_cycle_sync():
+    db = SessionLocal()
+    try:
+        evaluate_auto_off_hours_policy(db)
+        dispatch_due_scheduled_jobs(db)
+        db.commit()
+    except Exception as err:
+        db.rollback()
+        print(f"[PATCH-SCHEDULER] Error in patch scheduler loop: {err}")
+    finally:
+        try:
+            if db.is_active:
+                db.rollback()
+        except Exception:
+            pass
+        db.close()
 
 
 async def scheduled_patch_loop():
-    """Evaluate scheduled patch remediation jobs and auto off-hours policy every 10 seconds."""
+    """Evaluate scheduled patch remediation jobs and auto off-hours policy in a worker thread."""
     while True:
-        db = SessionLocal()
         try:
-            evaluate_auto_off_hours_policy(db)
-            dispatch_due_scheduled_jobs(db)
-            db.commit()
-        except Exception as err:
-            db.rollback()
-            print(f"[PATCH-SCHEDULER] Error in patch scheduler loop: {err}")
-        finally:
-            try:
-                if db.is_active:
-                    db.rollback()
-            except Exception:
-                pass
-            db.close()
-        await asyncio.sleep(10)
+            await asyncio.to_thread(_run_patch_cycle_sync)
+        except Exception:
+            pass
+        await asyncio.sleep(15)
+
+
+def _run_switch_backup_sync(triggered_by: str = "auto_loop"):
+    db = SessionLocal()
+    try:
+        execute_automated_backup_cycle(db, triggered_by=triggered_by)
+        db.commit()
+    except Exception as b_err:
+        db.rollback()
+        print(f"[SWITCH-BACKUP] Auto backup error: {b_err}")
+    finally:
+        try:
+            if db.is_active:
+                db.rollback()
+        except Exception:
+            pass
+        db.close()
 
 
 async def scheduled_switch_backup_loop():
     """Evaluate automated switch backup and CLI drift detection cycle."""
+    if _is_cloud_host():
+        return
+
     while True:
         try:
             cfg = get_backup_schedule_settings()
@@ -272,43 +308,32 @@ async def scheduled_switch_backup_loop():
                         should_run = True
 
                 if should_run:
-                    db = SessionLocal()
-                    try:
-                        execute_automated_backup_cycle(db, triggered_by="auto_loop")
-                        db.commit()
-                    except Exception as b_err:
-                        db.rollback()
-                        print(f"[SWITCH-BACKUP] Auto backup error: {b_err}")
-                    finally:
-                        try:
-                            if db.is_active:
-                                db.rollback()
-                        except Exception:
-                            pass
-                        db.close()
+                    await asyncio.to_thread(_run_switch_backup_sync, "auto_loop")
         except Exception as err:
             print(f"[SWITCH-BACKUP-SCHEDULER] Error in auto backup loop: {err}")
 
-        await asyncio.sleep(30)
+        await asyncio.sleep(60)
 
 
 @app.on_event("startup")
 async def startup_event_broadcaster():
-    # Asynchronously initialize database tables without blocking worker imports
-    try:
-        Base.metadata.create_all(bind=engine)
-    except Exception as exc:
-        print(f"[DB] Table verification note: {exc}")
+    # Asynchronously initialize database tables and seed accounts without blocking worker imports
+    def _init_db():
+        try:
+            Base.metadata.create_all(bind=engine)
+        except Exception as exc:
+            print(f"[DB] Table verification note: {exc}")
 
-    # Seed default developer (super admin) and admin accounts
-    db = SessionLocal()
-    try:
-        seed_default_users(db)
-        sync_quarantined_targets_from_db(db)
-    except Exception as exc:
-        print(f"[AUTH/L2] Error during startup sync: {exc}")
-    finally:
-        db.close()
+        db = SessionLocal()
+        try:
+            seed_default_users(db)
+            sync_quarantined_targets_from_db(db)
+        except Exception as exc:
+            print(f"[AUTH/L2] Error during startup sync: {exc}")
+        finally:
+            db.close()
+
+    await asyncio.to_thread(_init_db)
 
     asyncio.create_task(
         event_broadcaster()
