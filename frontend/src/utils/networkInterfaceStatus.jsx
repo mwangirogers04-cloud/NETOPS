@@ -53,47 +53,70 @@ export const isDeviceActuallyOnline = (device) => {
 };
 
 /**
- * Determines whether a device is strictly in network quarantine.
- * Reserved for:
- * 1. Isolated devices (enforcement_status === "isolated")
- * 2. Unapproved new devices awaiting administrator approval (approval_status === "pending")
- * 3. Explicitly rejected / blocked devices (approval_status === "rejected")
- * 4. Online devices whose internet access is unauthorized, on VLAN 90, or actively quarantined
+ * Determines whether a device reflects in QUARANTINED DEVICES.
  *
- * Registered / approved devices that are simply disconnected (offline) are NOT quarantined.
+ * Architecture rules:
+ * 1. When a new device is joining the network, it is quarantined directly (approval_status === "pending").
+ * 2. When a device is approved, it is still quarantined until explicitly given internet access
+ *    (approval_status === "approved" && (!device.internet_access_authorized || device.enforcement_status === "quarantined")).
+ * 3. When a device is blocked / rejected / isolated, even if offline, it reflects in QUARANTINED devices!
+ *    (approval_status === "rejected" || enforcement_status === "isolated" || !device.internet_access_authorized || device.enforcement_status === "quarantined" || vlan_id === 90).
+ *
+ * A device ONLY leaves quarantine when it is approved AND actively authorized for internet access (enforcement_status === "allowed" && internet_access_authorized === true).
  */
 export const isDeviceInQuarantine = (device) => {
   if (!device) return false;
-  if (device.enforcement_status === "isolated") return true;
-  if (device.approval_status === "pending" || device.approval_status === "rejected") return true;
 
-  // Registered / approved devices that are disconnected are OFFLINE, NOT Quarantined
-  if (!isDeviceActuallyOnline(device)) {
-    return false;
+  // Security isolation
+  if (device.enforcement_status === "isolated" || device.access_decision === "isolated") {
+    return true;
   }
 
-  // Active online devices quarantined by policy, VLAN 90, or lacking internet authorization
-  return Boolean(
+  // Pending approval (new device joining) or explicitly rejected
+  if (device.approval_status === "pending" || device.approval_status === "rejected") {
+    return true;
+  }
+
+  // Blocked, unapproved for internet, or assigned to Quarantine VLAN 90
+  if (
     !device.internet_access_authorized ||
     device.enforcement_status === "quarantined" ||
     Number(device.vlan_id) === 90 ||
     device.access_decision === "quarantine"
-  );
+  ) {
+    return true;
+  }
+
+  return false;
 };
 
 /**
- * Determines whether a device is a registered / approved endpoint currently offline.
+ * Determines whether a device reflects in OFFLINE DEVICES.
+ *
+ * Architecture rule:
+ * A device reflects in Offline devices ONLY when an approved, internet-authorized device
+ * leaves the Wi-Fi / LAN coverage area (e.g. employee takes laptop home, powers off, leaves building).
+ * Blocked / rejected / pending devices reflect in Quarantined devices instead.
  */
-export const isDeviceOfflineRegistered = (device) => {
+export const isDeviceOffline = (device) => {
   if (!device) return false;
-  if (isDeviceActuallyOnline(device)) return false;
-  // Must NOT be pending approval, rejected/blocked, or isolated
-  return (
-    device.approval_status !== "pending" &&
-    device.approval_status !== "rejected" &&
-    device.enforcement_status !== "isolated"
-  );
+
+  // If physically connected and passing network traffic, it is not offline
+  if (isDeviceActuallyOnline(device)) {
+    return false;
+  }
+
+  // If in quarantine (new pending, blocked, rejected, unauthorized, or isolated),
+  // it reflects in Quarantined devices
+  if (isDeviceInQuarantine(device)) {
+    return false;
+  }
+
+  // Approved, internet-authorized device that has disconnected (left Wi-Fi coverage area)
+  return device.approval_status === "approved" && Boolean(device.internet_access_authorized);
 };
+
+export const isDeviceOfflineRegistered = isDeviceOffline;
 
 /**
  * Computes network interface type and real-time internet connectivity status

@@ -11425,18 +11425,20 @@ const Dashboard = () => {
 
                       <td>
                         <span
-                          className={`status-badge ${isOnline ? "allowed" : "blocked"}`}
+                          className={`status-badge ${isOnline && !isDeviceInQuarantine(device) ? "allowed" : "blocked"}`}
                           style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}
                         >
                           <span className={`status-dot ${isOnline ? "online" : "offline"}`} />
                           {isOnline
-                            ? "ONLINE"
+                            ? (isDeviceInQuarantine(device) ? "ONLINE (Quarantined)" : "ONLINE")
                             : device.enforcement_status === "isolated"
                             ? "ISOLATED"
-                            : device.approval_status === "pending"
-                            ? "NEW (Pending Approval)"
                             : device.approval_status === "rejected"
                             ? "BLOCKED"
+                            : device.approval_status === "pending"
+                            ? "NEW (Pending Approval)"
+                            : !device.internet_access_authorized || device.enforcement_status === "quarantined"
+                            ? "BLOCKED (Quarantined)"
                             : "OFFLINE"}
                         </span>
                       </td>
@@ -11444,9 +11446,11 @@ const Dashboard = () => {
                       <td>
                         <StatusBadge
                           value={
-                            !isOnline && device.approval_status === "approved"
+                            isDeviceInQuarantine(device)
+                              ? (device.enforcement_status === "isolated" ? "isolated" : "quarantine")
+                              : !isOnline
                               ? "offline"
-                              : device.access_decision || (device.enforcement_status === "isolated" ? "isolated" : "quarantine")
+                              : device.access_decision || "allowed"
                           }
                         />
                       </td>

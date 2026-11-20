@@ -81,17 +81,19 @@ def add_access_information(device: Device):
     elif device.approval_status in {"pending", "rejected"}:
         device.access_decision = "quarantine"
 
-    elif is_offline and device.approval_status == "approved":
-        device.access_decision = "offline"
-
     elif getattr(device, "vlan_id", None) is not None and not is_type_and_vlan_matching(device.device_type, device.vlan_id):
         device.access_decision = "quarantine"
 
-    elif device.enforcement_status == "allowed" and device.internet_access_authorized:
-        device.access_decision = "allowed"
+    elif not device.internet_access_authorized or device.enforcement_status != "allowed":
+        # Blocked or newly approved waiting for internet access -> quarantine
+        device.access_decision = "quarantine"
+
+    elif is_offline:
+        # Approved and authorized device that has left Wi-Fi/LAN coverage area -> offline
+        device.access_decision = "offline"
 
     else:
-        device.access_decision = "quarantine"
+        device.access_decision = "allowed"
 
     # Physical connection status (online/offline) is preserved from physical detection
 
@@ -109,11 +111,6 @@ def add_access_information(device: Device):
     elif device.approval_status in {"pending", "rejected"}:
         device.access_reason = reason
 
-    elif is_offline and device.approval_status == "approved":
-        device.access_reason = (
-            "Device is currently disconnected from network"
-        )
-
     elif reason == "Unknown or unrecognized device type":
         device.access_reason = reason
 
@@ -125,6 +122,11 @@ def add_access_information(device: Device):
     elif device.enforcement_status != "allowed":
         device.access_reason = (
             "Internet access is currently quarantined by policy or schedule"
+        )
+
+    elif is_offline:
+        device.access_reason = (
+            "Device is currently disconnected from network (left coverage area)"
         )
 
     else:

@@ -79,11 +79,27 @@ def test_add_access_information_defaults_ip_assignment():
     assert result.ip_assignment == "dhcp"
 
 
-def test_approved_device_offline_has_offline_decision():
-    device = make_device(status="offline", approval_status="approved")
+def test_approved_authorized_device_leaving_wifi_has_offline_decision():
+    device = make_device(
+        status="offline",
+        approval_status="approved",
+        internet_access_authorized=True,
+        enforcement_status="allowed",
+    )
     result = add_access_information(device)
     assert result.access_decision == "offline"
-    assert result.access_reason == "Device is currently disconnected from network"
+    assert "disconnected" in result.access_reason.lower()
+
+
+def test_blocked_device_is_offline_but_reflects_in_quarantine():
+    device = make_device(
+        status="offline",
+        approval_status="approved",
+        internet_access_authorized=False,
+        enforcement_status="quarantined",
+    )
+    result = add_access_information(device)
+    assert result.access_decision == "quarantine"
 
 
 def test_pending_device_offline_remains_quarantined():
