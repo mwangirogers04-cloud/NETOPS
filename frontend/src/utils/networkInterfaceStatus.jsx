@@ -53,6 +53,49 @@ export const isDeviceActuallyOnline = (device) => {
 };
 
 /**
+ * Determines whether a device is strictly in network quarantine.
+ * Reserved for:
+ * 1. Isolated devices (enforcement_status === "isolated")
+ * 2. Unapproved new devices awaiting administrator approval (approval_status === "pending")
+ * 3. Explicitly rejected / blocked devices (approval_status === "rejected")
+ * 4. Online devices whose internet access is unauthorized, on VLAN 90, or actively quarantined
+ *
+ * Registered / approved devices that are simply disconnected (offline) are NOT quarantined.
+ */
+export const isDeviceInQuarantine = (device) => {
+  if (!device) return false;
+  if (device.enforcement_status === "isolated") return true;
+  if (device.approval_status === "pending" || device.approval_status === "rejected") return true;
+
+  // Registered / approved devices that are disconnected are OFFLINE, NOT Quarantined
+  if (!isDeviceActuallyOnline(device)) {
+    return false;
+  }
+
+  // Active online devices quarantined by policy, VLAN 90, or lacking internet authorization
+  return Boolean(
+    !device.internet_access_authorized ||
+    device.enforcement_status === "quarantined" ||
+    Number(device.vlan_id) === 90 ||
+    device.access_decision === "quarantine"
+  );
+};
+
+/**
+ * Determines whether a device is a registered / approved endpoint currently offline.
+ */
+export const isDeviceOfflineRegistered = (device) => {
+  if (!device) return false;
+  if (isDeviceActuallyOnline(device)) return false;
+  // Must NOT be pending approval, rejected/blocked, or isolated
+  return (
+    device.approval_status !== "pending" &&
+    device.approval_status !== "rejected" &&
+    device.enforcement_status !== "isolated"
+  );
+};
+
+/**
  * Computes network interface type and real-time internet connectivity status
  * for any LAN or WLAN (Wi-Fi) device.
  *

@@ -14,6 +14,8 @@ import {
   isTypeAndVlanMatching,
   getExpectedVlanForType,
   isDeviceActuallyOnline,
+  isDeviceInQuarantine,
+  isDeviceOfflineRegistered,
 } from "./utils/networkInterfaceStatus";
 import { playBellSound } from "./utils/bellAudio";
 
@@ -1082,6 +1084,7 @@ function App() {
 
   const totalDevices = siteScopedDevices.length;
   const onlineDevices = siteScopedDevices.filter((device) => isDeviceActuallyOnline(device)).length;
+  const offlineDevices = siteScopedDevices.filter((device) => isDeviceOfflineRegistered(device)).length;
   const pendingDevices = siteScopedDevices.filter(
     (device) => device.approval_status === "pending"
   ).length;
@@ -1091,7 +1094,7 @@ function App() {
   ).length;
 
   const quarantinedDevices = siteScopedDevices.filter(
-    (device) => device.enforcement_status === "quarantined"
+    (device) => isDeviceInQuarantine(device)
   ).length;
 
   const isolatedDevices = siteScopedDevices.filter(
@@ -3038,7 +3041,7 @@ const DevicesPage = () => {
 
                       <td>
                         <span className="status-badge blocked" style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontSize: "11px" }}>
-                          <span className="status-dot offline" /> OFFLINE (Isolated)
+                          <span className={`status-dot ${isDeviceActuallyOnline(device) ? "online" : "offline"}`} /> {isDeviceActuallyOnline(device) ? "ONLINE (Isolated)" : "OFFLINE (Isolated)"}
                         </span>
                       </td>
 
@@ -3236,7 +3239,7 @@ const DevicesPage = () => {
             style={deviceFilter === "online" ? { background: "var(--accent-color, #3b82f6)", color: "#fff" } : {}}
             onClick={() => setDeviceFilter("online")}
           >
-            🟢 Online ({devices.filter(d => isDeviceActuallyOnline(d)).length})
+            🟢 Online ({scopedDevices.filter(d => isDeviceActuallyOnline(d)).length})
           </button>
           <button
             type="button"
@@ -3244,7 +3247,7 @@ const DevicesPage = () => {
             style={deviceFilter === "offline" ? { background: "#dc2626", color: "#fff" } : { borderColor: "#ef4444", color: "#dc2626" }}
             onClick={() => setDeviceFilter("offline")}
           >
-            🔴 Offline ({devices.filter(d => !isDeviceActuallyOnline(d)).length})
+            🔴 Offline ({scopedDevices.filter(isDeviceOfflineRegistered).length})
           </button>
           <button
             type="button"
@@ -3405,14 +3408,14 @@ const DevicesPage = () => {
         {(() => {
           const inventoryFilteredDevices = scopedDevices.filter((device) => {
             if (deviceFilter === "online" && !isDeviceActuallyOnline(device)) return false;
-            if (deviceFilter === "offline" && isDeviceActuallyOnline(device)) return false;
+            if (deviceFilter === "offline" && !isDeviceOfflineRegistered(device)) return false;
             if (deviceFilter === "needs_updates" && (device.update_status !== "updates_available" || device.pending_updates === 0)) return false;
             if (deviceFilter === "queued" && !Boolean(getActiveJobForDevice(device))) return false;
             if (deviceFilter === "up_to_date" && device.update_status !== "up_to_date" && device.pending_updates !== 0) return false;
             if (deviceFilter === "unmonitored" && device.update_status && device.update_status !== "unmonitored") return false;
             if (deviceFilter === "pending" && device.approval_status !== "pending") return false;
             if (deviceFilter === "rejected" && device.approval_status !== "rejected") return false;
-            if (deviceFilter === "quarantined" && device.enforcement_status !== "quarantined") return false;
+            if (deviceFilter === "quarantined" && !isDeviceInQuarantine(device)) return false;
             if (deviceFilter === "isolated" && device.enforcement_status !== "isolated") return false;
             if (deviceFilter === "scheduled" && !isDeviceScheduled(device)) return false;
             if (deviceFilter === "scheduled_updates" && !isDeviceScheduledForUpdates(device)) return false;
@@ -4460,7 +4463,7 @@ const LanScannerPage = () => {
       });
 
   const onlineDevices = displayedInterfaceDevices.filter((d) => isDeviceActuallyOnline(d));
-  const offlineDevices = displayedInterfaceDevices.filter((d) => !isDeviceActuallyOnline(d));
+  const offlineDevices = displayedInterfaceDevices.filter((d) => isDeviceOfflineRegistered(d));
   const ipChangedEvents = events.filter((e) => e.event_type === "ip_address_changed");
   const ipChangedDeviceIds = new Set(ipChangedEvents.map((e) => e.device_id));
 
@@ -4495,11 +4498,11 @@ const LanScannerPage = () => {
   const filteredDevices = displayedInterfaceDevices.filter((device) => {
     // Status filter
     if (lanFilterStatus === "online" && !isDeviceActuallyOnline(device)) return false;
-    if (lanFilterStatus === "offline" && isDeviceActuallyOnline(device)) return false;
+    if (lanFilterStatus === "offline" && !isDeviceOfflineRegistered(device)) return false;
     if (lanFilterStatus === "ip-changed" && !ipChangedDeviceIds.has(device.id)) return false;
     if (lanFilterStatus === "ip-conflict" && !conflictedDeviceIds.has(device.id)) return false;
     if (lanFilterStatus === "allowed" && (!isDeviceActuallyOnline(device) || device.enforcement_status !== "allowed" || !device.internet_access_authorized)) return false;
-    if (lanFilterStatus === "quarantined" && (device.enforcement_status === "allowed" && device.internet_access_authorized)) return false;
+    if (lanFilterStatus === "quarantined" && !isDeviceInQuarantine(device)) return false;
     if (lanFilterStatus === "scheduled" && !isDeviceScheduled(device)) return false;
     if (lanFilterStatus === "pending" && device.approval_status !== "pending") return false;
 
@@ -4528,7 +4531,7 @@ const LanScannerPage = () => {
   };
 
   const allowedCount = displayedInterfaceDevices.filter((d) => isDeviceActuallyOnline(d) && d.enforcement_status === "allowed" && d.internet_access_authorized).length;
-  const quarantinedCount = displayedInterfaceDevices.filter((d) => (d.enforcement_status === "quarantined" || d.vlan_id === 90 || d.access_decision === "quarantine" || d.approval_status === "pending")).length;
+  const quarantinedCount = displayedInterfaceDevices.filter(isDeviceInQuarantine).length;
 
   return (
     <div className="page">
@@ -10870,7 +10873,7 @@ const Dashboard = () => {
   ).length;
 
   const offlineDevices = siteScopedDevices.filter(
-    (device) => !isDeviceActuallyOnline(device)
+    (device) => isDeviceOfflineRegistered(device)
   ).length;
 
   const pendingDevices = siteScopedDevices.filter(
@@ -10882,9 +10885,7 @@ const Dashboard = () => {
   ).length;
 
   const quarantinedDevices = siteScopedDevices.filter(
-    (device) =>
-      device.enforcement_status === "quarantined" ||
-      device.access_decision === "quarantine"
+    (device) => isDeviceInQuarantine(device)
   ).length;
 
   const rejectedDevices = siteScopedDevices.filter(
@@ -10923,17 +10924,9 @@ const Dashboard = () => {
 
   const filteredDashboardDevices = siteScopedDevices.filter((device) => {
     if (dashboardDeviceFilter === "online") return isDeviceActuallyOnline(device);
-    if (dashboardDeviceFilter === "offline") return !isDeviceActuallyOnline(device);
+    if (dashboardDeviceFilter === "offline") return isDeviceOfflineRegistered(device);
     if (dashboardDeviceFilter === "pending") return device.approval_status === "pending";
-    if (dashboardDeviceFilter === "quarantined") {
-      return (
-        device.enforcement_status === "quarantined" ||
-        device.access_decision === "quarantine" ||
-        device.approval_status === "pending" ||
-        device.approval_status === "rejected" ||
-        !device.internet_access_authorized
-      );
-    }
+    if (dashboardDeviceFilter === "quarantined") return isDeviceInQuarantine(device);
     if (dashboardDeviceFilter === "rejected") return device.approval_status === "rejected";
     return true;
   }).slice().sort((a, b) => compareIpAddresses(a.ip_address, b.ip_address));
@@ -11006,7 +10999,7 @@ const Dashboard = () => {
         <AccessSummary
           title="Offline"
           value={offlineDevices}
-          text="Disconnected or internet-blocked"
+          text="Disconnected from network"
           onClick={() => {
             setDashboardDeviceFilter("offline");
             const el = document.getElementById("dashboard-devices-panel");
@@ -11083,7 +11076,9 @@ const Dashboard = () => {
             </div>
             <div className="panel-subtitle">
               {dashboardDeviceFilter === "offline"
-                ? "Endpoints currently disconnected or blocked from the network"
+                ? "Registered endpoints currently disconnected from the network"
+                : dashboardDeviceFilter === "quarantined"
+                ? "Devices placed in security quarantine (pending approval, blocked, or unauthorized)"
                 : "Live LAN & Wi-Fi devices detected across your network infrastructure"}
             </div>
           </div>
@@ -11420,15 +11415,23 @@ const Dashboard = () => {
                           {isOnline
                             ? "ONLINE"
                             : device.enforcement_status === "isolated"
-                            ? "OFFLINE (Isolated)"
-                            : (device.enforcement_status === "quarantined" || device.vlan_id === 90 || device.approval_status === "pending")
-                            ? "OFFLINE (Quarantined)"
+                            ? "ISOLATED"
+                            : device.approval_status === "pending"
+                            ? "NEW (Pending Approval)"
+                            : device.approval_status === "rejected"
+                            ? "BLOCKED"
                             : "OFFLINE"}
                         </span>
                       </td>
 
                       <td>
-                        <StatusBadge value={device.access_decision || "quarantine"} />
+                        <StatusBadge
+                          value={
+                            !isOnline && device.approval_status === "approved"
+                              ? "offline"
+                              : device.access_decision || (device.enforcement_status === "isolated" ? "isolated" : "quarantine")
+                          }
+                        />
                       </td>
 
                       <td>

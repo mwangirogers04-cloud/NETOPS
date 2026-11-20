@@ -73,14 +73,16 @@ def add_access_information(device: Device):
     if not getattr(device, "ip_assignment", None):
         device.ip_assignment = "dhcp"
 
+    is_offline = getattr(device, "status", None) in ("offline", "disconnected")
+
     if device.enforcement_status == "isolated":
         device.access_decision = "isolated"
 
     elif device.approval_status in {"pending", "rejected"}:
         device.access_decision = "quarantine"
 
-    elif getattr(device, "status", None) in ("offline", "disconnected"):
-        device.access_decision = "quarantine"
+    elif is_offline and device.approval_status == "approved":
+        device.access_decision = "offline"
 
     elif getattr(device, "vlan_id", None) is not None and not is_type_and_vlan_matching(device.device_type, device.vlan_id):
         device.access_decision = "quarantine"
@@ -106,6 +108,11 @@ def add_access_information(device: Device):
 
     elif device.approval_status in {"pending", "rejected"}:
         device.access_reason = reason
+
+    elif is_offline and device.approval_status == "approved":
+        device.access_reason = (
+            "Device is currently disconnected from network"
+        )
 
     elif reason == "Unknown or unrecognized device type":
         device.access_reason = reason
