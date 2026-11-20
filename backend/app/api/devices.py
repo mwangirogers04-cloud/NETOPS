@@ -517,10 +517,8 @@ def approve_device(
         )
 
     if device.approval_status == "approved":
-        raise HTTPException(
-            status_code=400,
-            detail="Device is already approved",
-        )
+        add_access_information(device)
+        return device
 
     # --------------------------------------------------------
     # APPROVAL DOES NOT GRANT INTERNET ACCESS
@@ -532,7 +530,8 @@ def approve_device(
     # explicitly clicks "Allow Internet".
     device.internet_access_authorized = False
     device.enforcement_status = "quarantined"
-    device.status = "offline"
+    if not device.status:
+        device.status = "online"
 
     has_user = isinstance(current_user, User) or (current_user and hasattr(current_user, "username") and not hasattr(current_user, "dependency"))
     actor_username = current_user.username if has_user else "administrator"
@@ -565,7 +564,8 @@ def approve_device(
     # Ensure approval does NOT prematurely grant internet access
     device.internet_access_authorized = False
     device.enforcement_status = "quarantined"
-    device.status = "offline"
+    if not device.status:
+        device.status = "online"
 
     if device.ip_address:
         try:

@@ -1939,6 +1939,17 @@ const loadEvents = async () => {
     await loadDevices();
     await loadEvents();
 
+    if (action === "approve") {
+      const devName = result.hostname || result.ip_address || "Device";
+      alert(`✓ ${devName} approved successfully!\n\nAssigned to VLAN ${result.vlan_id || "20"}.\nNext step: Click "✓ Allow Internet" in the Action column to authorize internet access.`);
+    } else if (action === "allow") {
+      const devName = result.hostname || result.ip_address || "Device";
+      alert(`⚡ Internet access authorized for ${devName}!\nLayer 2 quarantine released.`);
+    } else if (action === "disallow" || action === "quarantine") {
+      const devName = result.hostname || result.ip_address || "Device";
+      alert(`🔒 ${devName} placed in quarantine. Network access blocked.`);
+    }
+
   } catch (error) {
     console.error(
       `Device action ${action} failed:`,
