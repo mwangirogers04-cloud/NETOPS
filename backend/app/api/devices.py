@@ -510,6 +510,10 @@ def create_device(
     "/{device_id}/approve",
     response_model=DeviceResponse,
 )
+@router.post(
+    "/{device_id}/approve",
+    response_model=DeviceResponse,
+)
 def approve_device(
     device_id: int,
     db: Session = Depends(get_db),
@@ -601,6 +605,10 @@ def approve_device(
     "/{device_id}/reject",
     response_model=DeviceResponse,
 )
+@router.post(
+    "/{device_id}/reject",
+    response_model=DeviceResponse,
+)
 def reject_device(
     device_id: int,
     db: Session = Depends(get_db),
@@ -615,19 +623,16 @@ def reject_device(
         )
 
     if device.approval_status == "rejected":
-        raise HTTPException(
-            status_code=400,
-            detail="Device is already rejected",
-        )
+        add_access_information(device)
+        return device
 
     device.approval_status = "rejected"
 
-    # Rejected devices must always remain quarantined and offline.
+    # Rejected devices must always remain quarantined on VLAN 90
     device.internet_access_authorized = False
     device.enforcement_status = "quarantined"
-    device.status = "offline"
 
-    # Rejected devices return to quarantine VLAN.
+    # Rejected devices return to quarantine VLAN
     device.vlan_id = 90
 
     enforce_device_access(
@@ -779,6 +784,9 @@ def allow_device(
 @router.post(
     "/{device_id}/disallow",
 )
+@router.post(
+    "/{device_id}/block",
+)
 def disallow_device(
     device_id: int,
     db: Session = Depends(get_db),
@@ -799,9 +807,7 @@ def disallow_device(
 
     device.internet_access_authorized = False
     device.enforcement_status = "quarantined"
-    device.status = "offline"
     device.vlan_id = 90
-    device.status = "offline"
 
     result = enforce_device_access(
         device,
@@ -1349,7 +1355,6 @@ def isolate_device(
     device.enforcement_status = "isolated"
     device.internet_access_authorized = False
     device.vlan_id = 90
-    device.status = "offline"
 
     # Disable active access schedules while device is explicitly isolated
     try:
@@ -1427,7 +1432,6 @@ def unisolate_device(
         )
 
     device.enforcement_status = "quarantined"
-    device.status = "offline"
 
     if device.approval_status == "approved":
         target_vlan = get_vlan_for_device_type(device.device_type)
@@ -1509,7 +1513,6 @@ def reset_device_for_experiment(
     device.classification_status = "normal"
     device.vlan_id = 90
     device.enforcement_status = "quarantined"
-    device.status = "offline"
     device.internet_access_authorized = False
 
     try:

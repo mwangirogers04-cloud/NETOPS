@@ -1784,18 +1784,19 @@ const loadEvents = async () => {
     // ALLOW INTERNET ACCESS
     // ----------------------------------------------------------
 
-    else if (action === "allow") {
+    else if (action === "allow" || action === "unblock") {
       url += "/allow";
       method = "POST";
     }
 
     // ----------------------------------------------------------
-    // DISALLOW / QUARANTINE INTERNET ACCESS
+    // DISALLOW / QUARANTINE / BLOCK INTERNET ACCESS
     // ----------------------------------------------------------
 
     else if (
       action === "disallow" ||
-      action === "quarantine"
+      action === "quarantine" ||
+      action === "block"
     ) {
       url += "/disallow";
       method = "POST";
@@ -1945,12 +1946,21 @@ const loadEvents = async () => {
     if (action === "approve") {
       const devName = result.hostname || result.ip_address || "Device";
       alert(`✓ ${devName} approved successfully!\n\nAssigned to VLAN ${result.vlan_id || "20"}.\nNext step: Click "✓ Allow Internet" in the Action column to authorize internet access.`);
-    } else if (action === "allow") {
+    } else if (action === "allow" || action === "unblock") {
       const devName = result.hostname || result.ip_address || "Device";
       alert(`⚡ Internet access authorized for ${devName}!\nLayer 2 quarantine released.`);
-    } else if (action === "disallow" || action === "quarantine") {
+    } else if (action === "disallow" || action === "quarantine" || action === "block") {
       const devName = result.hostname || result.ip_address || "Device";
-      alert(`🔒 ${devName} placed in quarantine. Network access blocked.`);
+      alert(`🔒 ${devName} internet access blocked.\nDevice placed in quarantine.`);
+    } else if (action === "reject") {
+      const devName = result.hostname || result.ip_address || "Device";
+      alert(`🚫 ${devName} rejected.\nDevice blocked and quarantined on VLAN 90.`);
+    } else if (action === "isolate") {
+      const devName = result.hostname || result.ip_address || "Device";
+      alert(`🔒 ${devName} isolated on Quarantine VLAN 90.\nAll network access disabled.`);
+    } else if (action === "unisolate") {
+      const devName = result.hostname || result.ip_address || "Device";
+      alert(`🔓 ${devName} released from isolation.\nRestored to operational VLAN.`);
     }
 
   } catch (error) {
@@ -4327,19 +4337,24 @@ const DevicesPage = () => {
                             className="secondary-button small"
                             disabled={
                               actionLoading ===
-                              `disallow-${device.id}`
+                              `disallow-${device.id}` ||
+                              actionLoading ===
+                              `block-${device.id}`
                             }
                             onClick={() =>
                               deviceAction(
                                 device.id,
-                                "disallow"
+                                "block"
                               )
                             }
+                            title="Block internet access"
                           >
                             {actionLoading ===
-                            `disallow-${device.id}`
+                            `disallow-${device.id}` ||
+                            actionLoading ===
+                            `block-${device.id}`
                               ? "..."
-                              : "Disconnect"}
+                              : "🚫 Block Internet"}
                           </button>
                         )}
 
@@ -5842,14 +5857,16 @@ const LanScannerPage = () => {
                                     className="danger-button small"
                                     type="button"
                                     onClick={() =>
-                                      deviceAction(device.id, "disallow")
+                                      deviceAction(device.id, "block")
                                     }
                                     disabled={
+                                      actionLoading === `block-${device.id}` ||
                                       actionLoading === `disallow-${device.id}`
                                     }
                                     title="Block Internet access on Firewall"
                                   >
-                                    {actionLoading === `disallow-${device.id}`
+                                    {actionLoading === `block-${device.id}` ||
+                                    actionLoading === `disallow-${device.id}`
                                       ? "Blocking..."
                                       : "🚫 Block Internet"}
                                   </button>
@@ -6408,11 +6425,11 @@ const AccessPage = () => {
                             onClick={() =>
                               deviceAction(
                                 device.id,
-                                "disallow"
+                                "block"
                               )
                             }
                           >
-                            Disconnect
+                            🚫 Block Internet
                           </button>
 
                         )}
@@ -11439,15 +11456,27 @@ const Dashboard = () => {
                           {isAdmin ? (
                             <>
                               {device.approval_status === "pending" && (
-                                <button
-                                  type="button"
-                                  className="approve-button"
-                                  style={{ padding: "3px 8px", fontSize: "11px" }}
-                                  onClick={() => deviceAction(device.id, "approve")}
-                                  disabled={actionLoading === `approve-${device.id}`}
-                                >
-                                  {actionLoading === `approve-${device.id}` ? "..." : "✓ Approve"}
-                                </button>
+                                <>
+                                  <button
+                                    type="button"
+                                    className="approve-button"
+                                    style={{ padding: "3px 8px", fontSize: "11px" }}
+                                    onClick={() => deviceAction(device.id, "approve")}
+                                    disabled={actionLoading === `approve-${device.id}`}
+                                  >
+                                    {actionLoading === `approve-${device.id}` ? "..." : "✓ Approve"}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="secondary-button small"
+                                    style={{ padding: "3px 8px", fontSize: "11px", color: "#dc2626", borderColor: "#f87171" }}
+                                    onClick={() => deviceAction(device.id, "reject")}
+                                    disabled={actionLoading === `reject-${device.id}`}
+                                    title="Reject and block device"
+                                  >
+                                    {actionLoading === `reject-${device.id}` ? "..." : "🚫 Block"}
+                                  </button>
+                                </>
                               )}
 
                               {device.approval_status === "approved" && device.enforcement_status !== "allowed" && (
@@ -11467,12 +11496,12 @@ const Dashboard = () => {
                                 <button
                                   type="button"
                                   className="secondary-button small"
-                                  style={{ padding: "3px 8px", fontSize: "11px", color: "#dc2626", borderColor: "#f87171" }}
-                                  onClick={() => deviceAction(device.id, "quarantine")}
-                                  disabled={actionLoading === `quarantine-${device.id}`}
+                                  style={{ padding: "3px 8px", fontSize: "11px", color: "#dc2626", borderColor: "#f87171", fontWeight: "700" }}
+                                  onClick={() => deviceAction(device.id, "block")}
+                                  disabled={actionLoading === `block-${device.id}` || actionLoading === `quarantine-${device.id}` || actionLoading === `disallow-${device.id}`}
                                   title="Block Internet Access"
                                 >
-                                  {actionLoading === `quarantine-${device.id}` ? "..." : "Block"}
+                                  {actionLoading === `block-${device.id}` || actionLoading === `quarantine-${device.id}` || actionLoading === `disallow-${device.id}` ? "..." : "🚫 Block"}
                                 </button>
                               )}
 
