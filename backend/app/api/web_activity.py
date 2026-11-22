@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -14,6 +14,7 @@ from ..models.web_activity import WebActivityLog, WebFilterPolicy
 from ..services.web_traffic_sniffer import (
     get_or_create_web_policy,
     get_web_activity_analytics,
+    get_active_web_sessions,
     record_web_activity,
     start_web_traffic_sniffer,
     stop_web_traffic_sniffer,
@@ -73,20 +74,34 @@ class ManualLogRequest(BaseModel):
     protocol: str = "PROBE"
 
 
+@router.get("/active-sessions")
+def get_active_sessions(
+    minutes: int = Query(5, ge=1, le=60),
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+):
+    """Retrieve currently connected devices and domains active within the last N minutes."""
+    return get_active_web_sessions(db, minutes=minutes)
+
+
 @router.get("/logs", response_model=list[WebActivityLogResponse])
 def get_web_activity_logs(
     category: str | None = None,
     violations_only: bool = False,
     ip_address: str | None = None,
     device_id: int | None = None,
-    limit: int = Query(100, ge=1, le=500),
+    minutes: int | None = None,
+    limit: int = Query(150, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_optional_current_user),
 ):
-    """List recent web activity logs with optional category, IP, and violation filters."""
+    """List recent web activity logs with optional category, IP, minutes, and violation filters."""
     q = select(WebActivityLog).order_by(desc(WebActivityLog.timestamp))
 
+    if minutes is not None and minutes > 0:
+        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=minutes)
+        q = q.where(WebActivityLog.timestamp >= cutoff)
     if category:
         q = q.where(WebActivityLog.category == category)
     if violations_only:
@@ -98,6 +113,17 @@ def get_web_activity_logs(
 
     q = q.offset(offset).limit(limit)
     return db.scalars(q).all()
+
+
+@router.delete("/logs")
+def clear_web_activity_logs(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Clear all historical web activity logs."""
+    db.query(WebActivityLog).delete()
+    db.commit()
+    return {"message": "Web activity logs cleared successfully"}
 
 
 @router.get("/analytics")

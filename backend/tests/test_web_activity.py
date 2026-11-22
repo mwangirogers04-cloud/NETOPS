@@ -186,3 +186,32 @@ def test_web_activity_api_endpoints(client, db_session):
     assert put_res.status_code == 200
     updated = put_res.json()
     assert updated["block_social_media_work_hours"] is True
+
+def test_active_sessions_and_time_filters(client, db_session):
+    # Post an entry
+    client.post("/web-activity/log", json={
+        "ip_address": "192.168.0.107",
+        "domain": "zeno.fm",
+        "protocol": "DNS",
+    })
+
+    # Test active sessions endpoint
+    res = client.get("/web-activity/active-sessions?minutes=5")
+    assert res.status_code == 200
+    sessions = res.json()
+    assert len(sessions) >= 1
+    assert any(s["domain"] == "zeno.fm" and s["ip_address"] == "192.168.0.107" for s in sessions)
+
+    # Test minutes filter on logs
+    logs_res = client.get("/web-activity/logs?minutes=5")
+    assert logs_res.status_code == 200
+    assert len(logs_res.json()) >= 1
+
+    # Test clear logs
+    del_res = client.delete("/web-activity/logs")
+    assert del_res.status_code == 200
+
+    # Ensure logs empty
+    empty_res = client.get("/web-activity/logs")
+    assert empty_res.status_code == 200
+    assert len(empty_res.json()) == 0

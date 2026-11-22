@@ -310,3 +310,51 @@ def get_web_activity_analytics(db: Session, hours: int = 24) -> dict:
         "top_social_devices": top_social,
         "top_domains": top_domains,
     }
+
+
+def get_active_web_sessions(db: Session, minutes: int = 5) -> list[dict]:
+    """
+    Returns devices and domains actively communicating within the last `minutes`.
+    If a user has left the site (no traffic within `minutes`), they are omitted.
+    Groups by (ip_address, domain).
+    """
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=minutes)
+    q = (
+        select(WebActivityLog)
+        .where(WebActivityLog.timestamp >= cutoff)
+        .order_by(desc(WebActivityLog.timestamp))
+    )
+    recent_logs = db.scalars(q).all()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    sessions: dict[tuple[str, str], dict] = {}
+    for log in recent_logs:
+        log_time = log.timestamp
+        if log_time.tzinfo is not None:
+            log_time = log_time.replace(tzinfo=None)
+
+        key = (log.ip_address, log.domain)
+        if key not in sessions:
+            seconds_ago = max(0, int((now - log_time).total_seconds()))
+            status = "active" if seconds_ago < 120 else "idle"
+            sessions[key] = {
+                "id": log.id,
+                "device_id": log.device_id,
+                "ip_address": log.ip_address,
+                "mac_address": log.mac_address,
+                "hostname": log.hostname or log.ip_address,
+                "domain": log.domain,
+                "category": log.category,
+                "protocol": log.protocol,
+                "is_violation": log.is_violation,
+                "action": log.action,
+                "hit_count": log.hit_count,
+                "last_seen": log.timestamp.isoformat(),
+                "seconds_ago": seconds_ago,
+                "status": status,
+            }
+        else:
+            sessions[key]["hit_count"] += log.hit_count
+
+    return sorted(list(sessions.values()), key=lambda s: s["seconds_ago"])
+
