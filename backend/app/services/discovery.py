@@ -1367,13 +1367,17 @@ def save_discovered_devices(
             if not hostname:
                 old_ip = existing_device.ip_address
                 new_ip = discovered.get("ip_address")
-                if (
+                is_fallback_name = (
                     existing_device.hostname
-                    and old_ip
-                    and new_ip
-                    and existing_device.hostname == f"HOST-{old_ip.replace('.', '-')}"
-                ):
-                    hostname = f"HOST-{new_ip.replace('.', '-')}"
+                    and (
+                        existing_device.hostname.startswith("HOST-")
+                        or existing_device.hostname.startswith("Phone-")
+                        or existing_device.hostname.startswith("LAN-HOST-")
+                    )
+                )
+                if is_fallback_name and new_ip and old_ip != new_ip:
+                    prefix = "Phone-" if existing_device.hostname.startswith("Phone-") else "HOST-"
+                    hostname = f"{prefix}{new_ip.replace('.', '-')}"
                 else:
                     hostname = existing_device.hostname
 
@@ -1462,6 +1466,13 @@ def save_discovered_devices(
                         pass
 
                 existing_device.ip_address = new_ip
+
+                # Auto-sync auto-generated fallback hostnames when IP changes to prevent confusion
+                curr_h = (existing_device.hostname or "").strip()
+                if curr_h.startswith("HOST-") or curr_h.startswith("Phone-") or curr_h.startswith("LAN-HOST-"):
+                    prefix = "Phone-" if curr_h.startswith("Phone-") else "HOST-"
+                    existing_device.hostname = f"{prefix}{new_ip.replace('.', '-')}"
+
                 create_event(
                     db,
                     "ip_address_changed",
