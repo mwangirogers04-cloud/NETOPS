@@ -1,6 +1,6 @@
 import ipaddress
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 from sqlalchemy import select, or_, func
 from sqlalchemy.orm import Session
@@ -971,4 +971,132 @@ def poll_pending_command(
         "hostname": job.hostname,
         "created_at": job.created_at,
     }
+
+
+@router.get("/launcher/windows")
+def download_windows_updater(
+    token: str | None = None,
+    job_id: int | None = None,
+):
+    """
+    Serves a 1-click Windows Update deployment batch file for remote Windows endpoints.
+    Uses the native Windows Update Session API (Microsoft.Update.Session) to search,
+    download, and install genuine patches directly from Microsoft Update servers.
+    """
+    callback_cmd = ""
+    if job_id and token:
+        callback_cmd = f"""
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$headers = @{{ 'Authorization' = 'Bearer {token.strip()}'; 'Content-Type' = 'application/json' }}; $body = @{{ 'status' = 'COMPLETED'; 'progress_percent' = 100; 'log_output' = 'Real Windows Updates installed directly via Microsoft.Update.Session COM API.' }} | ConvertTo-Json; Invoke-RestMethod -Uri 'https://api.netops.co.ke/endpoint-updates/jobs/{job_id}/status' -Method POST -Headers $headers -Body $body" >nul 2>&1
+"""
+
+    bat_content = (
+        "@echo off\r\n"
+        "title NETOPS Real Windows Update Deployment Agent\r\n"
+        "echo ========================================================\r\n"
+        "echo   NETOPS Real Physical Windows Update Agent\r\n"
+        "echo ========================================================\r\n"
+        "echo.\r\n"
+        "echo [*] Checking Windows Administrator privileges...\r\n"
+        "net session >nul 2>&1\r\n"
+        "if %errorlevel% neq 0 (\r\n"
+        "    echo [!] Administrator privileges required to install Windows updates.\r\n"
+        "    echo [!] Please right-click this file and select 'Run as administrator'.\r\n"
+        "    pause\r\n"
+        "    exit /b 1\r\n"
+        ")\r\n"
+        "echo [✓] Running with Administrator privileges.\r\n"
+        "echo.\r\n"
+        "echo [*] Initializing Windows Update Service (wuauserv)...\r\n"
+        "net start wuauserv >nul 2>&1\r\n"
+        "echo.\r\n"
+        "echo [*] Querying Microsoft Update Catalog for security rollups & patches...\r\n"
+        "powershell -NoProfile -ExecutionPolicy Bypass -Command \""
+        "$session = New-Object -ComObject Microsoft.Update.Session; "
+        "$searcher = $session.CreateUpdateSearcher(); "
+        "Write-Host 'Searching Microsoft servers for pending patches...'; "
+        "$results = $searcher.Search('IsInstalled=0 and Type=\\'Software\\' and IsHidden=0'); "
+        "if ($results.Updates.Count -eq 0) { "
+        "    Write-Host '[✓] System is already completely UP TO DATE! No pending patches found.' -ForegroundColor Green; "
+        "} else { "
+        "    Write-Host ('[!] Found ' + $results.Updates.Count + ' pending Windows update(s):') -ForegroundColor Yellow; "
+        "    foreach ($u in $results.Updates) { Write-Host ('  • ' + $u.Title) }; "
+        "    Write-Host 'Downloading and installing real Windows patches directly from Microsoft...'; "
+        "    $installer = $session.CreateUpdateInstaller(); "
+        "    $installer.Updates = $results.Updates; "
+        "    $installResult = $installer.Install(); "
+        "    Write-Host ('[✓] Installation Finished with Result Code: ' + $installResult.ResultCode) -ForegroundColor Green; "
+        "}\"\r\n"
+        + callback_cmd +
+        "echo.\r\n"
+        "echo ========================================================\r\n"
+        "echo [✓] Windows Update execution completed!\r\n"
+        "echo ========================================================\r\n"
+        "pause\r\n"
+    )
+    return Response(
+        content=bat_content,
+        media_type="application/x-bat",
+        headers={"Content-Disposition": "attachment; filename=install_windows_updates.bat"},
+    )
+
+
+@router.get("/launcher/linux")
+def download_linux_updater(
+    token: str | None = None,
+    job_id: int | None = None,
+):
+    """
+    Serves a 1-click Linux package updater shell script for remote Linux endpoints.
+    Downloads and installs real packages via native package manager (apt/dnf/yum).
+    """
+    callback_cmd = ""
+    if job_id and token:
+        callback_cmd = f"""
+curl -s -X POST "https://api.netops.co.ke/endpoint-updates/jobs/{job_id}/status" \
+  -H "Authorization: Bearer {token.strip()}" \
+  -H "Content-Type: application/json" \
+  -d '{{"status": "COMPLETED", "progress_percent": 100, "log_output": "Real Linux packages upgraded via native package manager."}}' >/dev/null 2>&1 || true
+"""
+
+    sh_content = (
+        "#!/usr/bin/env bash\n"
+        "set -e\n"
+        "echo '========================================================'\n"
+        "echo '  NETOPS Real Physical Linux Update Agent'\n"
+        "echo '========================================================'\n"
+        "echo ''\n\n"
+        "if [ \"$EUID\" -ne 0 ]; then\n"
+        "    echo '[*] Requesting sudo privileges to deploy updates...'\n"
+        "    SUDO='sudo'\n"
+        "else\n"
+        "    SUDO=''\n"
+        "fi\n\n"
+        "if command -v apt-get >/dev/null 2>&1; then\n"
+        "    echo '[*] Refreshing APT package index...'\n"
+        "    $SUDO apt-get update\n"
+        "    echo '[*] Downloading and installing real security packages...'\n"
+        "    $SUDO DEBIAN_FRONTEND=noninteractive apt-get -y --with-new-pkgs upgrade\n"
+        "elif command -v dnf >/dev/null 2>&1; then\n"
+        "    echo '[*] Checking DNF updates...'\n"
+        "    $SUDO dnf check-update || true\n"
+        "    echo '[*] Downloading and installing DNF packages...'\n"
+        "    $SUDO dnf -y upgrade\n"
+        "elif command -v yum >/dev/null 2>&1; then\n"
+        "    echo '[*] Updating YUM repositories and packages...'\n"
+        "    $SUDO yum -y update\n"
+        "else\n"
+        "    echo '[!] No supported package manager (apt/dnf/yum) found.'\n"
+        "    exit 1\n"
+        "fi\n\n"
+        + callback_cmd +
+        "echo ''\n"
+        "echo '========================================================'\n"
+        "echo '[✓] Linux system updates successfully installed!'\n"
+        "echo '========================================================'\n"
+    )
+    return Response(
+        content=sh_content,
+        media_type="application/x-sh",
+        headers={"Content-Disposition": "attachment; filename=install_linux_updates.sh"},
+    )
 

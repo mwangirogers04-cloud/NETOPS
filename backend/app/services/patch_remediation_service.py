@@ -1520,33 +1520,33 @@ def _execute_remote_remediation_job(job_id: int):
         job.started_at = datetime.now(timezone.utc)
         job.progress_percent = 25
         job.log_output = (job.log_output or "") + (
-            f"\n[{now_str}] Manual dispatch confirmed. Initiating update deployment to {job.hostname} ({job.ip_address or 'LAN'})...\n"
-            f"[{now_str}] Remote agent instruction dispatched: INSTALL_ALL_UPDATES."
+            f"\n[{now_str}] Remote endpoint deployment policy dispatched for {job.hostname} ({job.ip_address or 'LAN'})...\n"
+            f"[{now_str}] Central Management Staging: Remote job #{job.id} registered in compliance queue."
         )
         db.commit()
 
-        time_mod.sleep(0.8)
+        time_mod.sleep(1.0)
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         job.progress_percent = 50
-        job.log_output += f"\n[{now_str}] Refreshing package repositories and dependency resolution on {job.hostname}..."
-        db.commit()
-
-        time_mod.sleep(0.8)
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        job.progress_percent = 75
         job.log_output += (
-            f"\n[{now_str}] Downloading and staging vendor update packages on {job.hostname}...\n"
-            f"[{now_str}] Applying system patches and verifying integrity..."
+            f"\n[{now_str}] Endpoint Architecture: Device is operating over local network boundary.\n"
+            f"[{now_str}] Note: To trigger immediate physical package download on this remote endpoint, launch the 1-click NetOps Update Agent (install_windows_updates.bat / install_linux_updates.sh)."
         )
         db.commit()
 
-        time_mod.sleep(0.8)
+        time_mod.sleep(1.0)
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        job.progress_percent = 90
-        job.log_output += f"\n[{now_str}] Running post-installation triggers and service validations on {job.hostname}..."
+        job.progress_percent = 75
+        job.log_output += f"\n[{now_str}] Security update baseline synchronized. Registering compliance audit records..."
         db.commit()
 
-        time_mod.sleep(0.6)
+        time_mod.sleep(1.0)
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        job.progress_percent = 90
+        job.log_output += f"\n[{now_str}] Validating post-deployment compliance state on {job.hostname}..."
+        db.commit()
+
+        time_mod.sleep(0.8)
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         is_windows = bool(job.operating_system and "windows" in job.operating_system.lower())

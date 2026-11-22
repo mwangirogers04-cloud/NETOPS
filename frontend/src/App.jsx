@@ -459,6 +459,8 @@ function App() {
   // Client Scanner Probe
   const [probeCopied, setProbeCopied] = useState(false);
   const [showProbeModal, setShowProbeModal] = useState(false);
+  const [showClientUpdaterModal, setShowClientUpdaterModal] = useState(false);
+  const [updaterCopied, setUpdaterCopied] = useState(false);
 
   // Auto VLAN Automation
   const [automatingAllVlans, setAutomatingAllVlans] = useState(false);
@@ -12541,6 +12543,15 @@ const EndpointUpdatesPage = () => {
           <button
             type="button"
             className="secondary-button"
+            onClick={() => setShowClientUpdaterModal(true)}
+            style={{ display: "flex", alignItems: "center", gap: "6px", background: "rgba(16, 185, 129, 0.12)", borderColor: "#10b981", color: "#065f46", fontWeight: "700" }}
+            title="Download native 1-click update deployment script to physically download and install patches on remote machines"
+          >
+            ⚡ 1-Click Client Updater
+          </button>
+          <button
+            type="button"
+            className="secondary-button"
             onClick={() => {
               if (endpointUpdates.length === 0) {
                 alert("No endpoint update data available to export.");
@@ -15224,6 +15235,183 @@ const EndpointUpdatesPage = () => {
     );
   };
 
+  // ------------------------------------------------------------
+  // REAL CLIENT UPDATE DEPLOYMENT MODAL
+  // ------------------------------------------------------------
+  const renderClientUpdaterModal = () => {
+    if (!showClientUpdaterModal) return null;
+
+    const token = localStorage.getItem("netops_token") || "";
+    const winPowershellCmd = `powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-RestMethod -Uri '${API_URL}/endpoint-updates/launcher/windows?token=${encodeURIComponent(token)}' -OutFile 'install_updates.bat'; .\\install_updates.bat"`;
+    const linuxCurlCmd = `curl -sSL "${API_URL}/endpoint-updates/launcher/linux?token=${encodeURIComponent(token)}" | sudo bash`;
+
+    return (
+      <div
+        className="modal-overlay"
+        onClick={() => setShowClientUpdaterModal(false)}
+        style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: "rgba(15, 23, 42, 0.75)",
+          backdropFilter: "blur(4px)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          zIndex: 99999,
+          padding: "16px",
+        }}
+      >
+        <div
+          className="automation-modal"
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            maxWidth: "760px",
+            width: "95%",
+            maxHeight: "90vh",
+            overflowY: "auto",
+            display: "flex",
+            flexDirection: "column",
+            background: "#0f172a",
+            color: "#f8fafc",
+            border: "1px solid #334155",
+            borderRadius: "12px",
+            boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)",
+          }}
+        >
+          {/* Header */}
+          <div
+            style={{
+              padding: "16px 20px",
+              borderBottom: "1px solid #1e293b",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", fontSize: "16px", fontWeight: "700" }}>
+              <span>⚡</span> Real Physical Update Deployment Agent
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowClientUpdaterModal(false)}
+              style={{ background: "transparent", border: "none", color: "#94a3b8", fontSize: "18px", cursor: "pointer", padding: "4px" }}
+            >
+              ✕
+            </button>
+          </div>
+
+          {/* Body */}
+          <div style={{ padding: "20px", display: "flex", flexDirection: "column", gap: "18px" }}>
+            <div
+              style={{
+                background: "rgba(37, 99, 235, 0.12)",
+                border: "1px solid rgba(59, 130, 246, 0.3)",
+                borderRadius: "8px",
+                padding: "12px 16px",
+                fontSize: "13px",
+                color: "#93c5fd",
+                lineHeight: "1.6",
+              }}
+            >
+              <div style={{ fontWeight: "700", marginBottom: "4px", color: "#bfdbfe" }}>
+                ℹ️ Why is the local client script required for real updates?
+              </div>
+              Operating systems (Windows 10/11, macOS, and Linux) strictly prohibit remote websites from silently installing binary files across Wi-Fi without local Administrator credentials (to protect against malware and Remote Code Execution). Running this 1-click script allows the machine's native package manager (<strong>Microsoft Update Agent</strong> or <strong>APT/DNF</strong>) to physically download genuine security patches from vendor servers and install them.
+            </div>
+
+            {/* Windows 1-Liner */}
+            <div>
+              <div style={{ fontSize: "13px", fontWeight: "600", color: "#f1f5f9", marginBottom: "6px" }}>
+                🪟 Windows PowerShell (1-Click Run as Administrator)
+              </div>
+              <div style={{ background: "#020617", border: "1px solid #1e293b", borderRadius: "6px", padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
+                <code style={{ fontSize: "12px", color: "#a5f3fc", wordBreak: "break-all", fontFamily: "monospace" }}>
+                  {winPowershellCmd}
+                </code>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => {
+                    navigator.clipboard?.writeText(winPowershellCmd);
+                    setUpdaterCopied(true);
+                    setTimeout(() => setUpdaterCopied(false), 2000);
+                  }}
+                  style={{ whiteSpace: "nowrap", padding: "5px 12px", fontSize: "12px", cursor: "pointer", flexShrink: 0 }}
+                >
+                  {updaterCopied ? "✅ Copied" : "📋 Copy"}
+                </button>
+              </div>
+            </div>
+
+            {/* Linux 1-Liner */}
+            <div>
+              <div style={{ fontSize: "13px", fontWeight: "600", color: "#f1f5f9", marginBottom: "6px" }}>
+                🐧 Linux Terminal (Debian / Ubuntu / Kali / Fedora)
+              </div>
+              <div style={{ background: "#020617", border: "1px solid #1e293b", borderRadius: "6px", padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
+                <code style={{ fontSize: "12px", color: "#a5f3fc", wordBreak: "break-all", fontFamily: "monospace" }}>
+                  {linuxCurlCmd}
+                </code>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => {
+                    navigator.clipboard?.writeText(linuxCurlCmd);
+                    setUpdaterCopied(true);
+                    setTimeout(() => setUpdaterCopied(false), 2000);
+                  }}
+                  style={{ whiteSpace: "nowrap", padding: "5px 12px", fontSize: "12px", cursor: "pointer", flexShrink: 0 }}
+                >
+                  {updaterCopied ? "✅ Copied" : "📋 Copy"}
+                </button>
+              </div>
+            </div>
+
+            {/* Direct Downloads */}
+            <div>
+              <div style={{ fontSize: "13px", fontWeight: "600", color: "#f1f5f9", marginBottom: "6px" }}>
+                📥 Direct 1-Click Batch & Shell Files
+              </div>
+              <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                <a
+                  href={`${API_URL}/endpoint-updates/launcher/windows?token=${encodeURIComponent(token)}`}
+                  className="secondary-button"
+                  style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12px", padding: "8px 14px", color: "#f8fafc", background: "#1e293b", border: "1px solid #334155", borderRadius: "6px" }}
+                  download="install_windows_updates.bat"
+                >
+                  <span>🪟</span> Download install_windows_updates.bat
+                </a>
+                <a
+                  href={`${API_URL}/endpoint-updates/launcher/linux?token=${encodeURIComponent(token)}`}
+                  className="secondary-button"
+                  style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12px", padding: "8px 14px", color: "#f8fafc", background: "#1e293b", border: "1px solid #334155", borderRadius: "6px" }}
+                  download="install_linux_updates.sh"
+                >
+                  <span>🐧</span> Download install_linux_updates.sh
+                </a>
+              </div>
+            </div>
+          </div>
+
+          {/* Footer */}
+          <div style={{ padding: "12px 20px", borderTop: "1px solid #1e293b", display: "flex", justifyContent: "flex-end" }}>
+            <button
+              type="button"
+              className="primary-button"
+              onClick={() => setShowClientUpdaterModal(false)}
+              style={{ padding: "7px 18px", fontSize: "13px" }}
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
 
   // ------------------------------------------------------------
   // MAIN UI
@@ -17372,6 +17560,7 @@ const EndpointUpdatesPage = () => {
         {renderTroubleshootModal()}
         {renderCveModal()}
         {renderProbeModal()}
+        {renderClientUpdaterModal()}
 
 
         {showChangePasswordModal && (
