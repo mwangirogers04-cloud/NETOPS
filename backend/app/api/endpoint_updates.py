@@ -1,5 +1,5 @@
 import ipaddress
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 from sqlalchemy import select, or_, func
@@ -132,9 +132,16 @@ def report_endpoint_update(
     effective_security = report.security_updates
 
     if effective_status == "updates_available" or (effective_pending and effective_pending > 0):
+        two_hours_ago = datetime.now(timezone.utc) - timedelta(hours=2)
         completed_jobs = db.scalars(
             select(PatchJob)
-            .where(PatchJob.status == "COMPLETED")
+            .where(
+                PatchJob.status == "COMPLETED",
+                or_(
+                    PatchJob.completed_at >= two_hours_ago,
+                    PatchJob.completed_at.is_(None),
+                )
+            )
             .order_by(PatchJob.completed_at.desc())
         ).all()
         for cj in completed_jobs:
@@ -418,8 +425,15 @@ def get_endpoint_updates(
     enriched_results = []
 
     try:
+        two_hours_ago = datetime.now(timezone.utc) - timedelta(hours=2)
         completed_jobs = db.scalars(
-            select(PatchJob).where(PatchJob.status == "COMPLETED").order_by(PatchJob.completed_at.desc())
+            select(PatchJob).where(
+                PatchJob.status == "COMPLETED",
+                or_(
+                    PatchJob.completed_at >= two_hours_ago,
+                    PatchJob.completed_at.is_(None),
+                )
+            ).order_by(PatchJob.completed_at.desc())
         ).all()
         comp_job_device_ids = {j.device_id for j in completed_jobs if isinstance(j, PatchJob) and j.device_id}
         comp_job_macs = {j.mac_address.replace(":", "").replace("-", "").upper() for j in completed_jobs if isinstance(j, PatchJob) and j.mac_address}
@@ -500,7 +514,7 @@ def get_endpoint_updates(
 
         update_status = endpoint.update_status
         pending_count = endpoint.pending_updates if endpoint.pending_updates is not None else 0
-        if has_completed_job or is_non_computer or (device and getattr(device, "update_status", None) == "up_to_date" and getattr(device, "pending_updates", 0) == 0):
+        if has_completed_job or is_non_computer:
             update_status = "up_to_date"
             pending_count = 0
         elif pending_count == 0 and update_status == "updates_available":
@@ -593,7 +607,7 @@ def get_endpoint_updates(
             or not getattr(device, "device_type", None)
             or getattr(device, "device_type", None) == "unknown"
         )
-        if dev_has_job or is_dev_non_comp or dev_up == "up_to_date":
+        if dev_has_job or is_dev_non_comp:
             dev_up = "up_to_date"
             pend = 0
         elif not dev_up or (pend == 0 and dev_up == "updates_available"):

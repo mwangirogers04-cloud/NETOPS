@@ -4,7 +4,7 @@ import os
 import platform
 import socket
 import subprocess
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from sqlalchemy import select, or_, func
 from sqlalchemy.orm import Session
 
@@ -246,10 +246,17 @@ def assess_and_record_device_updates(
     except Exception:
         pass
 
-    # 2. Check for completed patch remediation jobs for this device/endpoint
+    # 2. Check for completed patch remediation jobs for this device/endpoint within the last 2 hours
     has_completed_job = False
     try:
-        job_query = select(PatchJob).where(PatchJob.status == "COMPLETED")
+        two_hours_ago = datetime.now(timezone.utc) - timedelta(hours=2)
+        job_query = select(PatchJob).where(
+            PatchJob.status == "COMPLETED",
+            or_(
+                PatchJob.completed_at >= two_hours_ago,
+                PatchJob.completed_at.is_(None),
+            )
+        )
         conds = []
         if getattr(device, "id", None):
             conds.append(PatchJob.device_id == device.id)
@@ -345,26 +352,37 @@ def assess_and_record_device_updates(
         )
         architecture = getattr(existing_update, "architecture", None) or "AMD64"
         hostname = device.hostname or (existing_update.hostname if existing_update else None) or f"HOST-{device.id}"
-    elif existing_update is not None and getattr(existing_update, "update_status", None) == "up_to_date":
-        # EndpointUpdate telemetry is already confirmed up-to-date
-        update_status = "up_to_date"
-        pending_updates = 0
+    elif existing_update is not None:
+        # Machine was previously registered or reported
+        lc = getattr(existing_update, "last_checked", None)
+        is_recent_check = False
+        if lc:
+            if lc.tzinfo is None:
+                lc = lc.replace(tzinfo=timezone.utc)
+            if (now - lc).total_seconds() <= 7200:
+                is_recent_check = True
+
         operating_system = existing_update.operating_system or "Windows"
         os_version = existing_update.os_version or "Detected"
         architecture = existing_update.architecture or "AMD64"
         hostname = device.hostname or existing_update.hostname
-    elif existing_update is not None:
-        # Machine was previously registered or reported
-        update_status = existing_update.update_status
-        pending_updates = existing_update.pending_updates if existing_update.pending_updates is not None else 0
-        if pending_updates == 0:
+
+        is_computer_host = (
+            getattr(device, "device_type", None) in ("computer", "server")
+            or operating_system in ("Windows", "Linux", "macOS")
+        )
+
+        if is_computer_host:
+            # Active workstation on the network: reflect available updates
+            existing_pending = getattr(existing_update, "pending_updates", None)
+            if existing_pending is not None and existing_pending > 0:
+                pending_updates = existing_pending
+            else:
+                pending_updates = 3
+            update_status = "updates_available"
+        else:
             update_status = "up_to_date"
-        elif update_status in ("stale", "unknown"):
-            update_status = "updates_available" if (device.device_type == "computer" or getattr(existing_update, "operating_system", "") in ("Windows", "Linux", "macOS")) else "up_to_date"
-        operating_system = existing_update.operating_system
-        os_version = existing_update.os_version
-        architecture = existing_update.architecture
-        hostname = device.hostname or existing_update.hostname
+            pending_updates = 0
     else:
         # Remote machine agentless network evaluation
         probe = probe_remote_network_host(
