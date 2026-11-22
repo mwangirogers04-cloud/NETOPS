@@ -311,19 +311,44 @@ function App() {
       setCurrentUser(null);
       return;
     }
-    fetch(`${API_URL}/auth/me`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((res) => {
+
+    let isMounted = true;
+    const verifySession = async (retries = 3) => {
+      try {
+        const res = await fetch(`${API_URL}/auth/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.status === 401 || res.status === 403) {
+          if (!isMounted) return;
+          localStorage.removeItem("netops_token");
+          localStorage.removeItem("netops_user");
+          localStorage.removeItem("netops_last_activity");
+          setCurrentUser(null);
+          return;
+        }
         if (!res.ok) throw new Error("Invalid session");
-        return res.json();
-      })
-      .then((userData) => {
+        const userData = await res.json();
+        if (!isMounted) return;
         setCurrentUser(userData);
         localStorage.setItem("netops_user", JSON.stringify(userData));
         localStorage.setItem("netops_last_activity", Date.now().toString());
-      })
-      .catch((err) => {
+      } catch (err) {
+        if (!isMounted) return;
+        // If it's a network error or cold start, retry before giving up
+        if (retries > 0) {
+          setTimeout(() => {
+            if (isMounted) verifySession(retries - 1);
+          }, 3500);
+          return;
+        }
+        // After retries exhausted, check if we have cached user data to keep user logged in during network blip
+        const cachedUser = localStorage.getItem("netops_user");
+        if (cachedUser) {
+          try {
+            setCurrentUser(JSON.parse(cachedUser));
+            return;
+          } catch (_) {}
+        }
         localStorage.removeItem("netops_token");
         localStorage.removeItem("netops_user");
         localStorage.removeItem("netops_last_activity");
@@ -331,7 +356,12 @@ function App() {
         if (err && err.message && err.message.toLowerCase().includes("inactivity")) {
           setInactivityNotice("You have been automatically logged out due to 3 minutes of inactivity.");
         }
-      });
+      }
+    };
+    verifySession();
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   const [devices, setDevices] = useState([]);
@@ -562,8 +592,8 @@ function App() {
       console.error("Discovery scan error:", err);
       if (err.name === "AbortError") {
         alert("Discovery scan timed out: The network sweep took longer than 35 seconds. Please check if your remote network connection is stable or scan a single interface (eth0 or wlan0).");
-      } else if (err.message && err.message.toLowerCase().includes("failed to fetch")) {
-        alert("Connection to NETOPS API failed: The remote server could not be reached or the request timed out. Please verify your connection to api.netops.co.ke.");
+      } else if (err.message && (err.message.toLowerCase().includes("failed to fetch") || err.message.toLowerCase().includes("networkerror"))) {
+        alert("Connection to NETOPS API timed out or server is starting up. Please wait ~15-30 seconds for the cloud instance (api.netops.co.ke) to respond, then retry.");
       } else {
         alert("LAN/WLAN Discovery scan failed: " + err.message);
       }

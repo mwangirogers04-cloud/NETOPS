@@ -9,7 +9,7 @@ const formatFetchError = (err, defaultMsg = "Request failed.") => {
     msg.toLowerCase().includes("networkerror") ||
     msg.toLowerCase().includes("load failed")
   ) {
-    return "Unable to reach the NETOPS server. Please check your internet connection or verify the backend service is running.";
+    return "NETOPS Cloud API is waking up or temporarily unreachable. Please wait 15–30 seconds and click Sign In again.";
   }
   return msg || defaultMsg;
 };
@@ -248,14 +248,28 @@ export default function LoginPage({
     setErrorMessage("");
     setExpiredUserNotice("");
     try {
-      const response = await fetch(`${API_URL}/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          username: identifier.trim(),
-          password: password,
-        }),
-      });
+      let response;
+      try {
+        response = await fetch(`${API_URL}/auth/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            username: identifier.trim(),
+            password: password,
+          }),
+        });
+      } catch (firstErr) {
+        // If cold start or network blip, wait 3 seconds and retry automatically once
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+        response = await fetch(`${API_URL}/auth/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            username: identifier.trim(),
+            password: password,
+          }),
+        });
+      }
       const data = await response.json();
       if (!response.ok) {
         const detailMsg =
