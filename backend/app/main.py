@@ -51,6 +51,10 @@ from .services.web_traffic_sniffer import (
     start_web_traffic_sniffer,
     stop_web_traffic_sniffer,
 )
+from .services.dns_server import (
+    start_dns_server,
+    stop_dns_server,
+)
 
 
 # ---------------------------------------------------------
@@ -371,6 +375,11 @@ async def startup_event_broadcaster():
     except Exception as exc:
         print(f"[WEB-SNIFFER] Startup note: {exc}")
 
+    try:
+        start_dns_server()
+    except Exception as exc:
+        print(f"[DNS-SERVER] Startup note: {exc}")
+
 
 @app.on_event("shutdown")
 def shutdown_background_tasks():
@@ -380,6 +389,10 @@ def shutdown_background_tasks():
         pass
     try:
         stop_web_traffic_sniffer()
+    except Exception:
+        pass
+    try:
+        stop_dns_server()
     except Exception:
         pass
 

@@ -22,6 +22,11 @@ STREAMING_DOMAINS = {
     "spotify.com", "soundcloud.com", "deezer.com", "audiomack.com",
     "fmovies.to", "fmovies.se", "123movies.net", "123moviesfree.net",
     "solarmovie.pe", "myflixer.to", "soap2day.to",
+    "tunein.com", "iheart.com", "radio.com", "radio.net",
+    "zeno.fm", "zenomedia.com", "radioking.com", "radiojar.com",
+    "shoutcast.com", "icecast.org", "streamguys.com",
+    "capitalfm.co.ke", "classic105.com", "kiss100.co.ke",
+    "radiomaisha.co.ke", "citizen.digital", "nrgradioke.com",
 }
 
 GAMING_DOMAINS = {
@@ -115,7 +120,7 @@ def categorize_domain(domain: str) -> str:
             return "productivity"
 
     # Pattern heuristics
-    if any(k in d for k in ("video", "stream", "movie", "cinema", "tv", "flv", "anime")):
+    if any(k in d for k in ("video", "stream", "movie", "cinema", "tv", "flv", "anime", "radio", "tunein", "zeno", "audio", "podcast", "broadcast")):
         return "streaming"
     if any(k in d for k in ("game", "play", "arcade", "mmo", "rpg", "esport")):
         return "gaming"

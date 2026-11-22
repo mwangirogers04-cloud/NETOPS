@@ -186,6 +186,41 @@ export default function WebActivityPage({
         </div>
       </div>
 
+      {/* Network Setup Banner */}
+      <div
+        style={{
+          background: "rgba(59, 130, 246, 0.08)",
+          border: "1px solid rgba(59, 130, 246, 0.25)",
+          borderRadius: "8px",
+          padding: "12px 16px",
+          marginBottom: "20px",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          flexWrap: "wrap",
+          gap: "12px",
+        }}
+      >
+        <div style={{ fontSize: "12px", color: "#93c5fd", lineHeight: "1.5" }}>
+          💡 <strong>How to Capture All Sites & Streams:</strong> NetOps DNS Collector is live on <code>192.168.0.111:53</code>. Set your router’s DHCP Primary DNS (or any laptop's DNS) to <strong><code>192.168.0.111</code></strong> to instantly log 100% of websites, radio streaming, Facebook, and games across the whole network.
+        </div>
+        <div style={{ display: "flex", gap: "8px" }}>
+          <button
+            type="button"
+            className="secondary-button small"
+            style={{ fontSize: "11px", padding: "4px 10px", borderColor: "#3b82f6", color: "#60a5fa" }}
+            onClick={() => {
+              if (navigator.clipboard) {
+                navigator.clipboard.writeText("192.168.0.111");
+              }
+              alert("Copied NetOps DNS Server IP: 192.168.0.111\n\nSet this as the DNS Server on your router or laptop to capture all browsing activity!");
+            }}
+          >
+            📋 Copy DNS IP (192.168.0.111)
+          </button>
+        </div>
+      </div>
+
       {/* Metrics Summary Cards */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: "14px", marginBottom: "22px" }}>
         <div style={{ background: "#1e293b", border: "1px solid #334155", borderRadius: "8px", padding: "16px" }}>
