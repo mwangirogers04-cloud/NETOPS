@@ -20,7 +20,6 @@ import {
 import { playBellSound } from "./utils/bellAudio";
 
 const getDefaultApiUrl = () => {
-  if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL;
   if (typeof window !== "undefined") {
     const host = window.location.hostname;
     if (host === "localhost" || host === "127.0.0.1") {
@@ -30,11 +29,11 @@ const getDefaultApiUrl = () => {
       return `http://${host}:8000`;
     }
   }
+  if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL;
   return "https://api.netops.co.ke";
 };
 
 const getDefaultWsUrl = () => {
-  if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL;
   if (typeof window !== "undefined") {
     const host = window.location.hostname;
     if (host === "localhost" || host === "127.0.0.1") {
@@ -44,6 +43,7 @@ const getDefaultWsUrl = () => {
       return `ws://${host}:8000/ws/events`;
     }
   }
+  if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL;
   return "wss://api.netops.co.ke/ws/events";
 };
 
