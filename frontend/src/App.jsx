@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import LoginPage from "./components/LoginPage";
 import UsersPage from "./components/UsersPage";
 import UserMonitoringPage from "./components/UserMonitoringPage";
+import WebActivityPage from "./components/WebActivityPage";
 import SwitchVlanPage from "./components/SwitchVlanPage";
 import NetworkTopologyMap from "./components/NetworkTopologyMap";
 import NetOpsLogo from "./components/NetOpsLogo";
@@ -13382,6 +13383,9 @@ const EndpointUpdatesPage = () => {
         }
         return <UserMonitoringPage API_URL={API_URL} currentUser={currentUser} getAuthHeaders={getAuthHeaders} setActivePage={setActivePage} />;
 
+      case "web_activity":
+        return <WebActivityPage API_URL={API_URL} currentUser={currentUser} getAuthHeaders={getAuthHeaders} setActivePage={setActivePage} />;
+
       case "settings":
         return SettingsPage();
 
@@ -17356,6 +17360,17 @@ const EndpointUpdatesPage = () => {
                     }
                   />
                 )}
+
+                <NavItem
+                  icon="🌐"
+                  label="Web & App Activity"
+                  active={
+                    activePage === "web_activity"
+                  }
+                  onClick={() =>
+                    setActivePage("web_activity")
+                  }
+                />
 
                 <div className="nav-section-title">
                   SYSTEM

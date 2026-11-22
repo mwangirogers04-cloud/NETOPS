@@ -10,6 +10,7 @@ from .switch_backup import SwitchBackup
 from .device_vulnerability import DeviceVulnerability
 from .user import User, PasswordResetOTP
 from .vlan_config import VlanConfig
+from .web_activity import WebActivityLog, WebFilterPolicy
 
 __all__ = [
     "AccessSchedule",
@@ -26,4 +27,6 @@ __all__ = [
     "User",
     "PasswordResetOTP",
     "VlanConfig",
+    "WebActivityLog",
+    "WebFilterPolicy",
 ]

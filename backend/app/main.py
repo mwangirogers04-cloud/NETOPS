@@ -34,6 +34,7 @@ from .api.switches import router as switches_router
 from .api.notifications import router as notifications_router
 from .api.radius import router as radius_router
 from .api.user_monitoring import router as user_monitoring_router
+from .api.web_activity import router as web_activity_router
 
 from .services.auth_service import seed_default_users
 from .services.webhook_service import dispatch_security_alert, map_event_type_to_trigger
@@ -45,6 +46,10 @@ from .services.endpoint_health_monitor import endpoint_health_monitor_loop
 from .services.patch_remediation_service import (
     dispatch_due_scheduled_jobs,
     evaluate_auto_off_hours_policy,
+)
+from .services.web_traffic_sniffer import (
+    start_web_traffic_sniffer,
+    stop_web_traffic_sniffer,
 )
 
 
@@ -109,6 +114,7 @@ app.include_router(switches_router)
 app.include_router(notifications_router)
 app.include_router(radius_router)
 app.include_router(user_monitoring_router)
+app.include_router(web_activity_router)
 
 
 # ---------------------------------------------------------
@@ -360,11 +366,20 @@ async def startup_event_broadcaster():
     except Exception as exc:
         print(f"[PASSIVE-SNIFFER] Startup note: {exc}")
 
+    try:
+        start_web_traffic_sniffer()
+    except Exception as exc:
+        print(f"[WEB-SNIFFER] Startup note: {exc}")
+
 
 @app.on_event("shutdown")
 def shutdown_background_tasks():
     try:
         stop_passive_sniffer()
+    except Exception:
+        pass
+    try:
+        stop_web_traffic_sniffer()
     except Exception:
         pass
 
