@@ -391,6 +391,29 @@ def is_local_machine(
     return False
 
 
+def is_phone_device(
+    device: Device | None = None,
+    hostname: str | None = None,
+    operating_system: str | None = None,
+    device_type: str | None = None,
+) -> bool:
+    """Check if the target is a mobile phone (iOS / Android / tablet)."""
+    t = (getattr(device, "device_type", None) or device_type or "").lower().strip()
+    h = (getattr(device, "hostname", None) or hostname or "").lower().strip()
+    os_name = (getattr(device, "operating_system", None) or operating_system or "").lower().strip()
+    vendor = (getattr(device, "vendor", None) or "").lower().strip()
+
+    if t in ("phone", "mobile", "tablet"):
+        return True
+    if any(k in h for k in ("phone-", "iphone", "android", "ipad", "galaxy", "tecno", "infinix", "redmi", "oppo", "vivo", "pixel")):
+        return True
+    if any(k in os_name for k in ("ios", "android", "mobile")):
+        return True
+    if "mobile phone" in vendor or "smartphone" in vendor:
+        return True
+    return False
+
+
 def get_pending_job_for_agent(
     db: Session,
     hostname: str | None = None,
@@ -1172,6 +1195,14 @@ def create_patch_job(
         mac_address = mac_address or latest_update.mac_address
         machine_id = machine_id or latest_update.machine_id
 
+    # Check if target is a phone / mobile device: freeze update option!
+    target_dev = db.get(Device, valid_device_id) if valid_device_id else None
+    if is_phone_device(target_dev, hostname=hostname, operating_system=resolved_os):
+        raise ValueError(
+            "Updates Frozen: Mobile phones (iOS/Android) cannot receive remote network patch pushes. "
+            "Updates must be installed directly on the phone via Settings > Software Update."
+        )
+
     # Evaluate whether this job is scheduled for future execution
     is_scheduled = False
     if scheduled_at:
@@ -1650,6 +1681,18 @@ def probe_remote_connection(
             "protocol": protocol,
             "message": "IP address and username are required for remote connection probe."
         }
+
+    try:
+        with SessionLocal() as db_session:
+            dev = db_session.scalars(select(Device).where(Device.ip_address == clean_ip)).first()
+            if dev and is_phone_device(dev):
+                return {
+                    "connected": False,
+                    "protocol": "mobile",
+                    "message": "Updates Frozen: Mobile phones (iOS/Android) cannot receive remote network update pushes. Updates are managed directly on the phone.",
+                }
+    except Exception:
+        pass
 
     # Explicit WinRM
     if protocol == "winrm" or (protocol == "auto" and port in (5985, 5986)):

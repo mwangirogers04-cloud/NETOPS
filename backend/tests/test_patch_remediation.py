@@ -872,6 +872,49 @@ def test_remote_connection_probe_and_api(client):
         assert res.json()["protocol"] == "winrm"
 
 
+def test_phone_devices_update_frozen_guard(client, db_session):
+    """Verify that update jobs and remote probes are completely frozen for mobile phones."""
+    from backend.app.models.device import Device
+    from backend.app.services.patch_remediation_service import is_phone_device, probe_remote_connection
+
+    # Test is_phone_device helper
+    phone_dev = Device(
+        mac_address="9E:D0:8C:A6:3F:8B",
+        ip_address="192.168.0.106",
+        hostname="Phone-192-168-0-106",
+        device_type="phone",
+        vendor="Mobile Phone (Private Wi-Fi MAC)",
+        status="online",
+        approval_status="approved",
+    )
+    db_session.add(phone_dev)
+    db_session.commit()
+
+    assert is_phone_device(phone_dev) is True
+    assert is_phone_device(None, hostname="Phone-192-168-0-105") is True
+    assert is_phone_device(None, hostname="iPhone-User") is True
+    assert is_phone_device(None, hostname="DESKTOP-8N0NNSL") is False
+
+    # Attempting to queue a patch job for a phone must return HTTP 400 with 'Updates Frozen'
+    res = client.post(
+        "/endpoint-updates/jobs",
+        json={
+            "hostname": "Phone-192-168-0-106",
+            "ip_address": "192.168.0.106",
+            "device_id": phone_dev.id,
+            "action": "INSTALL_ALL_UPDATES",
+        },
+    )
+    assert res.status_code == 400
+    assert "Updates Frozen" in res.json()["detail"]
+
+    # Probing remote connection for a phone must return connected=False with frozen message
+    probe_res = probe_remote_connection(ip="192.168.0.106", username="admin")
+    assert probe_res["connected"] is False
+    assert "Updates Frozen" in probe_res["message"]
+
+
+
 
 
 

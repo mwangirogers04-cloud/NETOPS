@@ -835,6 +835,31 @@ function App() {
     return Array.isArray(list) && list.some((s) => s.enabled !== false);
   };
 
+  const isPhoneDevice = (device) => {
+    if (!device) return false;
+    const t = (device.device_type || "").toLowerCase().trim();
+    const h = (device.hostname || "").toLowerCase().trim();
+    const os = (device.operating_system || "").toLowerCase().trim();
+    const v = (device.vendor || "").toLowerCase().trim();
+    if (t === "phone" || t === "mobile" || t === "tablet") return true;
+    if (
+      h.startsWith("phone-") ||
+      h.includes("iphone") ||
+      h.includes("android") ||
+      h.includes("ipad") ||
+      h.includes("galaxy") ||
+      h.includes("tecno") ||
+      h.includes("infinix") ||
+      h.includes("redmi") ||
+      h.includes("oppo") ||
+      h.includes("vivo") ||
+      h.includes("pixel")
+    ) return true;
+    if (os.includes("ios") || os.includes("android") || os.includes("mobile")) return true;
+    if (v.includes("mobile phone") || v.includes("smartphone")) return true;
+    return false;
+  };
+
   const isDeviceScheduled = (device) => {
     return isDeviceScheduledForUpdates(device) || isDeviceScheduledForAccess(device);
   };
@@ -842,6 +867,10 @@ function App() {
   const openDeployModal = async (device, preferredMode = null) => {
     if (!isSuperAdmin) {
       alert("Permission Denied: Only Developers (Super Admins) can deploy updates remotely to machines. Administrators have view-only access.");
+      return;
+    }
+    if (isPhoneDevice(device)) {
+      alert("Updates Frozen: This device is a mobile phone (iOS / Android). Remote network patch push is not supported on mobile devices. Updates must be installed directly on the phone via Settings > Software Update.");
       return;
     }
     setForceWorkingHours(false);
@@ -4120,6 +4149,34 @@ const DevicesPage = () => {
                                 >
                                   ▶️ Continue Update
                                 </button>
+                              )}
+                            </div>
+                          );
+                        }
+
+                        if (isPhoneDevice(device)) {
+                          return (
+                            <div>
+                              <span
+                                className="status-badge"
+                                style={{
+                                  fontSize: "11px",
+                                  padding: "3px 8px",
+                                  background: "rgba(100, 116, 139, 0.12)",
+                                  color: "#64748b",
+                                  border: "1px solid rgba(100, 116, 139, 0.25)",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "4px",
+                                }}
+                                title="Mobile devices (iOS/Android) cannot receive remote network patch pushes. Updates are frozen and managed on the phone."
+                              >
+                                🔒 FROZEN (PHONE OTA)
+                              </span>
+                              {device.operating_system && (
+                                <div className="device-secondary" style={{ fontSize: "11px", marginTop: "3px" }}>
+                                  {device.operating_system} {device.os_version || ""}
+                                </div>
                               )}
                             </div>
                           );
@@ -11966,6 +12023,23 @@ const Dashboard = () => {
                               </button>
                             )}
                           </div>
+                        ) : isPhoneDevice(endpoint) ? (
+                          <span
+                            className="status-badge"
+                            style={{
+                              background: "rgba(100, 116, 139, 0.12)",
+                              color: "#64748b",
+                              fontSize: "11px",
+                              border: "1px solid rgba(100, 116, 139, 0.3)",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "4px",
+                              cursor: "not-allowed",
+                            }}
+                            title="Mobile phones (iOS/Android) cannot receive remote network patch pushes. Updates are frozen and managed directly on the phone."
+                          >
+                            🔒 Frozen (Phone OTA)
+                          </span>
                         ) : isSuperAdmin ? (
                           <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
                             <button
@@ -13156,6 +13230,23 @@ const EndpointUpdatesPage = () => {
                               </div>
                             )}
                           </div>
+                        ) : isPhoneDevice(endpoint) ? (
+                          <span
+                            className="status-badge"
+                            style={{
+                              background: "rgba(100, 116, 139, 0.12)",
+                              color: "#64748b",
+                              fontSize: "11px",
+                              border: "1px solid rgba(100, 116, 139, 0.3)",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "4px",
+                              cursor: "not-allowed",
+                            }}
+                            title="Mobile phones (iOS/Android) cannot receive remote network patch pushes. Updates are frozen and managed directly on the phone."
+                          >
+                            🔒 Frozen (Phone OTA)
+                          </span>
                         ) : isSuperAdmin ? (
                           <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
                             <button
@@ -14078,15 +14169,18 @@ const EndpointUpdatesPage = () => {
                     type="button"
                     className="primary-button"
                     style={{
-                      background: scheduleMode !== "now" ? "#6366f1" : "#10b981",
-                      borderColor: scheduleMode !== "now" ? "#4f46e5" : "#059669",
+                      background: isPhoneDevice(deployModalDevice) ? "#475569" : (scheduleMode !== "now" ? "#6366f1" : "#10b981"),
+                      borderColor: isPhoneDevice(deployModalDevice) ? "#334155" : (scheduleMode !== "now" ? "#4f46e5" : "#059669"),
+                      cursor: isPhoneDevice(deployModalDevice) ? "not-allowed" : "pointer",
                     }}
                     disabled={
+                      isPhoneDevice(deployModalDevice) ||
                       deployingStatus === "dispatching" ||
                       (scheduleMode === "scheduled" && (!scheduledDateTime || new Date(scheduledDateTime) <= new Date())) ||
                       (scheduleMode === "scheduled" && modalScheduleCheck?.is_in_working_hours && updatePolicy.block_working_hours_schedule && !forceWorkingHours)
                     }
                     onClick={async () => {
+                      if (isPhoneDevice(deployModalDevice)) return;
                       const target = deployModalDevice;
                       const targetTime =
                         scheduleMode === "off_hours"
@@ -14110,7 +14204,9 @@ const EndpointUpdatesPage = () => {
                       }
                     }}
                   >
-                    {deployingStatus === "dispatching"
+                    {isPhoneDevice(deployModalDevice)
+                      ? "🔒 Updates Frozen for Phones (Mobile OTA Only)"
+                      : deployingStatus === "dispatching"
                       ? (scheduleMode !== "now" ? "⏳ Scheduling Off-Hours Job..." : "⏳ Queueing Update Job...")
                       : scheduleMode === "off_hours"
                       ? "🌙 Confirm & Schedule Outside Working Hours"
