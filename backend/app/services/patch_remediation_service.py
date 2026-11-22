@@ -1526,7 +1526,29 @@ def _check_tcp_port(ip: str, port: int, timeout: float = 1.5) -> bool:
 def _probe_winrm(ip: str, username: str, password: str | None, port: int = 5985) -> dict:
     """Test WinRM connectivity against a Windows machine."""
     try:
+        import ipaddress
+        if os.environ.get("CLOUD_MODE") == "true" and ipaddress.ip_address(ip).is_private:
+            return {
+                "connected": False,
+                "protocol": "winrm",
+                "message": (
+                    f"Target {ip} is on your local private LAN. Direct network push requires accessing NetOps from your local appliance URL "
+                    f"(http://192.168.0.111:5173), or deploying via the 1-Click Client Updater."
+                ),
+            }
+    except Exception:
+        pass
+
+    try:
         import winrm
+    except ImportError:
+        return {
+            "connected": False,
+            "protocol": "winrm",
+            "message": "WinRM module ('pywinrm') is being deployed on the server. Please allow 1-2 minutes for Render to finish building.",
+        }
+
+    try:
         session = winrm.Session(
             f"http://{ip}:{port}/wsman",
             auth=(username, password or ""),

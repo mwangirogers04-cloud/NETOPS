@@ -21,11 +21,29 @@ import { playBellSound } from "./utils/bellAudio";
 
 const getDefaultApiUrl = () => {
   if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL;
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname;
+    if (host === "localhost" || host === "127.0.0.1") {
+      return "http://localhost:8000";
+    }
+    if (host.startsWith("192.168.") || host.startsWith("10.") || host.startsWith("172.")) {
+      return `http://${host}:8000`;
+    }
+  }
   return "https://api.netops.co.ke";
 };
 
 const getDefaultWsUrl = () => {
   if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL;
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname;
+    if (host === "localhost" || host === "127.0.0.1") {
+      return "ws://localhost:8000/ws/events";
+    }
+    if (host.startsWith("192.168.") || host.startsWith("10.") || host.startsWith("172.")) {
+      return `ws://${host}:8000/ws/events`;
+    }
+  }
   return "wss://api.netops.co.ke/ws/events";
 };
 
