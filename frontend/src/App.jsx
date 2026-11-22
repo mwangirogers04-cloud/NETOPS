@@ -857,7 +857,11 @@ function App() {
       setScheduledDateTime("");
     }
 
-    const isLocalDev = device.hostname === "kali" || device.ip_address === "127.0.0.1" || device.ip_address === "192.168.0.101";
+    const isLocalDev =
+      (device.hostname || "").toLowerCase().includes("kali") ||
+      device.hostname === "localhost" ||
+      device.ip_address === "127.0.0.1" ||
+      ["192.168.0.111", "192.168.0.107", "192.168.0.101"].includes(device.ip_address);
     const isWinDev = (device.operating_system || "").toLowerCase().includes("win");
     setRemotePushProtocol(isWinDev ? "winrm" : "ssh");
     setRemotePushPort(isWinDev ? "5985" : "22");
@@ -13822,9 +13826,10 @@ const EndpointUpdatesPage = () => {
                   )}
                 </div>
 
-                {!(deployModalDevice.hostname === "kali" ||
+                {!((deployModalDevice.hostname || "").toLowerCase().includes("kali") ||
+                  deployModalDevice.hostname === "localhost" ||
                   deployModalDevice.ip_address === "127.0.0.1" ||
-                  deployModalDevice.ip_address === "192.168.0.101") && (
+                  ["192.168.0.111", "192.168.0.107", "192.168.0.101"].includes(deployModalDevice.ip_address)) && (
                   <div
                     style={{
                       margin: "16px 0",
@@ -13981,9 +13986,10 @@ const EndpointUpdatesPage = () => {
                     lineHeight: "1.5",
                   }}
                 >
-                  {(deployModalDevice.hostname === "kali" ||
+                  {((deployModalDevice.hostname || "").toLowerCase().includes("kali") ||
+                    deployModalDevice.hostname === "localhost" ||
                     deployModalDevice.ip_address === "127.0.0.1" ||
-                    deployModalDevice.ip_address === "192.168.0.101") ? (
+                    ["192.168.0.111", "192.168.0.107", "192.168.0.101"].includes(deployModalDevice.ip_address)) ? (
                     <div>
                       🖥️ <strong>Local Machine Remediation:</strong> {scheduleMode !== "now" ? "Updates will be queued and automatically triggered using the native package manager (apt-get upgrade -y) during the non-working hours maintenance window." : "Updates will be applied immediately using the native package manager (apt-get upgrade -y)."}
                     </div>
