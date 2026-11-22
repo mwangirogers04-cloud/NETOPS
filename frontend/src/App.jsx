@@ -922,59 +922,6 @@ function App() {
     }
   };
 
-  const handleRestartEndpoint = async (endpoint) => {
-    if (!isSuperAdmin) {
-      alert("Permission Denied: Only Developers (Super Admins) have permissions to reboot machines.");
-      return;
-    }
-    const host = endpoint.hostname || "endpoint";
-    const ip = endpoint.device_ip || endpoint.ip_address || "LAN";
-    const devType = (endpoint.device_type || "").toLowerCase();
-    const osLower = (endpoint.operating_system || "").toLowerCase();
-    const isMobile =
-      devType === "phone" ||
-      devType === "mobile" ||
-      devType === "tablet" ||
-      /phone|android|iphone|ipad/i.test(host) ||
-      /android|ios/i.test(osLower);
-
-    if (isMobile) {
-      alert(`⚠️ Remote restart is not supported on mobile devices (${host}). Mobile operating systems (iOS/Android) prohibit remote network restarts for security. Please restart the mobile device manually.`);
-      return;
-    }
-
-    const confirmed = window.confirm(`Are you sure you want to reboot ${host} (${ip}) now to finalize system updates?`);
-    if (!confirmed) return;
-
-    try {
-      const response = await fetch(`${API_URL}/endpoint-updates/reboot`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
-        body: JSON.stringify({
-          hostname: host,
-          ip_address: endpoint.device_ip || endpoint.ip_address || null,
-          mac_address: endpoint.mac_address || null,
-          device_id: endpoint.device_id || (endpoint.vlan_id !== undefined ? endpoint.id : null),
-          delay_seconds: 5,
-          reason: "System update finalization reboot",
-        }),
-      });
-
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        throw new Error(data.detail || `Server error (${response.status})`);
-      }
-      const result = await response.json();
-      alert(`🔄 Instruction Queued: ${result.message}\nThe local sync agent / endpoint daemon will execute the system restart.`);
-      await loadPatchJobs();
-      await loadDevices();
-      await loadEvents();
-    } catch (err) {
-      console.error("Reboot endpoint error:", err);
-      alert("Failed to reboot endpoint: " + err.message);
-    }
-  };
-
   // ------------------------------------------------------------
   // LOAD DEVICES
   // ------------------------------------------------------------
@@ -11936,24 +11883,6 @@ const Dashboard = () => {
                                 ▶️ Continue
                               </button>
                             )}
-                            {isSuperAdmin && !isMobileDevice && (
-                              <button
-                                type="button"
-                                className="secondary-button small"
-                                style={{
-                                  fontSize: "11px",
-                                  padding: "3px 8px",
-                                  background: "#fff7ed",
-                                  color: "#c2410c",
-                                  borderColor: "#fdba74",
-                                  fontWeight: "600",
-                                }}
-                                onClick={() => handleRestartEndpoint(endpoint)}
-                                title="Reboot / restart this machine"
-                              >
-                                🔄 Restart
-                              </button>
-                            )}
                           </div>
                         ) : isSuperAdmin ? (
                           <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
@@ -11972,24 +11901,6 @@ const Dashboard = () => {
                             >
                               ⚡ Deploy Updates
                             </button>
-                            {!isMobileDevice && (
-                              <button
-                                type="button"
-                                className="secondary-button small"
-                                style={{
-                                  fontSize: "11px",
-                                  padding: "3px 8px",
-                                  background: "#fff7ed",
-                                  color: "#c2410c",
-                                  borderColor: "#fdba74",
-                                  fontWeight: "600",
-                                }}
-                                onClick={() => handleRestartEndpoint(endpoint)}
-                                title="Reboot / restart this machine"
-                              >
-                                🔄 Restart
-                              </button>
-                            )}
                           </div>
                         ) : (
                           <span
@@ -14303,31 +14214,7 @@ const EndpointUpdatesPage = () => {
                 )}
 
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "16px" }}>
-                  {selectedJobDetails && isSuperAdmin && !(
-                    selectedJobDetails.device_type === "phone" ||
-                    selectedJobDetails.device_type === "mobile" ||
-                    selectedJobDetails.device_type === "tablet" ||
-                    /phone|android|iphone|ipad/i.test(selectedJobDetails.hostname || "") ||
-                    /android|ios/i.test(selectedJobDetails.operating_system || "")
-                  ) ? (
-                    <button
-                      type="button"
-                      className="secondary-button small"
-                      style={{
-                        background: "#fff7ed",
-                        color: "#ea580c",
-                        borderColor: "#fdba74",
-                        fontWeight: "600",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "6px",
-                      }}
-                      onClick={() => handleRestartEndpoint(selectedJobDetails)}
-                      title="Reboot machine now"
-                    >
-                      🔄 Restart Machine
-                    </button>
-                  ) : <div />}
+                  <div />
                   <button
                     type="button"
                     className="primary-button small"
