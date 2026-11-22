@@ -828,6 +828,50 @@ def test_reboot_endpoint_mobile_rejected(client, db_session):
     assert "mobile device" in res.json()["detail"].lower()
 
 
+def test_remote_connection_probe_and_api(client):
+    from unittest.mock import patch, MagicMock
+    from backend.app.services.patch_remediation_service import probe_remote_connection
+
+    # Test WinRM probe success
+    mock_session = MagicMock()
+    mock_res = MagicMock()
+    mock_res.status_code = 0
+    mock_res.std_out = b"10.0.19045\n"
+    mock_session.run_ps.return_value = mock_res
+
+    with patch("winrm.Session", return_value=mock_session):
+        probe = probe_remote_connection(
+            ip="192.168.0.104",
+            protocol="winrm",
+            username="Administrator",
+            password="Password123",
+            port=5985,
+        )
+        assert probe["connected"] is True
+        assert probe["protocol"] == "winrm"
+        assert "Windows" in probe["os_info"]
+
+    # Test API endpoint
+    with patch("backend.app.api.endpoint_updates.probe_remote_connection") as mock_probe:
+        mock_probe.return_value = {
+            "connected": True,
+            "protocol": "winrm",
+            "message": "Connection verified.",
+            "os_info": "Microsoft Windows",
+        }
+        res = client.post("/endpoint-updates/test-remote-connection", json={
+            "ip_address": "192.168.0.104",
+            "protocol": "winrm",
+            "username": "Administrator",
+            "password": "Password123",
+            "port": 5985,
+            "save_credentials": True,
+        })
+        assert res.status_code == 200
+        assert res.json()["connected"] is True
+        assert res.json()["protocol"] == "winrm"
+
+
 
 
 

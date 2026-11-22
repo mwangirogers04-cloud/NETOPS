@@ -15,6 +15,12 @@ class CreatePatchJobRequest(BaseModel):
     schedule_mode: str | None = None  # "now", "scheduled", "off_hours"
     respect_working_hours: bool = False
     force_working_hours: bool = False
+    remote_protocol: str | None = None  # "auto", "winrm", "ssh", "agent"
+    remote_username: str | None = None
+    remote_password: str | None = None
+    remote_port: int | None = None
+    remote_auth_type: str | None = "password"
+    remote_ssh_key: str | None = None
 
 
 class UpdatePolicyUpdateRequest(BaseModel):
@@ -88,6 +94,26 @@ class PatchJobResponse(BaseModel):
             except Exception:
                 return None
         return v
+
+
+class TestRemoteConnectionRequest(BaseModel):
+    ip_address: str
+    protocol: str = "auto"  # "auto", "winrm", "ssh"
+    username: str
+    password: str | None = None
+    port: int | None = None
+    ssh_key: str | None = None
+    save_credentials: bool = False
+    device_id: int | None = None
+    hostname: str | None = None
+    mac_address: str | None = None
+
+
+class TestRemoteConnectionResponse(BaseModel):
+    connected: bool
+    protocol: str
+    message: str
+    os_info: str | None = None
 
 
 class RebootEndpointRequest(BaseModel):

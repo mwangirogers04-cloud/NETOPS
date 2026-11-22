@@ -658,6 +658,13 @@ function App() {
   });
   const [policySaving, setPolicySaving] = useState(false);
   const [bulkOffHoursLoading, setBulkOffHoursLoading] = useState(false);
+  const [remotePushEnabled, setRemotePushEnabled] = useState(false);
+  const [remotePushProtocol, setRemotePushProtocol] = useState("auto");
+  const [remotePushUsername, setRemotePushUsername] = useState("");
+  const [remotePushPassword, setRemotePushPassword] = useState("");
+  const [remotePushPort, setRemotePushPort] = useState("");
+  const [remotePushTesting, setRemotePushTesting] = useState(false);
+  const [remotePushTestResult, setRemotePushTestResult] = useState(null);
 
   const loadUpdatePolicy = async () => {
     try {
@@ -831,6 +838,16 @@ function App() {
     } else {
       setScheduledDateTime("");
     }
+
+    const isLocalDev = device.hostname === "kali" || device.ip_address === "127.0.0.1" || device.ip_address === "192.168.0.101";
+    const isWinDev = (device.operating_system || "").toLowerCase().includes("win");
+    setRemotePushProtocol(isWinDev ? "winrm" : "ssh");
+    setRemotePushPort(isWinDev ? "5985" : "22");
+    setRemotePushUsername(isWinDev ? "Administrator" : "root");
+    setRemotePushPassword("");
+    setRemotePushEnabled(!isLocalDev);
+    setRemotePushTestResult(null);
+
     setDeployModalDevice(device);
 
     const whData = await checkDeviceWorkingHours(device);
@@ -845,7 +862,42 @@ function App() {
     }
   };
 
-  const deployUpdates = async (target, scheduledTime = null, mode = "now", forceOverride = false) => {
+  const handleTestRemoteConnection = async () => {
+    if (!remotePushUsername) {
+      alert("Please enter a username to test the remote connection.");
+      return;
+    }
+    setRemotePushTesting(true);
+    setRemotePushTestResult(null);
+    try {
+      const response = await fetch(`${API_URL}/endpoint-updates/test-remote-connection`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        body: JSON.stringify({
+          ip_address: deployModalDevice?.ip_address,
+          protocol: remotePushProtocol,
+          username: remotePushUsername,
+          password: remotePushPassword || null,
+          port: remotePushPort ? parseInt(remotePushPort, 10) : (remotePushProtocol === "ssh" ? 22 : 5985),
+          hostname: deployModalDevice?.hostname,
+          mac_address: deployModalDevice?.mac_address,
+          save_credentials: true,
+        }),
+      });
+      const data = await response.json();
+      setRemotePushTestResult(data);
+    } catch (err) {
+      setRemotePushTestResult({
+        connected: false,
+        protocol: remotePushProtocol,
+        message: err.message || "Failed to contact NetOps backend",
+      });
+    } finally {
+      setRemotePushTesting(false);
+    }
+  };
+
+  const deployUpdates = async (target, scheduledTime = null, mode = "now", forceOverride = false, remoteCreds = null) => {
     if (!isSuperAdmin) {
       alert("Permission Denied: Only Developers (Super Admins) can deploy updates remotely to machines. Administrators have view-only access.");
       return null;
@@ -859,22 +911,30 @@ function App() {
 
     setDeployingStatus("dispatching");
     try {
+      const bodyPayload = {
+        hostname,
+        ip_address,
+        mac_address,
+        machine_id,
+        device_id,
+        action: "INSTALL_ALL_UPDATES",
+        initiated_by: currentUser?.username || "Developer Console",
+        scheduled_at,
+        schedule_mode: mode,
+        respect_working_hours: mode === "scheduled" || mode === "off_hours",
+        force_working_hours: forceOverride,
+      };
+      if (remoteCreds && remoteCreds.enabled) {
+        bodyPayload.remote_protocol = remoteCreds.protocol || "auto";
+        bodyPayload.remote_username = remoteCreds.username || null;
+        bodyPayload.remote_password = remoteCreds.password || null;
+        if (remoteCreds.port) bodyPayload.remote_port = parseInt(remoteCreds.port, 10);
+      }
+
       const response = await fetch(`${API_URL}/endpoint-updates/jobs`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...getAuthHeaders() },
-        body: JSON.stringify({
-          hostname,
-          ip_address,
-          mac_address,
-          machine_id,
-          device_id,
-          action: "INSTALL_ALL_UPDATES",
-          initiated_by: currentUser?.username || "Developer Console",
-          scheduled_at,
-          schedule_mode: mode,
-          respect_working_hours: mode === "scheduled" || mode === "off_hours",
-          force_working_hours: forceOverride,
-        }),
+        body: JSON.stringify(bodyPayload),
       });
 
       if (!response.ok) {
@@ -13744,6 +13804,153 @@ const EndpointUpdatesPage = () => {
                   )}
                 </div>
 
+                {!(deployModalDevice.hostname === "kali" ||
+                  deployModalDevice.ip_address === "127.0.0.1" ||
+                  deployModalDevice.ip_address === "192.168.0.101") && (
+                  <div
+                    style={{
+                      margin: "16px 0",
+                      padding: "14px 16px",
+                      background: "rgba(15, 23, 42, 0.4)",
+                      border: "1px solid rgba(59, 130, 246, 0.3)",
+                      borderRadius: "8px",
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <span style={{ fontSize: "16px" }}>🔐</span>
+                        <div>
+                          <div style={{ fontWeight: "600", fontSize: "13px", color: "#e2e8f0" }}>
+                            Direct Network Push Credentials
+                          </div>
+                          <div style={{ fontSize: "11px", color: "#94a3b8" }}>
+                            Connect directly to {deployModalDevice.ip_address || "remote PC"} over LAN to install real updates
+                          </div>
+                        </div>
+                      </div>
+                      <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", cursor: "pointer", color: "#60a5fa" }}>
+                        <input
+                          type="checkbox"
+                          checked={remotePushEnabled}
+                          onChange={(e) => setRemotePushEnabled(e.target.checked)}
+                        />
+                        Enable Remote Push
+                      </label>
+                    </div>
+
+                    {remotePushEnabled && (
+                      <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: "10px" }}>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                          <div>
+                            <label style={{ display: "block", fontSize: "11px", color: "#94a3b8", marginBottom: "4px" }}>
+                              Remote Protocol
+                            </label>
+                            <select
+                              className="form-control"
+                              style={{ width: "100%", fontSize: "12px", padding: "6px 8px", background: "#0f172a", color: "#f8fafc", border: "1px solid #334155", borderRadius: "4px" }}
+                              value={remotePushProtocol}
+                              onChange={(e) => {
+                                const proto = e.target.value;
+                                setRemotePushProtocol(proto);
+                                if (proto === "winrm") {
+                                  setRemotePushPort("5985");
+                                  if (!remotePushUsername || remotePushUsername === "root") setRemotePushUsername("Administrator");
+                                } else if (proto === "ssh") {
+                                  setRemotePushPort("22");
+                                  if (!remotePushUsername || remotePushUsername === "Administrator") setRemotePushUsername("root");
+                                }
+                              }}
+                            >
+                              <option value="winrm">WinRM (Windows 10/11 / Server)</option>
+                              <option value="ssh">SSH (Linux / Ubuntu / Debian / macOS)</option>
+                              <option value="auto">Auto-Detect</option>
+                            </select>
+                          </div>
+
+                          <div>
+                            <label style={{ display: "block", fontSize: "11px", color: "#94a3b8", marginBottom: "4px" }}>
+                              Port
+                            </label>
+                            <input
+                              type="number"
+                              className="form-control"
+                              style={{ width: "100%", fontSize: "12px", padding: "6px 8px", background: "#0f172a", color: "#f8fafc", border: "1px solid #334155", borderRadius: "4px" }}
+                              placeholder={remotePushProtocol === "ssh" ? "22" : "5985"}
+                              value={remotePushPort}
+                              onChange={(e) => setRemotePushPort(e.target.value)}
+                            />
+                          </div>
+                        </div>
+
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                          <div>
+                            <label style={{ display: "block", fontSize: "11px", color: "#94a3b8", marginBottom: "4px" }}>
+                              Username
+                            </label>
+                            <input
+                              type="text"
+                              className="form-control"
+                              style={{ width: "100%", fontSize: "12px", padding: "6px 8px", background: "#0f172a", color: "#f8fafc", border: "1px solid #334155", borderRadius: "4px" }}
+                              placeholder={remotePushProtocol === "winrm" ? "Administrator" : "root"}
+                              value={remotePushUsername}
+                              onChange={(e) => setRemotePushUsername(e.target.value)}
+                            />
+                          </div>
+
+                          <div>
+                            <label style={{ display: "block", fontSize: "11px", color: "#94a3b8", marginBottom: "4px" }}>
+                              Password / Secret
+                            </label>
+                            <input
+                              type="password"
+                              className="form-control"
+                              style={{ width: "100%", fontSize: "12px", padding: "6px 8px", background: "#0f172a", color: "#f8fafc", border: "1px solid #334155", borderRadius: "4px" }}
+                              placeholder="••••••••"
+                              value={remotePushPassword}
+                              onChange={(e) => setRemotePushPassword(e.target.value)}
+                            />
+                          </div>
+                        </div>
+
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "4px" }}>
+                          <div style={{ fontSize: "11px", color: "#64748b" }}>
+                            {remotePushProtocol === "winrm"
+                              ? "💡 Windows PC requires WinRM enabled ('winrm quickconfig')."
+                              : "💡 Linux machine requires SSH service running."}
+                          </div>
+                          <button
+                            type="button"
+                            className="secondary-button small"
+                            style={{ fontSize: "11px", padding: "3px 10px", whiteSpace: "nowrap" }}
+                            onClick={handleTestRemoteConnection}
+                            disabled={remotePushTesting || !remotePushUsername}
+                          >
+                            {remotePushTesting ? "⏳ Testing..." : "🔌 Test Connection"}
+                          </button>
+                        </div>
+
+                        {remotePushTestResult && (
+                          <div
+                            style={{
+                              padding: "8px 12px",
+                              borderRadius: "4px",
+                              fontSize: "11px",
+                              marginTop: "6px",
+                              background: remotePushTestResult.connected ? "rgba(16, 185, 129, 0.15)" : "rgba(239, 68, 68, 0.15)",
+                              border: remotePushTestResult.connected ? "1px solid rgba(16, 185, 129, 0.4)" : "1px solid rgba(239, 68, 68, 0.4)",
+                              color: remotePushTestResult.connected ? "#34d399" : "#f87171",
+                            }}
+                          >
+                            {remotePushTestResult.connected ? "✓ " : "✕ "}
+                            {remotePushTestResult.message}
+                            {remotePushTestResult.os_info && ` (${remotePushTestResult.os_info})`}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div
                   style={{
                     margin: "16px 0",
@@ -13764,7 +13971,7 @@ const EndpointUpdatesPage = () => {
                     </div>
                   ) : (
                     <div>
-                      📡 <strong>LAN Remote Remediation:</strong> {scheduleMode !== "now" ? "An update job will be queued in SCHEDULED state for the non-working hours window. Once the off-hours window arrives, it will activate for the endpoint to install updates." : "An update installation job will be dispatched immediately. When this machine's agent reports its check-in, it will download and install updates natively and sync completion back to NETOPS."}
+                      📡 <strong>LAN Remote Remediation:</strong> {remotePushEnabled ? "NetOps will connect directly over the network via " + (remotePushProtocol === "winrm" ? "WinRM (Windows Update engine)" : remotePushProtocol === "ssh" ? "SSH (native package manager)" : "WinRM/SSH") + " to download and install updates directly on the target machine." : (scheduleMode !== "now" ? "An update job will be queued in SCHEDULED state for the non-working hours window. Once the off-hours window arrives, it will activate for the endpoint." : "An update installation job will be dispatched. You can also run the 1-click NetOps Update Agent on the target machine to install updates natively.")}
                     </div>
                   )}
                 </div>
@@ -13801,7 +14008,14 @@ const EndpointUpdatesPage = () => {
                           : scheduleMode === "scheduled"
                           ? scheduledDateTime
                           : null;
-                      const job = await deployUpdates(target, targetTime, scheduleMode, forceWorkingHours);
+                      const remoteCreds = {
+                        enabled: remotePushEnabled,
+                        protocol: remotePushProtocol,
+                        username: remotePushUsername,
+                        password: remotePushPassword,
+                        port: remotePushPort,
+                      };
+                      const job = await deployUpdates(target, targetTime, scheduleMode, forceWorkingHours, remoteCreds);
                       if (job) {
                         setDeployModalDevice(null);
                         setDeployingStatus(null);

@@ -20,9 +20,12 @@ from ..schemas.patch_job import (
     WorkingHoursCheckRequest,
     RebootEndpointRequest,
     RebootEndpointResponse,
+    TestRemoteConnectionRequest,
+    TestRemoteConnectionResponse,
 )
 from ..services.event_service import create_event
 from ..services.network_patch_scanner import scan_lan_for_updates
+from ..services.device_credential_store import save_device_credentials
 from ..services.patch_remediation_service import (
     create_patch_job,
     get_pending_job_for_agent,
@@ -36,6 +39,7 @@ from ..services.patch_remediation_service import (
     schedule_all_pending_off_hours,
     evaluate_auto_off_hours_policy,
     reboot_endpoint,
+    probe_remote_connection,
 )
 
 router = APIRouter(
@@ -792,6 +796,12 @@ def trigger_patch_job(
             schedule_mode=payload.schedule_mode,
             respect_working_hours=payload.respect_working_hours,
             force_working_hours=payload.force_working_hours,
+            remote_protocol=payload.remote_protocol,
+            remote_username=payload.remote_username,
+            remote_password=payload.remote_password,
+            remote_port=payload.remote_port,
+            remote_auth_type=payload.remote_auth_type,
+            remote_ssh_key=payload.remote_ssh_key,
         )
         resp = PatchJobResponse.model_validate(job)
         resp.is_local = is_local
@@ -813,6 +823,36 @@ def trigger_patch_job(
             status_code=500,
             detail=f"Failed to create update job: {exc}",
         ) from exc
+
+
+@router.post("/test-remote-connection", response_model=TestRemoteConnectionResponse)
+def test_remote_endpoint_connection(
+    payload: TestRemoteConnectionRequest,
+    current_user: User = Depends(require_super_admin),
+):
+    """
+    Test direct remote connection (WinRM for Windows or SSH for Linux) using supplied credentials.
+    """
+    res = probe_remote_connection(
+        ip=payload.ip_address,
+        protocol=payload.protocol,
+        username=payload.username,
+        password=payload.password,
+        port=payload.port,
+        ssh_key=payload.ssh_key,
+    )
+    if payload.save_credentials and res.get("connected"):
+        for ident in (payload.ip_address, payload.mac_address, payload.hostname):
+            if ident:
+                save_device_credentials(
+                    identifier=ident,
+                    protocol=res.get("protocol") or payload.protocol,
+                    username=payload.username,
+                    password=payload.password,
+                    port=payload.port,
+                    ssh_key=payload.ssh_key,
+                )
+    return res
 
 
 @router.get("/jobs", response_model=list[PatchJobResponse])

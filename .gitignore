@@ -30,6 +30,7 @@ frontend/dist/
 backend/notification_settings.json
 backend/backup_schedule_settings.json
 backend/radius_settings.json
+backend/device_remote_credentials.json
 
 # Test & Temporary exports
 *.xlsx
