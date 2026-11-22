@@ -13994,6 +13994,68 @@ const EndpointUpdatesPage = () => {
                   )}
                 </div>
 
+                {/* Alternative: 1-Click Client Updater */}
+                <div
+                  style={{
+                    margin: "14px 0",
+                    padding: "12px 14px",
+                    background: "rgba(16, 185, 129, 0.08)",
+                    border: "1px solid rgba(16, 185, 129, 0.3)",
+                    borderRadius: "6px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: "12px",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <div>
+                    <div style={{ fontSize: "12px", fontWeight: "600", color: "#34d399", marginBottom: "2px" }}>
+                      ⚡ Alternative: 1-Click Client Updater (No WinRM / Firewall Setup)
+                    </div>
+                    <div style={{ fontSize: "11px", color: "#94a3b8" }}>
+                      Works across the cloud or local LAN by running directly on the machine.
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                    <a
+                      href={`${API_URL}/endpoint-updates/launcher/${(deployModalDevice?.os_type || "").toLowerCase().includes("win") ? "windows" : "linux"}?token=${encodeURIComponent(localStorage.getItem("netops_token") || "")}`}
+                      className="secondary-button"
+                      style={{
+                        textDecoration: "none",
+                        fontSize: "12px",
+                        padding: "6px 12px",
+                        background: "#064e3b",
+                        border: "1px solid #10b981",
+                        color: "#a7f3d0",
+                        borderRadius: "5px",
+                        fontWeight: "600",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "6px",
+                      }}
+                      download={(deployModalDevice?.os_type || "").toLowerCase().includes("win") ? "install_windows_updates.bat" : "install_linux_updates.sh"}
+                    >
+                      📥 Download {(deployModalDevice?.os_type || "").toLowerCase().includes("win") ? "install_windows_updates.bat" : "install_linux_updates.sh"}
+                    </a>
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      style={{
+                        fontSize: "11px",
+                        padding: "6px 10px",
+                        background: "#1e293b",
+                        border: "1px solid #475569",
+                        color: "#cbd5e1",
+                        borderRadius: "5px",
+                      }}
+                      onClick={() => setShowClientUpdaterModal(true)}
+                    >
+                      📋 PowerShell / Bash Commands
+                    </button>
+                  </div>
+                </div>
+
                 <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "20px" }}>
                   <button
                     type="button"
