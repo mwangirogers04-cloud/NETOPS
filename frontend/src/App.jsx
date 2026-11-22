@@ -2570,6 +2570,23 @@ const renderInlineScheduleRow = (device, colSpan = 10) => {
             >
               💼 Work Hours
             </button>
+            <button
+              type="button"
+              className="secondary-button small"
+              style={{ fontSize: "11px", padding: "4px 8px" }}
+              onClick={() => {
+                setScheduleForm({
+                  ...scheduleForm,
+                  start_time: "18:00:00",
+                  end_time: "06:00:00",
+                  days: "daily",
+                  enabled: true,
+                });
+              }}
+              title="Off-hours internet access: 18:00 to 06:00 (Daily)"
+            >
+              🌙 Off-Hours
+            </button>
           </div>
 
           {/* ACTION BUTTONS */}
@@ -2583,6 +2600,40 @@ const renderInlineScheduleRow = (device, colSpan = 10) => {
             >
               {scheduleLoading === scheduleForm.device_id ? "Saving..." : "💾 Save Schedule"}
             </button>
+
+            {scheduleForm.schedule_id && (
+              <button
+                type="button"
+                className="secondary-button small"
+                style={{ color: "#ef4444", borderColor: "#fca5a5" }}
+                onClick={async () => {
+                  if (!window.confirm("Remove this access schedule and return device to unrestricted access?")) return;
+                  try {
+                    const res = await fetch(`${API_URL}/access-schedules/${scheduleForm.schedule_id}`, {
+                      method: "DELETE",
+                      headers: getAuthHeaders(),
+                    });
+                    if (res.ok) {
+                      setScheduleForm({
+                        schedule_id: null,
+                        device_id: null,
+                        start_time: "08:00:00",
+                        end_time: "17:00:00",
+                        days: "daily",
+                        enabled: true,
+                      });
+                      await loadAccessSchedules();
+                      await loadDevices();
+                    }
+                  } catch (e) {
+                    alert("Failed to delete schedule: " + e.message);
+                  }
+                }}
+                title="Delete this access schedule and restore default network access"
+              >
+                🗑️ Remove
+              </button>
+            )}
 
             <button
               type="button"
@@ -7625,13 +7676,20 @@ return (
                 }}
                 onClick={() => {
                   if (!isAdmin) return;
+                  if (!isSuperAdmin && (reportType === "user_activity" || reportType === "approvals")) {
+                    alert("Access denied: Only Super Administrators can export User Access & Audit or Approval reports.");
+                    return;
+                  }
                   if (!validateReportDates()) return;
                   const params = new URLSearchParams({
+                    report_type: reportType,
                     period: reportPeriod,
                   });
 
-                  const activeIsp = selectedIsp === "custom" && customIspName.trim() ? customIspName.trim() : selectedIsp;
-                  params.append("isp", activeIsp);
+                  if (reportType === "isp_internet_usage") {
+                    const activeIsp = selectedIsp === "custom" && customIspName.trim() ? customIspName.trim() : selectedIsp;
+                    params.append("isp", activeIsp);
+                  }
 
                   if (reportPeriod === "custom") {
                     params.append(
@@ -7649,12 +7707,12 @@ return (
                   if (token) params.append("token", token);
 
                   window.open(
-                    `${API_URL}/reports/isp-usage/download/csv?${params.toString()}`,
+                    `${API_URL}/reports/export/csv?${params.toString()}`,
                     "_blank"
                   );
                 }}
               >
-                📥 Download CSV (ISP Usage)
+                📥 Download CSV
               </button>
             </div>
             )}
@@ -12479,6 +12537,39 @@ const EndpointUpdatesPage = () => {
             style={{ display: "flex", alignItems: "center", gap: "6px" }}
           >
             {lanScanLoading ? "⏳ Scanning LAN..." : "⚡ Scan LAN for Updates (Agentless)"}
+          </button>
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => {
+              if (endpointUpdates.length === 0) {
+                alert("No endpoint update data available to export.");
+                return;
+              }
+              const headers = ["Hostname", "IP Address", "MAC Address", "OS Version", "Update Status", "Pending Updates Count", "Reboot Required", "Last Checked"];
+              const rows = endpointUpdates.map(e => [
+                `"${e.hostname || 'Unknown'}"`,
+                `"${e.ip_address || 'N/A'}"`,
+                `"${e.mac_address || 'N/A'}"`,
+                `"${e.os_version || 'Unknown'}"`,
+                `"${e.update_status || 'unknown'}"`,
+                e.pending_updates || 0,
+                e.reboot_required ? "Yes" : "No",
+                `"${e.last_checked || 'N/A'}"`,
+              ]);
+              const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
+              const encodedUri = encodeURI(csvContent);
+              const link = document.createElement("a");
+              link.setAttribute("href", encodedUri);
+              link.setAttribute("download", `netops_endpoint_patches_${new Date().toISOString().slice(0, 10)}.csv`);
+              document.body.appendChild(link);
+              link.click();
+              document.body.removeChild(link);
+            }}
+            title="Download CSV audit report of all managed endpoints and pending software updates"
+            style={{ display: "flex", alignItems: "center", gap: "6px" }}
+          >
+            📥 Export Patch CSV
           </button>
           <button
             type="button"

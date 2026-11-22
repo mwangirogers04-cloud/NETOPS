@@ -1,5 +1,6 @@
+import csv
 from datetime import datetime, timedelta, time
-from io import BytesIO
+from io import BytesIO, StringIO
 from xml.sax.saxutils import escape as xml_escape
 
 from fastapi.responses import Response, StreamingResponse
@@ -2539,4 +2540,122 @@ def export_report_pdf(
                 f'attachment; filename="{filename}"'
             )
         },
+    )
+
+
+@router.get("/export/csv")
+def export_report_csv(
+    report_type: str,
+    period: str,
+    date: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    start_datetime: str | None = None,
+    end_datetime: str | None = None,
+    isp: str = "all",
+    current_user: User | None = Depends(verify_report_admin_access),
+    db: Session = Depends(get_db),
+):
+    """
+    Generate and download a NETOPS report as a clean CSV spreadsheet.
+    """
+    clean_type = report_type.lower().strip()
+    is_developer = (
+        current_user
+        and (
+            getattr(current_user, "username", "").lower() == "developer"
+            or getattr(current_user, "role", "").lower() in ("super_admin", "developer")
+        )
+    )
+    if clean_type in ("user_activity", "approvals"):
+        if current_user and not is_developer and current_user.role != "super_admin":
+            raise HTTPException(
+                status_code=403,
+                detail="Access denied: Only Super Administrators and Developer can view or export User Access & Audit or Approval reports.",
+            )
+
+    report = generate_report(
+        report_type=report_type,
+        period=period,
+        date=date,
+        start_date=start_date,
+        end_date=end_date,
+        start_datetime=start_datetime,
+        end_datetime=end_datetime,
+        isp=isp,
+        current_user=current_user,
+        db=db,
+    )
+
+    output = StringIO()
+    writer = csv.writer(output)
+
+    # Header metadata
+    writer.writerow(["# NETOPS Enterprise Report", report.get("report_title", "Network Report")])
+    writer.writerow(["# Generated", datetime.now().strftime("%Y-%m-%d %H:%M:%S")])
+    writer.writerow(["# Period", report.get("period", period)])
+    writer.writerow([])
+
+    if clean_type in ("isp_internet_usage", "firewall_internet_usage", "isp_usage"):
+        dev_list = report.get("device_usage_list") or []
+        writer.writerow(["Hostname", "IP Address", "MAC Address", "Device Type", "VLAN", "Download (MB)", "Upload (MB)", "Total Usage (MB)", "Enforcement Status"])
+        for d in dev_list:
+            writer.writerow([
+                d.get("hostname", "Unknown"),
+                d.get("ip_address", "N/A"),
+                d.get("mac_address", "N/A"),
+                d.get("device_type", "Unknown"),
+                d.get("vlan_id", "N/A"),
+                d.get("download_mb", 0),
+                d.get("upload_mb", 0),
+                d.get("total_mb", 0),
+                d.get("enforcement_status", "allowed"),
+            ])
+    elif clean_type in ("user_activity", "audit_trail"):
+        events = report.get("events") or []
+        writer.writerow(["Event ID", "Timestamp", "Admin / User", "Event Type", "Target Device", "Details"])
+        for ev in events:
+            writer.writerow([
+                ev.get("id", ""),
+                ev.get("timestamp", ""),
+                ev.get("actor_username") or ev.get("user") or "System",
+                ev.get("event_type", ""),
+                ev.get("device_name") or ev.get("target") or "N/A",
+                ev.get("message", ""),
+            ])
+    elif clean_type == "device_inventory":
+        devs = report.get("devices") or []
+        writer.writerow(["Device ID", "Hostname", "IP Address", "MAC Address", "Vendor", "Device Type", "VLAN", "Approval Status", "Enforcement Status", "Online Status"])
+        for d in devs:
+            writer.writerow([
+                d.get("id", ""),
+                d.get("hostname", "Unknown"),
+                d.get("ip_address", "N/A"),
+                d.get("mac_address", "N/A"),
+                d.get("vendor", "Generic"),
+                d.get("device_type", "workstation"),
+                d.get("vlan_id", 20),
+                d.get("approval_status", "pending"),
+                d.get("enforcement_status", "allowed"),
+                d.get("status", "online"),
+            ])
+    else:
+        events = report.get("events") or []
+        writer.writerow(["Event ID", "Timestamp", "Event Type", "Device", "IP Address", "MAC Address", "Message"])
+        for ev in events:
+            writer.writerow([
+                ev.get("id", ""),
+                ev.get("timestamp", ""),
+                ev.get("event_type", ""),
+                ev.get("device_name", "N/A"),
+                ev.get("ip_address", "N/A"),
+                ev.get("mac_address", "N/A"),
+                ev.get("message", ""),
+            ])
+
+    filename = f"netops_{clean_type}_{period}.csv"
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

@@ -10,7 +10,7 @@ from ..models.device import Device
 from ..models.user import User
 from ..services.access_policy import normalize_device_type
 from ..services.access_schedule import is_access_allowed
-from ..services.auth_service import require_super_admin, get_optional_current_user
+from ..services.auth_service import require_admin, require_super_admin, get_optional_current_user
 from ..services.device_classifier import classify_device
 from ..services.event_service import create_event
 from ..services.network_enforcement import enforce_device_access
@@ -165,7 +165,7 @@ def update_access_schedule(
 def delete_access_schedule(
     schedule_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_super_admin),
+    current_user: User = Depends(require_admin),
 ):
     schedule = db.get(AccessSchedule, schedule_id)
 

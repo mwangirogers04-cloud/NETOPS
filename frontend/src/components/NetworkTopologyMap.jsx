@@ -244,6 +244,15 @@ export default function NetworkTopologyMap({
           >
             {loading || switchingDensity ? "Refreshing..." : "🔄 Refresh Topology"}
           </button>
+          <button
+            type="button"
+            className="secondary-button small"
+            onClick={() => window.print()}
+            title="Print or export the network topology diagram to PDF"
+            style={{ display: "flex", alignItems: "center", gap: "4px" }}
+          >
+            🖨️ Print / PDF
+          </button>
         </div>
       </div>
 

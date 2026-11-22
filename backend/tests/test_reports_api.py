@@ -556,3 +556,45 @@ def test_api_export_excel_device_inventory():
     assert ws_dev.freeze_panes == "A2"
     assert ws_dev.auto_filter.ref is not None
 
+
+def test_api_export_csv_device_inventory():
+    sample_device = Device(
+        id=5,
+        ip_address="192.168.1.55",
+        mac_address="AA:BB:CC:DD:EE:FF",
+        hostname="WORKSTATION-01",
+        vendor="Dell Inc.",
+        device_type="computer",
+        vlan_id=20,
+        status="online",
+        approval_status="approved",
+        enforcement_status="allowed",
+        classification_status="classified",
+        switch_name="SW-CORE-01",
+        switch_port="Gi1/0/12",
+    )
+
+    db = MagicMock()
+    mock_res = MagicMock()
+    mock_res.all.return_value = [sample_device]
+    db.scalars.return_value = mock_res
+
+    def override_get_db():
+        yield db
+
+    app.dependency_overrides[reports.get_db] = override_get_db
+    try:
+        response = client.get(
+            "/reports/export/csv?report_type=device_inventory&period=daily&date=2026-10-01"
+        )
+        assert response.status_code == 200
+        assert "text/csv" in response.headers["content-type"]
+        assert "attachment" in response.headers["content-disposition"]
+        content = response.text
+        assert "# NETOPS Enterprise Report" in content
+        assert "Device ID,Hostname,IP Address,MAC Address" in content
+        assert "AA:BB:CC:DD:EE:FF" in content
+    finally:
+        app.dependency_overrides.pop(reports.get_db, None)
+
+
