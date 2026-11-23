@@ -247,11 +247,55 @@ export default function WebActivityPage({
     if (!domain) return false;
     const d = domain.toLowerCase();
     const noiseList = [
+      // OS & Network Connectivity checks
       "msftncsi.com",
       "msftconnecttest.com",
       "api.netops.co.ke",
       "connectivitycheck.gstatic.com",
       "detectportal.firefox.com",
+      "dns.msftncsi.com",
+      "ipv6.msftncsi.com",
+      "ipv6.msftconnecttest.com",
+      "ctldl.windowsupdate.com",
+      "windowsupdate.com",
+      "dns.google",
+      "cloudflare-dns.com",
+      "one.one.one.one",
+
+      // Browser & OS background telemetry
+      "safebrowsing.googleapis.com",
+      "ohttp-relay-safebrowsing-chrome.google.fastly-edge.com",
+      "mozilla-ohttp.fastly-edge.com",
+      "ads.mozilla.org",
+      "firefox.settings.services.mozilla.com",
+      "push.services.mozilla.com",
+      "nexusrules.officeapps.live.com",
+      "daily-cloudcode-pa.googleapis.com",
+      "aicode.googleapis.com",
+      "notifications-pa.googleapis.com",
+      "beacons.gcp.gvt2.com",
+      "array514.prod.do.dsp.mp.microsoft.com",
+
+      // Ad Networks, tracking pixels, & analytics SDKs (never typed by users in browser)
+      "clarity.ms",
+      "rubiconproject.com",
+      "tribalfusion.com",
+      "blismedia.com",
+      "yellowblue.io",
+      "adition.com",
+      "media.net",
+      "yieldmo.com",
+      "contextweb.com",
+      "kargo.com",
+      "appsflyersdk.com",
+      "app-measurement.com",
+      "braze.com",
+      "posthog.consumer.worldcoin.org",
+      "toolsforhumanity.com",
+      "lokalise.co",
+      "doubleclick.net",
+      "google-analytics.com",
+      "googletagmanager.com",
     ];
     return noiseList.some((n) => d === n || d.endsWith("." + n));
   };
