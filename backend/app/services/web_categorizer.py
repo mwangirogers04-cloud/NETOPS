@@ -48,7 +48,8 @@ GAMING_DOMAINS = {
 SOCIAL_MEDIA_DOMAINS = {
     "facebook.com", "fbcdn.net", "fbsbx.com", "m.facebook.com",
     "instagram.com", "cdninstagram.com",
-    "tiktok.com", "tiktokv.com", "byteoversea.com", "musical.ly",
+    "tiktok.com", "tiktokv.com", "tiktokcdn.com", "tiktokcdn-eu.com", "tiktokcdn-us.com",
+    "byteoversea.com", "ibytedtos.com", "ibyteimg.com", "musical.ly", "bytedance.com",
     "twitter.com", "x.com", "twimg.com",
     "reddit.com", "redditmedia.com", "redd.it",
     "snapchat.com", "sc-cdn.net",
