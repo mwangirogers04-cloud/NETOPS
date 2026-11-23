@@ -246,21 +246,46 @@ def trigger_web_activity_scan(
 ):
     """
     On-demand scan trigger from the dashboard.
-    Returns currently active browsing sessions and status across network endpoints.
+    Directly interrogates the router gateway, queries active connected endpoints,
+    and returns live browsing sessions.
     """
-    # 1. Fetch active sessions within the last 15 minutes
-    active_sessions = get_active_web_sessions(db, minutes=15)
+    import dns.message
+    import dns.query
+    import dns.rcode
+    from ..services.router.manager import get_active_router_driver
 
-    # 2. Query known managed devices
-    devices = db.scalars(select(Device)).all()
-    devices_monitored = len(devices)
+    # 1. Sweep active connected endpoints directly from the router
+    router_driver = get_active_router_driver(db)
+    router_devices = []
+    try:
+        router_devices = router_driver.get_connected_devices()
+    except Exception as exc:
+        logger.warning(f"[SCAN] Router query notice: {exc}")
+
+    # 2. Probe router DNS gateway responsiveness
+    router_ip = getattr(router_driver, "url", "http://192.168.0.1").replace("http://", "").replace("https://", "").split("/")[0].split(":")[0]
+    router_dns_active = False
+    try:
+        probe_q = dns.message.make_query("connectivitycheck.gstatic.com", "A")
+        probe_resp = dns.query.udp(probe_q, router_ip, port=53, timeout=1.5)
+        router_dns_active = (probe_resp.rcode() == dns.rcode.NOERROR)
+    except Exception:
+        router_dns_active = False
+
+    # 3. Retrieve active browsing sessions within last 15 minutes
+    active_sessions = get_active_web_sessions(db, minutes=15)
+    devices_monitored = max(len(router_devices), db.query(Device).count())
 
     return {
         "status": "completed",
         "timestamp": datetime.now(timezone.utc).isoformat(),
+        "router_vendor": router_driver.get_vendor_title(),
+        "router_ip": router_ip,
+        "router_dns_active": router_dns_active,
         "devices_monitored": devices_monitored,
+        "router_connected_count": len(router_devices),
         "active_sessions_count": len(active_sessions),
         "active_sessions": active_sessions,
-        "message": f"Scan completed across {devices_monitored} network endpoint(s). Retrieved {len(active_sessions)} active browsing session(s).",
+        "message": f"Direct router scan completed on {router_driver.get_vendor_title()} ({router_ip}). Polled {len(router_devices)} connected device(s). Retrieved {len(active_sessions)} active browsing session(s).",
     }
 
