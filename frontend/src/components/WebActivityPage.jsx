@@ -23,31 +23,21 @@ export default function WebActivityPage({
   const [lastRefreshedAt, setLastRefreshedAt] = useState(new Date());
   const [clearingHistory, setClearingHistory] = useState(false);
   const [scanning, setScanning] = useState(false);
-  const [scanNotice, setScanNotice] = useState("");
 
   // Scan all connected endpoints for browsing and DNS activity
   const handleScanWebActivity = async () => {
     setScanning(true);
-    setScanNotice("");
     try {
-      const res = await fetch(`${API_URL}/web-activity/trigger-scan`, {
+      await fetch(`${API_URL}/web-activity/trigger-scan`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...getAuthHeaders() },
       });
-      if (res.ok) {
-        const data = await res.json();
-        setScanNotice(`✅ ${data.message || "Endpoint browsing scan completed successfully!"}`);
-        await Promise.all([fetchActiveSessions(), fetchLogs(), fetchAnalytics()]);
-        setLastRefreshedAt(new Date());
-      } else {
-        const err = await res.json().catch(() => ({}));
-        setScanNotice(`❌ Scan failed: ${err.detail || "Unable to trigger endpoint scan."}`);
-      }
+      await Promise.all([fetchActiveSessions(), fetchLogs(), fetchAnalytics()]);
+      setLastRefreshedAt(new Date());
     } catch (err) {
-      setScanNotice(`❌ Network error while scanning: ${err.message}`);
+      console.error("Error triggering web activity scan:", err);
     } finally {
       setScanning(false);
-      setTimeout(() => setScanNotice(""), 8000);
     }
   };
 
@@ -382,69 +372,6 @@ export default function WebActivityPage({
               🔄
             </span>
             {refreshing ? "Reloading..." : "Reload Devices Now"}
-          </button>
-        </div>
-      </div>
-
-      {/* Scan Feedback Banner */}
-      {scanNotice && (
-        <div
-          style={{
-            background: scanNotice.startsWith("✅") ? "rgba(16, 185, 129, 0.15)" : "rgba(239, 68, 68, 0.15)",
-            border: scanNotice.startsWith("✅") ? "1px solid #10b981" : "1px solid #ef4444",
-            color: scanNotice.startsWith("✅") ? "#34d399" : "#f87171",
-            padding: "10px 16px",
-            borderRadius: "8px",
-            marginBottom: "16px",
-            fontSize: "13px",
-            fontWeight: "500",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-          }}
-        >
-          <span>{scanNotice}</span>
-          <button
-            type="button"
-            onClick={() => setScanNotice("")}
-            style={{ background: "none", border: "none", color: "inherit", cursor: "pointer", fontSize: "16px" }}
-          >
-            ✕
-          </button>
-        </div>
-      )}
-
-      {/* Network Setup Banner */}
-      <div
-        style={{
-          background: "rgba(59, 130, 246, 0.08)",
-          border: "1px solid rgba(59, 130, 246, 0.25)",
-          borderRadius: "8px",
-          padding: "12px 16px",
-          marginBottom: "20px",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          flexWrap: "wrap",
-          gap: "12px",
-        }}
-      >
-        <div style={{ fontSize: "12px", color: "#93c5fd", lineHeight: "1.5" }}>
-          💡 <strong>How to Capture All Sites & Streams:</strong> NetOps DNS Server is running on <code>192.168.0.111:53</code>. In your router (Tenda / MikroTik), set <strong>DHCP Primary DNS to <code>192.168.0.111</code></strong> so that all laptops, phones, and computers automatically route their browsing through NetOps.
-        </div>
-        <div style={{ display: "flex", gap: "8px" }}>
-          <button
-            type="button"
-            className="secondary-button small"
-            style={{ fontSize: "11px", padding: "4px 10px", borderColor: "#3b82f6", color: "#60a5fa" }}
-            onClick={() => {
-              if (navigator.clipboard) {
-                navigator.clipboard.writeText("192.168.0.111");
-              }
-              alert("Copied NetOps DNS Server IP: 192.168.0.111\n\nSet this as the DNS Server on your router or laptop to capture all browsing activity!");
-            }}
-          >
-            📋 Copy DNS IP (192.168.0.111)
           </button>
         </div>
       </div>
