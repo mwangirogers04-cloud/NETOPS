@@ -464,13 +464,15 @@ export default function WebActivityPage({
           if (s.is_violation) {
             acc[key].hasViolation = true;
           }
-          if (!acc[key].sitesMap[s.domain]) {
-            acc[key].sitesMap[s.domain] = { ...s, count: 1 };
-          } else {
-            acc[key].sitesMap[s.domain].count += 1;
-            if (s.seconds_ago < acc[key].sitesMap[s.domain].seconds_ago) {
-              acc[key].sitesMap[s.domain].seconds_ago = s.seconds_ago;
-              acc[key].sitesMap[s.domain].status = s.status;
+          if (s.domain && s.domain !== "__idle__") {
+            if (!acc[key].sitesMap[s.domain]) {
+              acc[key].sitesMap[s.domain] = { ...s, count: 1 };
+            } else {
+              acc[key].sitesMap[s.domain].count += 1;
+              if (s.seconds_ago < acc[key].sitesMap[s.domain].seconds_ago) {
+                acc[key].sitesMap[s.domain].seconds_ago = s.seconds_ago;
+                acc[key].sitesMap[s.domain].status = s.status;
+              }
             }
           }
           return acc;
@@ -638,23 +640,43 @@ export default function WebActivityPage({
                       </div>
 
                       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "4px" }}>
-                        <span
-                          style={{
-                            fontSize: "10px",
-                            fontWeight: "700",
-                            padding: "2px 8px",
-                            borderRadius: "4px",
-                            background: dev.status === "active" ? "rgba(16, 185, 129, 0.2)" : "rgba(245, 158, 11, 0.2)",
-                            color: dev.status === "active" ? "#34d399" : "#fbbf24",
-                            border: dev.status === "active" ? "1px solid #10b981" : "1px solid #f59e0b",
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "4px",
-                          }}
-                        >
-                          <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: dev.status === "active" ? "#10b981" : "#f59e0b" }} className={dev.status === "active" ? "live-dot" : ""} />
-                          {dev.minSecondsAgo < 60 ? `${dev.minSecondsAgo}s ago` : `${Math.floor(dev.minSecondsAgo / 60)}m ago`}
-                        </span>
+                        {dev.sites.length > 0 ? (
+                          <span
+                            style={{
+                              fontSize: "10px",
+                              fontWeight: "700",
+                              padding: "2px 8px",
+                              borderRadius: "4px",
+                              background: dev.status === "active" ? "rgba(16, 185, 129, 0.2)" : "rgba(245, 158, 11, 0.2)",
+                              color: dev.status === "active" ? "#34d399" : "#fbbf24",
+                              border: dev.status === "active" ? "1px solid #10b981" : "1px solid #f59e0b",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "4px",
+                            }}
+                          >
+                            <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: dev.status === "active" ? "#10b981" : "#f59e0b" }} className={dev.status === "active" ? "live-dot" : ""} />
+                            {dev.minSecondsAgo < 60 ? `${dev.minSecondsAgo}s ago` : `${Math.floor(dev.minSecondsAgo / 60)}m ago`}
+                          </span>
+                        ) : (
+                          <span
+                            style={{
+                              fontSize: "10px",
+                              fontWeight: "700",
+                              padding: "2px 8px",
+                              borderRadius: "4px",
+                              background: "rgba(16, 185, 129, 0.15)",
+                              color: "#34d399",
+                              border: "1px solid rgba(16, 185, 129, 0.3)",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "4px",
+                            }}
+                          >
+                            <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#10b981" }} />
+                            Online (Idle)
+                          </span>
+                        )}
 
                         <span style={{ fontSize: "10px", color: "#94a3b8", background: "#1e293b", padding: "1px 6px", borderRadius: "4px" }}>
                           {dev.sites.length} unique site{dev.sites.length === 1 ? "" : "s"}
@@ -664,7 +686,15 @@ export default function WebActivityPage({
 
                     {/* Websites Browsed by this Machine */}
                     <div style={{ display: "flex", flexDirection: "column", gap: "6px", maxHeight: "240px", overflowY: "auto", paddingRight: "4px" }}>
-                      {dev.sites.map((site, sIdx) => {
+                      {dev.sites.length === 0 ? (
+                        <div style={{ padding: "12px", textAlign: "center", background: "#1e293b", borderRadius: "6px", color: "#64748b", fontSize: "11px" }}>
+                          <span style={{ color: "#34d399", fontWeight: "600" }}>🟢 Online & Monitored</span>
+                          <div style={{ fontSize: "10px", color: "#475569", marginTop: "2px" }}>
+                            Connected to network — No new websites visited in the last {activeMinutes}m window.
+                          </div>
+                        </div>
+                      ) : (
+                        dev.sites.map((site, sIdx) => {
                         const badge = getCategoryBadge(site.category);
                         return (
                           <div
@@ -714,7 +744,7 @@ export default function WebActivityPage({
                             </div>
                           </div>
                         );
-                      })}
+                      }))}
                     </div>
                   </div>
                 ))}

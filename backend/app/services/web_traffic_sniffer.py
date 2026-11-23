@@ -312,11 +312,11 @@ def get_web_activity_analytics(db: Session, hours: int = 24) -> dict:
     }
 
 
-def get_active_web_sessions(db: Session, minutes: int = 5) -> list[dict]:
+def get_active_web_sessions(db: Session, minutes: int = 5, include_idle_devices: bool = True) -> list[dict]:
     """
     Returns devices and domains actively communicating within the last `minutes`.
-    If a user has left the site (no traffic within `minutes`), they are omitted.
-    Groups by (ip_address, domain).
+    Also includes currently online network devices (even if idle) so no connected
+    computer is omitted from the scan.
     """
     cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=minutes)
     q = (
@@ -355,6 +355,29 @@ def get_active_web_sessions(db: Session, minutes: int = 5) -> list[dict]:
             }
         else:
             sessions[key]["hit_count"] += log.hit_count
+
+    # Include all online / reachable network devices so no online machine is omitted
+    if include_idle_devices:
+        device_ips_in_sessions = {s["ip_address"] for s in sessions.values()}
+        online_devices = db.scalars(select(Device).where(Device.status == "online")).all()
+        for dev in online_devices:
+            if dev.ip_address and dev.ip_address not in device_ips_in_sessions:
+                sessions[(dev.ip_address, "__idle__")] = {
+                    "id": None,
+                    "device_id": dev.id,
+                    "ip_address": dev.ip_address,
+                    "mac_address": dev.mac_address,
+                    "hostname": dev.hostname or dev.ip_address,
+                    "domain": None,
+                    "category": "general",
+                    "protocol": "NETWORK",
+                    "is_violation": False,
+                    "action": "monitored",
+                    "hit_count": 0,
+                    "last_seen": dev.last_seen.isoformat() if dev.last_seen else None,
+                    "seconds_ago": 9999,
+                    "status": "online_idle",
+                }
 
     return sorted(list(sessions.values()), key=lambda s: s["seconds_ago"])
 

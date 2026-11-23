@@ -254,13 +254,36 @@ def trigger_web_activity_scan(
     import dns.rcode
     from ..services.router.manager import get_active_router_driver
 
-    # 1. Sweep active connected endpoints directly from the router
+    # 1. Sweep active connected endpoints directly from the router & ARP
     router_driver = get_active_router_driver(db)
     router_devices = []
     try:
         router_devices = router_driver.get_connected_devices()
     except Exception as exc:
         logger.warning(f"[SCAN] Router query notice: {exc}")
+
+    # Synchronize all active router/network devices into Device table as online
+    for rdev in router_devices:
+        rip = rdev.get("ip_address")
+        rmac = rdev.get("mac_address")
+        if rip and rip not in ("127.0.0.1", "0.0.0.0"):
+            d = db.query(Device).filter((Device.ip_address == rip) | (Device.mac_address == rmac)).first()
+            if d:
+                d.status = "online"
+                d.last_seen = datetime.now(timezone.utc)
+            else:
+                d = Device(
+                    ip_address=rip,
+                    mac_address=rmac,
+                    hostname=rdev.get("hostname") or f"HOST-{rip.replace('.', '-')}",
+                    status="online",
+                    last_seen=datetime.now(timezone.utc),
+                )
+                db.add(d)
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
 
     # 2. Probe router DNS gateway responsiveness
     router_ip = getattr(router_driver, "url", "http://192.168.0.1").replace("http://", "").replace("https://", "").split("/")[0].split(":")[0]
@@ -272,8 +295,8 @@ def trigger_web_activity_scan(
     except Exception:
         router_dns_active = False
 
-    # 3. Retrieve active browsing sessions within last 15 minutes
-    active_sessions = get_active_web_sessions(db, minutes=15)
+    # 3. Retrieve all active and connected devices (including online idle endpoints)
+    active_sessions = get_active_web_sessions(db, minutes=15, include_idle_devices=True)
     devices_monitored = max(len(router_devices), db.query(Device).count())
 
     return {
