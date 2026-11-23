@@ -44,10 +44,13 @@ export default function WebActivityPage({
     }
   };
 
-  // Fetch active sessions (devices communicating in the last 5 minutes)
-  const fetchActiveSessions = async () => {
+  const [activeMinutes, setActiveMinutes] = useState(5);
+
+  // Fetch active sessions (devices communicating in the last N minutes)
+  const fetchActiveSessions = async (mins = activeMinutes) => {
     try {
-      const res = await fetch(`${API_URL}/web-activity/active-sessions?minutes=5`, {
+      const m = mins || activeMinutes || 5;
+      const res = await fetch(`${API_URL}/web-activity/active-sessions?minutes=${m}`, {
         headers: getAuthHeaders(),
       });
       if (res.ok) {
@@ -437,8 +440,10 @@ export default function WebActivityPage({
 
       {/* Live Active Connections Card */}
       {(() => {
+        const visibleSessions = activeSessions.filter((s) => !hideNoise || !isSystemNoise(s.domain));
+
         // Group active sessions by unique device IP / hostname
-        const groupedDevices = activeSessions.reduce((acc, s) => {
+        const groupedDevices = visibleSessions.reduce((acc, s) => {
           const key = s.ip_address || s.hostname || "unknown";
           if (!acc[key]) {
             acc[key] = {
@@ -449,7 +454,7 @@ export default function WebActivityPage({
               status: s.status,
               minSecondsAgo: s.seconds_ago,
               hasViolation: s.is_violation,
-              sites: [],
+              sitesMap: {},
             };
           }
           if (s.seconds_ago < acc[key].minSecondsAgo) {
@@ -459,11 +464,22 @@ export default function WebActivityPage({
           if (s.is_violation) {
             acc[key].hasViolation = true;
           }
-          acc[key].sites.push(s);
+          if (!acc[key].sitesMap[s.domain]) {
+            acc[key].sitesMap[s.domain] = { ...s, count: 1 };
+          } else {
+            acc[key].sitesMap[s.domain].count += 1;
+            if (s.seconds_ago < acc[key].sitesMap[s.domain].seconds_ago) {
+              acc[key].sitesMap[s.domain].seconds_ago = s.seconds_ago;
+              acc[key].sitesMap[s.domain].status = s.status;
+            }
+          }
           return acc;
         }, {});
 
-        const deviceList = Object.values(groupedDevices).sort((a, b) => a.minSecondsAgo - b.minSecondsAgo);
+        const deviceList = Object.values(groupedDevices).map(dev => ({
+          ...dev,
+          sites: Object.values(dev.sitesMap).sort((a, b) => a.seconds_ago - b.seconds_ago)
+        })).sort((a, b) => a.minSecondsAgo - b.minSecondsAgo);
 
         return (
           <div style={{ background: "#1e293b", border: "1px solid #334155", borderRadius: "8px", padding: "16px", marginBottom: "20px" }}>
@@ -471,14 +487,78 @@ export default function WebActivityPage({
               <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
                 <span style={{ display: "inline-block", width: "10px", height: "10px", borderRadius: "50%", background: "#10b981" }} className="live-dot" />
                 <span style={{ fontSize: "14px", fontWeight: "700", color: "#f8fafc" }}>
-                  🟢 Active Devices & Browsing Activity (Live Now)
+                  🟢 Connected Computers & Browsing Activity
                 </span>
                 <span style={{ background: "rgba(16, 185, 129, 0.2)", color: "#34d399", border: "1px solid rgba(16, 185, 129, 0.4)", borderRadius: "12px", padding: "2px 8px", fontSize: "11px", fontWeight: "700" }}>
-                  {deviceList.length} device{deviceList.length === 1 ? "" : "s"} • {activeSessions.length} active site{activeSessions.length === 1 ? "" : "s"}
+                  {deviceList.length} computer{deviceList.length === 1 ? "" : "s"} • {visibleSessions.length} active site{visibleSessions.length === 1 ? "" : "s"}
                 </span>
               </div>
 
-              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+              {/* Time Window & Noise Controls */}
+              <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                {/* Time Range */}
+                <div style={{ display: "flex", background: "#0f172a", padding: "2px", borderRadius: "6px", border: "1px solid #334155", gap: "2px" }}>
+                  <button
+                    type="button"
+                    onClick={() => { setActiveMinutes(5); fetchActiveSessions(5); }}
+                    style={{
+                      background: activeMinutes === 5 ? "#10b981" : "transparent",
+                      color: activeMinutes === 5 ? "#ffffff" : "#94a3b8",
+                      border: "none",
+                      borderRadius: "4px",
+                      padding: "4px 8px",
+                      fontSize: "11px",
+                      cursor: "pointer",
+                      fontWeight: activeMinutes === 5 ? "700" : "500",
+                    }}
+                  >
+                    🟢 5m
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setActiveMinutes(15); fetchActiveSessions(15); }}
+                    style={{
+                      background: activeMinutes === 15 ? "#2563eb" : "transparent",
+                      color: activeMinutes === 15 ? "#ffffff" : "#94a3b8",
+                      border: "none",
+                      borderRadius: "4px",
+                      padding: "4px 8px",
+                      fontSize: "11px",
+                      cursor: "pointer",
+                      fontWeight: activeMinutes === 15 ? "700" : "500",
+                    }}
+                  >
+                    ⏱️ 15m
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setActiveMinutes(60); fetchActiveSessions(60); }}
+                    style={{
+                      background: activeMinutes === 60 ? "#2563eb" : "transparent",
+                      color: activeMinutes === 60 ? "#ffffff" : "#94a3b8",
+                      border: "none",
+                      borderRadius: "4px",
+                      padding: "4px 8px",
+                      fontSize: "11px",
+                      cursor: "pointer",
+                      fontWeight: activeMinutes === 60 ? "700" : "500",
+                    }}
+                  >
+                    ⏳ 1h
+                  </button>
+                </div>
+
+                {/* Noise filter */}
+                <label style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "11px", color: hideNoise ? "#60a5fa" : "#94a3b8", cursor: "pointer", userSelect: "none" }}>
+                  <input
+                    type="checkbox"
+                    checked={hideNoise}
+                    onChange={(e) => setHideNoise(e.target.checked)}
+                    style={{ cursor: "pointer", accentColor: "#3b82f6" }}
+                  />
+                  <span>🛡️ Hide OS Noise</span>
+                </label>
+
                 {/* View toggle */}
                 <div style={{ display: "flex", background: "#0f172a", padding: "2px", borderRadius: "6px", border: "1px solid #334155" }}>
                   <button
@@ -496,7 +576,7 @@ export default function WebActivityPage({
                     }}
                     title="Show one consolidated card per machine with all its browsed websites"
                   >
-                    💻 One Card per Machine
+                    💻 By Machine
                   </button>
                   <button
                     type="button"
@@ -516,18 +596,14 @@ export default function WebActivityPage({
                     🌐 Individual Sites
                   </button>
                 </div>
-
-                <div style={{ fontSize: "11px", color: "#94a3b8" }}>
-                  Auto-refreshes every {autoRefreshSecs}s
-                </div>
               </div>
             </div>
 
             {deviceList.length === 0 ? (
-              <div style={{ padding: "20px", textAlign: "center", background: "#0f172a", borderRadius: "6px", color: "#64748b", fontSize: "12px" }}>
-                <span>⚪ No devices actively streaming or browsing in the last 5 minutes.</span>
+              <div style={{ padding: "24px", textAlign: "center", background: "#0f172a", borderRadius: "6px", color: "#64748b", fontSize: "12px" }}>
+                <span>⚪ No web browsing activity detected in the last {activeMinutes} minutes.</span>
                 <div style={{ marginTop: "4px", fontSize: "11px", color: "#475569" }}>
-                  When a laptop streams radio, opens YouTube, or visits a website, it will show up here instantly with its live status.
+                  When any computer streams radio, visits YouTube, or browses websites, it will show up here instantly.
                 </div>
               </div>
             ) : viewMode === "grouped" ? (
@@ -581,7 +657,7 @@ export default function WebActivityPage({
                         </span>
 
                         <span style={{ fontSize: "10px", color: "#94a3b8", background: "#1e293b", padding: "1px 6px", borderRadius: "4px" }}>
-                          {dev.sites.length} site{dev.sites.length === 1 ? "" : "s"} browsed
+                          {dev.sites.length} unique site{dev.sites.length === 1 ? "" : "s"}
                         </span>
                       </div>
                     </div>
@@ -608,6 +684,11 @@ export default function WebActivityPage({
                               <span style={{ fontWeight: "600", color: "#60a5fa", fontFamily: "monospace", fontSize: "12px", textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
                                 {site.domain}
                               </span>
+                              {site.count > 1 && (
+                                <span style={{ fontSize: "9px", background: "rgba(255,255,255,0.1)", borderRadius: "10px", padding: "1px 5px", color: "#cbd5e1" }}>
+                                  ×{site.count}
+                                </span>
+                              )}
                               {site.is_violation && (
                                 <span style={{ fontSize: "10px", color: "#f87171", fontWeight: "700" }}>⚠️</span>
                               )}
@@ -641,7 +722,7 @@ export default function WebActivityPage({
             ) : (
               /* FLAT VIEW: Repeating individual site tiles */
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "12px" }}>
-                {activeSessions.map((s, idx) => {
+                {visibleSessions.map((s, idx) => {
                   const badge = getCategoryBadge(s.category);
                   return (
                     <div
@@ -816,444 +897,6 @@ export default function WebActivityPage({
             </div>
           )}
         </div>
-      </div>
-
-      {/* Filters Toolbar */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#1e293b", border: "1px solid #334155", borderRadius: "8px", padding: "12px 16px", marginBottom: "16px", flexWrap: "wrap", gap: "10px" }}>
-        {/* Time Window Buttons */}
-        <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
-          <span style={{ fontSize: "11px", color: "#94a3b8", fontWeight: "700", marginRight: "4px" }}>WINDOW:</span>
-          <button
-            type="button"
-            className={timeRange === "live" ? "primary-button small" : "secondary-button small"}
-            onClick={() => setTimeRange("live")}
-            style={{ fontSize: "11px", padding: "4px 8px", background: timeRange === "live" ? "#10b981" : undefined, borderColor: timeRange === "live" ? "#059669" : undefined }}
-          >
-            🟢 Live Now (&lt;5m)
-          </button>
-          <button
-            type="button"
-            className={timeRange === "15m" ? "primary-button small" : "secondary-button small"}
-            onClick={() => setTimeRange("15m")}
-            style={{ fontSize: "11px", padding: "4px 8px" }}
-          >
-            ⏱️ Last 15m
-          </button>
-          <button
-            type="button"
-            className={timeRange === "1h" ? "primary-button small" : "secondary-button small"}
-            onClick={() => setTimeRange("1h")}
-            style={{ fontSize: "11px", padding: "4px 8px" }}
-          >
-            ⏳ 1 Hour
-          </button>
-          <button
-            type="button"
-            className={timeRange === "24h" ? "primary-button small" : "secondary-button small"}
-            onClick={() => setTimeRange("24h")}
-            style={{ fontSize: "11px", padding: "4px 8px" }}
-          >
-            📅 Today (24h)
-          </button>
-          <button
-            type="button"
-            className={timeRange === "all" ? "primary-button small" : "secondary-button small"}
-            onClick={() => setTimeRange("all")}
-            style={{ fontSize: "11px", padding: "4px 8px" }}
-          >
-            📜 All Time
-          </button>
-        </div>
-
-        {/* Category Filters */}
-        <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
-          <button
-            type="button"
-            className={categoryFilter === "all" && !violationsOnly ? "primary-button small" : "secondary-button small"}
-            onClick={() => { setCategoryFilter("all"); setViolationsOnly(false); }}
-            style={{ fontSize: "11px", padding: "4px 8px" }}
-          >
-            All Categories
-          </button>
-          <button
-            type="button"
-            className={violationsOnly ? "primary-button small" : "secondary-button small"}
-            onClick={() => { setViolationsOnly(true); setCategoryFilter("all"); }}
-            style={{ fontSize: "11px", padding: "4px 8px", background: violationsOnly ? "#dc2626" : undefined, borderColor: violationsOnly ? "#b91c1c" : undefined }}
-          >
-            ⚠️ Violations Only
-          </button>
-          <button
-            type="button"
-            className={categoryFilter === "streaming" ? "primary-button small" : "secondary-button small"}
-            onClick={() => { setCategoryFilter("streaming"); setViolationsOnly(false); }}
-            style={{ fontSize: "11px", padding: "4px 8px", background: categoryFilter === "streaming" ? "#ef4444" : undefined }}
-          >
-            🎬 Streaming
-          </button>
-          <button
-            type="button"
-            className={categoryFilter === "gaming" ? "primary-button small" : "secondary-button small"}
-            onClick={() => { setCategoryFilter("gaming"); setViolationsOnly(false); }}
-            style={{ fontSize: "11px", padding: "4px 8px", background: categoryFilter === "gaming" ? "#a855f7" : undefined }}
-          >
-            🎮 Gaming
-          </button>
-          <button
-            type="button"
-            className={categoryFilter === "social_media" ? "primary-button small" : "secondary-button small"}
-            onClick={() => { setCategoryFilter("social_media"); setViolationsOnly(false); }}
-            style={{ fontSize: "11px", padding: "4px 8px", background: categoryFilter === "social_media" ? "#3b82f6" : undefined }}
-          >
-            📱 Social Media
-          </button>
-        </div>
-
-        {/* Search & Auto-Refresh Dropdown */}
-        <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-          <input
-            type="text"
-            className="form-control"
-            placeholder="Search domain, IP, host..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            style={{ fontSize: "12px", padding: "5px 10px", width: "190px", background: "#0f172a", border: "1px solid #334155", color: "#f8fafc", borderRadius: "4px" }}
-          />
-
-          <select
-            className="form-control"
-            value={autoRefreshSecs}
-            onChange={(e) => setAutoRefreshSecs(parseInt(e.target.value, 10))}
-            style={{ fontSize: "11px", padding: "5px 8px", background: "#0f172a", border: "1px solid #334155", color: "#94a3b8", borderRadius: "4px" }}
-          >
-            <option value="5">Auto (5s)</option>
-            <option value="15">Auto (15s)</option>
-            <option value="0">Manual</option>
-          </select>
-        </div>
-      </div>
-
-      {/* Table Mode & OS Noise Toolbar */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px", flexWrap: "wrap", gap: "10px" }}>
-        <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-          <span style={{ fontSize: "11px", color: "#94a3b8", fontWeight: "700", marginRight: "4px" }}>TABLE VIEW:</span>
-          <button
-            type="button"
-            className={tableMode === "grouped" ? "primary-button small" : "secondary-button small"}
-            onClick={() => setTableMode("grouped")}
-            style={{ fontSize: "11px", padding: "4px 10px", background: tableMode === "grouped" ? "#2563eb" : undefined }}
-          >
-            💻 One Row per Machine ({groupedMachineLogs.length})
-          </button>
-          <button
-            type="button"
-            className={tableMode === "stream" ? "primary-button small" : "secondary-button small"}
-            onClick={() => setTableMode("stream")}
-            style={{ fontSize: "11px", padding: "4px 10px", background: tableMode === "stream" ? "#2563eb" : undefined }}
-          >
-            📋 Raw Log Stream ({filteredLogs.length})
-          </button>
-        </div>
-
-        <label style={{ display: "inline-flex", alignItems: "center", gap: "8px", fontSize: "12px", color: hideNoise ? "#60a5fa" : "#94a3b8", cursor: "pointer", userSelect: "none", background: hideNoise ? "rgba(59, 130, 246, 0.1)" : "transparent", padding: "4px 10px", borderRadius: "6px", border: hideNoise ? "1px solid rgba(59, 130, 246, 0.3)" : "1px solid transparent" }}>
-          <input
-            type="checkbox"
-            checked={hideNoise}
-            onChange={(e) => setHideNoise(e.target.checked)}
-            style={{ cursor: "pointer", accentColor: "#3b82f6" }}
-          />
-          <span>🛡️ Filter Background OS Telemetry (msftncsi, netops API)</span>
-        </label>
-      </div>
-
-      {/* Activity Table */}
-      <div style={{ background: "#1e293b", border: "1px solid #334155", borderRadius: "8px", overflow: "hidden" }}>
-        <table className="netops-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
-          {tableMode === "grouped" ? (
-            <>
-              <thead>
-                <tr style={{ background: "#0f172a", borderBottom: "1px solid #334155", textAlign: "left", color: "#94a3b8" }}>
-                  <th style={{ padding: "10px 14px", width: "130px" }}>LAST ACTIVE</th>
-                  <th style={{ padding: "10px 14px", width: "170px" }}>COMPUTER / USER</th>
-                  <th style={{ padding: "10px 14px", width: "160px" }}>IP & MAC ADDRESS</th>
-                  <th style={{ padding: "10px 14px" }}>SITES BROWSED (UNIQUE DOMAINS)</th>
-                  <th style={{ padding: "10px 14px", width: "120px" }}>ACTIVITY</th>
-                  <th style={{ padding: "10px 14px", width: "110px" }}>COMPLIANCE</th>
-                </tr>
-              </thead>
-              <tbody>
-                {groupedMachineLogs.length === 0 ? (
-                  <tr>
-                    <td colSpan="6" style={{ textAlign: "center", padding: "30px", color: "#64748b" }}>
-                      {loading ? (
-                        "⏳ Loading web activity logs..."
-                      ) : timeRange === "live" ? (
-                        <div>
-                          <div>⚪ No active web activity detected in the last 5 minutes.</div>
-                          <div style={{ fontSize: "11px", color: "#475569", marginTop: "4px" }}>
-                            Users who closed their sites have left the session. Switch window to "Last 1 Hour" or "All Time" to view previous history.
-                          </div>
-                        </div>
-                      ) : (
-                        "No web activity logs match the selected filter."
-                      )}
-                    </td>
-                  </tr>
-                ) : (
-                  groupedMachineLogs.map((m) => {
-                    const sessionStatus = getSessionStatus(m.lastActive);
-                    const dt = new Date(m.lastActive.endsWith("Z") ? m.lastActive : m.lastActive + "Z");
-                    const sitesList = Object.values(m.sites).sort((a, b) => b.hit_count - a.hit_count);
-                    return (
-                      <tr
-                        key={`machine-${m.ip_address || m.hostname}`}
-                        style={{
-                          borderBottom: "1px solid #334155",
-                          background: m.hasViolation ? "rgba(239, 68, 68, 0.05)" : undefined,
-                        }}
-                      >
-                        <td style={{ padding: "10px 14px", color: "#94a3b8", whiteSpace: "nowrap", verticalAlign: "top" }}>
-                          <div>{dt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</div>
-                          <div style={{ fontSize: "10px", color: "#64748b", marginTop: "3px", display: "flex", alignItems: "center", gap: "4px" }}>
-                            <span
-                              style={{
-                                display: "inline-block",
-                                width: "6px",
-                                height: "6px",
-                                borderRadius: "50%",
-                                background: sessionStatus.dotColor,
-                              }}
-                            />
-                            {sessionStatus.label}
-                          </div>
-                        </td>
-
-                        <td style={{ padding: "10px 14px", verticalAlign: "top" }}>
-                          <div style={{ fontWeight: "700", color: "#f8fafc", fontSize: "13px" }}>
-                            💻 {m.hostname || "Network Host"}
-                          </div>
-                        </td>
-
-                        <td style={{ padding: "10px 14px", fontFamily: "monospace", color: "#94a3b8", verticalAlign: "top" }}>
-                          <div style={{ fontWeight: "600", color: "#cbd5e1" }}>{m.ip_address}</div>
-                          {m.mac_address && <div style={{ fontSize: "11px", color: "#64748b" }}>{m.mac_address}</div>}
-                        </td>
-
-                        <td style={{ padding: "10px 14px", verticalAlign: "top" }}>
-                          <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
-                            {sitesList.map((site) => {
-                              const badge = getCategoryBadge(site.category);
-                              return (
-                                <span
-                                  key={site.domain}
-                                  title={`${site.domain} — ${badge.label} (${site.hit_count} hits)`}
-                                  style={{
-                                    display: "inline-flex",
-                                    alignItems: "center",
-                                    gap: "5px",
-                                    padding: "3px 8px",
-                                    borderRadius: "4px",
-                                    background: site.is_violation ? "rgba(239, 68, 68, 0.15)" : "rgba(15, 23, 42, 0.9)",
-                                    border: `1px solid ${site.is_violation ? "rgba(239, 68, 68, 0.4)" : "#334155"}`,
-                                    fontSize: "11px",
-                                  }}
-                                >
-                                  <span style={{ fontFamily: "monospace", fontWeight: "600", color: site.is_violation ? "#fca5a5" : "#60a5fa" }}>
-                                    {site.domain}
-                                  </span>
-                                  <span style={{ fontSize: "10px", color: badge.color }}>
-                                    {badge.label.split(" ")[0]}
-                                  </span>
-                                  {site.hit_count > 1 && (
-                                    <span style={{ fontSize: "9px", background: "rgba(255,255,255,0.1)", borderRadius: "10px", padding: "1px 5px", color: "#cbd5e1" }}>
-                                      ×{site.hit_count}
-                                    </span>
-                                  )}
-                                </span>
-                              );
-                            })}
-                          </div>
-                        </td>
-
-                        <td style={{ padding: "10px 14px", verticalAlign: "top", whiteSpace: "nowrap" }}>
-                          <div style={{ fontWeight: "700", color: "#f8fafc" }}>
-                            {sitesList.length} site{sitesList.length === 1 ? "" : "s"}
-                          </div>
-                          <div style={{ fontSize: "11px", color: "#64748b" }}>
-                            {m.totalHits} hit{m.totalHits === 1 ? "" : "s"}
-                          </div>
-                        </td>
-
-                        <td style={{ padding: "10px 14px", verticalAlign: "top", whiteSpace: "nowrap" }}>
-                          {m.hasViolation ? (
-                            <span
-                              style={{
-                                fontSize: "11px",
-                                fontWeight: "700",
-                                padding: "3px 8px",
-                                borderRadius: "4px",
-                                background: "rgba(239, 68, 68, 0.2)",
-                                color: "#f87171",
-                                border: "1px solid rgba(239, 68, 68, 0.5)",
-                                display: "inline-flex",
-                                alignItems: "center",
-                                gap: "4px",
-                              }}
-                            >
-                              ⚠️ Flagged
-                            </span>
-                          ) : (
-                            <span style={{ color: "#10b981", fontSize: "11px", fontWeight: "600" }}>
-                              ✓ Monitored
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </>
-          ) : (
-            <>
-              <thead>
-                <tr style={{ background: "#0f172a", borderBottom: "1px solid #334155", textAlign: "left", color: "#94a3b8" }}>
-                  <th style={{ padding: "10px 14px" }}>TIME</th>
-                  <th style={{ padding: "10px 14px" }}>COMPUTER / USER</th>
-                  <th style={{ padding: "10px 14px" }}>IP & MAC ADDRESS</th>
-                  <th style={{ padding: "10px 14px" }}>DOMAIN / WEBSITE</th>
-                  <th style={{ padding: "10px 14px" }}>CATEGORY</th>
-                  <th style={{ padding: "10px 14px" }}>CONNECTION STATE</th>
-                  <th style={{ padding: "10px 14px" }}>COMPLIANCE</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredLogs.length === 0 ? (
-                  <tr>
-                    <td colSpan="7" style={{ textAlign: "center", padding: "30px", color: "#64748b" }}>
-                      {loading ? (
-                        "⏳ Loading web activity logs..."
-                      ) : timeRange === "live" ? (
-                        <div>
-                          <div>⚪ No active web activity detected in the last 5 minutes.</div>
-                          <div style={{ fontSize: "11px", color: "#475569", marginTop: "4px" }}>
-                            Users who closed their sites have left the session. Switch window to "Last 1 Hour" or "All Time" to view previous history.
-                          </div>
-                        </div>
-                      ) : (
-                        "No web activity logs match the selected filter."
-                      )}
-                    </td>
-                  </tr>
-                ) : (
-                  filteredLogs.map((log) => {
-                    const badge = getCategoryBadge(log.category);
-                    const sessionStatus = getSessionStatus(log.timestamp);
-                    const dt = new Date(log.timestamp.endsWith("Z") ? log.timestamp : log.timestamp + "Z");
-                    return (
-                      <tr
-                        key={`log-${log.id}`}
-                        style={{
-                          borderBottom: "#334155 1px solid",
-                          background: log.is_violation ? "rgba(239, 68, 68, 0.05)" : undefined,
-                        }}
-                      >
-                        <td style={{ padding: "10px 14px", color: "#94a3b8", whiteSpace: "nowrap" }}>
-                          {dt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
-                        </td>
-
-                        <td style={{ padding: "10px 14px" }}>
-                          <div style={{ fontWeight: "700", color: "#f8fafc" }}>
-                            {log.hostname || "Network Host"}
-                          </div>
-                        </td>
-
-                        <td style={{ padding: "10px 14px", fontFamily: "monospace", color: "#94a3b8" }}>
-                          <div>{log.ip_address}</div>
-                          {log.mac_address && <div style={{ fontSize: "11px", color: "#64748b" }}>{log.mac_address}</div>}
-                        </td>
-
-                        <td style={{ padding: "10px 14px" }}>
-                          <div style={{ fontWeight: "700", color: "#60a5fa", fontFamily: "monospace" }}>
-                            {log.domain}
-                          </div>
-                        </td>
-
-                        <td style={{ padding: "10px 14px" }}>
-                          <span
-                            style={{
-                              fontSize: "11px",
-                              fontWeight: "700",
-                              padding: "3px 8px",
-                              borderRadius: "4px",
-                              background: badge.bg,
-                              color: badge.color,
-                              border: `1px solid ${badge.border}`,
-                              display: "inline-flex",
-                              alignItems: "center",
-                              gap: "4px",
-                            }}
-                          >
-                            {badge.label}
-                          </span>
-                        </td>
-
-                        {/* Enhanced Connection State Column */}
-                        <td style={{ padding: "10px 14px" }}>
-                          <span
-                            style={{
-                              fontSize: "11px",
-                              fontWeight: "700",
-                              padding: "3px 8px",
-                              borderRadius: "4px",
-                              background: sessionStatus.bg,
-                              color: sessionStatus.color,
-                              border: `1px solid ${sessionStatus.border}`,
-                              display: "inline-flex",
-                              alignItems: "center",
-                              gap: "6px",
-                            }}
-                          >
-                            <span
-                              style={{ width: "6px", height: "6px", borderRadius: "50%", background: sessionStatus.dotColor }}
-                              className={sessionStatus.status === "active" ? "live-dot" : ""}
-                            />
-                            {sessionStatus.label}
-                          </span>
-                        </td>
-
-                        <td style={{ padding: "10px 14px" }}>
-                          {log.is_violation ? (
-                            <span
-                              style={{
-                                fontSize: "11px",
-                                fontWeight: "700",
-                                padding: "3px 8px",
-                                borderRadius: "4px",
-                                background: "rgba(239, 68, 68, 0.2)",
-                                color: "#f87171",
-                                border: "1px solid rgba(239, 68, 68, 0.5)",
-                                display: "inline-flex",
-                                alignItems: "center",
-                                gap: "4px",
-                              }}
-                            >
-                              ⚠️ Flagged (Work Hours)
-                            </span>
-                          ) : (
-                            <span style={{ color: "#64748b", fontSize: "11px" }}>
-                              ✓ Monitored
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </>
-          )}
-        </table>
       </div>
 
       {/* Policy Modal */}
