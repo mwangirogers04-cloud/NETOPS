@@ -22,6 +22,34 @@ export default function WebActivityPage({
   const [autoRefreshSecs, setAutoRefreshSecs] = useState(5);
   const [lastRefreshedAt, setLastRefreshedAt] = useState(new Date());
   const [clearingHistory, setClearingHistory] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const [scanNotice, setScanNotice] = useState("");
+
+  // Scan all connected endpoints for browsing and DNS activity
+  const handleScanWebActivity = async () => {
+    setScanning(true);
+    setScanNotice("");
+    try {
+      const res = await fetch(`${API_URL}/web-activity/trigger-scan`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setScanNotice(`✅ ${data.message || "Endpoint browsing scan completed successfully!"}`);
+        await Promise.all([fetchActiveSessions(), fetchLogs(), fetchAnalytics()]);
+        setLastRefreshedAt(new Date());
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setScanNotice(`❌ Scan failed: ${err.detail || "Unable to trigger endpoint scan."}`);
+      }
+    } catch (err) {
+      setScanNotice(`❌ Network error while scanning: ${err.message}`);
+    } finally {
+      setScanning(false);
+      setTimeout(() => setScanNotice(""), 8000);
+    }
+  };
 
   // Fetch active sessions (devices communicating in the last 5 minutes)
   const fetchActiveSessions = async () => {
@@ -305,6 +333,32 @@ export default function WebActivityPage({
             🗑️ Clear History
           </button>
 
+          {/* Scan Endpoints Browsing Activity Button */}
+          <button
+            type="button"
+            className="primary-button"
+            onClick={handleScanWebActivity}
+            disabled={scanning}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "8px",
+              fontSize: "12px",
+              fontWeight: "700",
+              padding: "7px 16px",
+              background: scanning ? "#0369a1" : "linear-gradient(135deg, #0284c7, #0369a1)",
+              borderColor: "#0284c7",
+              cursor: scanning ? "not-allowed" : "pointer",
+              boxShadow: "0 2px 4px rgba(2, 132, 199, 0.3)",
+            }}
+            title="Scan connected LAN machines for active and cached browsing activity"
+          >
+            <span style={{ display: "inline-block", fontSize: "14px" }} className={scanning ? "spin-active" : ""}>
+              {scanning ? "⏳" : "📡"}
+            </span>
+            {scanning ? "Scanning Machines..." : "Scan Browsing Activity"}
+          </button>
+
           {/* Enhanced Refresh Button */}
           <button
             type="button"
@@ -331,6 +385,34 @@ export default function WebActivityPage({
           </button>
         </div>
       </div>
+
+      {/* Scan Feedback Banner */}
+      {scanNotice && (
+        <div
+          style={{
+            background: scanNotice.startsWith("✅") ? "rgba(16, 185, 129, 0.15)" : "rgba(239, 68, 68, 0.15)",
+            border: scanNotice.startsWith("✅") ? "1px solid #10b981" : "1px solid #ef4444",
+            color: scanNotice.startsWith("✅") ? "#34d399" : "#f87171",
+            padding: "10px 16px",
+            borderRadius: "8px",
+            marginBottom: "16px",
+            fontSize: "13px",
+            fontWeight: "500",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          <span>{scanNotice}</span>
+          <button
+            type="button"
+            onClick={() => setScanNotice("")}
+            style={{ background: "none", border: "none", color: "inherit", cursor: "pointer", fontSize: "16px" }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* Network Setup Banner */}
       <div

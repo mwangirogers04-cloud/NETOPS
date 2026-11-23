@@ -176,13 +176,13 @@ def _sniffer_loop():
     global _sniffer_process, _sniffer_running
     logger.info("[WEB_SNIFFER] Starting live passive DNS capture...")
 
-    # Pattern matches standard tcpdump DNS A/AAAA queries:
-    # IP 192.168.0.104.54321 > 192.168.0.1.53: 1234+ A? youtube.com. (29)
+    # Pattern matches standard tcpdump DNS A/AAAA/HTTPS queries with or without EDNS flags:
+    # IP 192.168.0.104.54321 > 192.168.0.1.53: 1234+ [1au] A? youtube.com. (39)
     dns_pattern = re.compile(
-        r"IP\s+([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)\.[0-9]+\s*>\s*[0-9\.]+\.53:\s+[0-9]+\+?\s+(?:A|AAAA)\?\s+([a-zA-Z0-9\-\.\_]+)\."
+        r"IP\s+([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)\.[0-9]+\s*>\s*[0-9\.]+\.53:\s+.*?(?:A|AAAA|HTTPS)\?\s+([a-zA-Z0-9\-\.\_]+)\."
     )
 
-    cmd = ["sudo", "-n", "tcpdump", "-l", "-n", "-q", "-i", "any", "udp port 53"]
+    cmd = ["sudo", "-n", "tcpdump", "-l", "-n", "-i", "any", "udp dst port 53"]
 
     while _sniffer_running:
         try:

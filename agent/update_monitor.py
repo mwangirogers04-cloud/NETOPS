@@ -359,6 +359,111 @@ def execute_patch_job(job_id, action, server_url=None):
         )
 
 
+def collect_linux_web_activity():
+    """Collect active and cached browsing domains on Linux."""
+    domains = set()
+
+    # 1. Check active web connections (HTTP/HTTPS)
+    try:
+        ss_res = subprocess.run(
+            ["ss", "-t", "-a", "-n", "dport = :http or dport = :https"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+        if ss_res.stdout:
+            for line in ss_res.stdout.splitlines():
+                parts = line.split()
+                if len(parts) >= 5 and "ESTAB" in line:
+                    peer = parts[4]
+                    ip = peer.rsplit(":", 1)[0].strip("[]")
+                    # Try quick reverse DNS for peer IP
+                    try:
+                        host, _, _ = socket.gethostbyaddr(ip)
+                        if host and "." in host:
+                            domains.add(host.lower())
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+
+    # 2. Check local browser histories in home directories
+    import glob
+    import sqlite3
+    import shutil
+    import tempfile
+    from urllib.parse import urlparse
+
+    for base_home in ("/home", "/root"):
+        if not os.path.exists(base_home):
+            continue
+        patterns = [
+            f"{base_home}/*/.config/google-chrome/*/History",
+            f"{base_home}/*/.config/chromium/*/History",
+            f"{base_home}/*/.mozilla/firefox/*.default*/places.sqlite",
+            f"{base_home}/*/.mozilla/firefox/*.default-release*/places.sqlite",
+            f"{base_home}/*/.config/BraveSoftware/Brave-Browser/*/History",
+        ]
+        temp_dir = tempfile.gettempdir()
+        for pat in patterns:
+            for f in glob.glob(pat):
+                try:
+                    temp_f = os.path.join(temp_dir, f"hist_{os.getpid()}_{os.path.basename(f)}")
+                    shutil.copy2(f, temp_f)
+                    conn = sqlite3.connect(temp_f)
+                    cur = conn.cursor()
+                    if "places.sqlite" in f:
+                        cur.execute("SELECT url FROM moz_places ORDER BY last_visit_date DESC LIMIT 30;")
+                    else:
+                        cur.execute("SELECT url FROM urls ORDER BY last_visit_time DESC LIMIT 30;")
+                    for row in cur.fetchall():
+                        p = urlparse(row[0])
+                        netloc = (p.netloc or "").split(":")[0].strip().lower()
+                        if netloc and "." in netloc:
+                            domains.add(netloc)
+                    conn.close()
+                except Exception:
+                    pass
+                finally:
+                    if os.path.exists(temp_f):
+                        try:
+                            os.remove(temp_f)
+                        except Exception:
+                            pass
+
+    return list(domains)
+
+
+def send_web_activity(domains, network_info, server_url=None):
+    """Send collected browsing domains back to NETOPS server."""
+    if not domains:
+        return
+    base_url = (server_url or get_server_url()).rstrip("/")
+    if base_url.endswith("/endpoint-updates"):
+        base_url = base_url[:-len("/endpoint-updates")].rstrip("/")
+
+    api_url = f"{base_url}/web-activity/agent-sync"
+    payload = {
+        "ip_address": network_info.get("ip_address"),
+        "hostname": platform.node(),
+        "mac_address": network_info.get("mac_address"),
+        "domains": domains,
+        "protocol": "AGENT_CACHE",
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        api_url,
+        data=data,
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            pass
+    except Exception as exc:
+        print(f"Web activity sync note: {exc}")
+
+
 if __name__ == "__main__":
     REPORT_INTERVAL = int(os.environ.get("NETOPS_AGENT_INTERVAL", 15))
     run_once = "--once" in sys.argv
@@ -376,6 +481,15 @@ if __name__ == "__main__":
         print(f"\nSending update status to NETOPS ({target_url})...")
         response = send_update_status(information, target_url)
         print(response)
+
+        # Collect and sync active and cached browsing domains to NETOPS
+        try:
+            visited_domains = collect_linux_web_activity()
+            if visited_domains:
+                print(f"Syncing {len(visited_domains)} active/cached browsing domains to NETOPS...")
+                send_web_activity(visited_domains, information, target_url)
+        except Exception as w_err:
+            print(f"Browsing sync notice: {w_err}")
 
         # Process universal router-agnostic quarantine enforcement & patch commands
         try:

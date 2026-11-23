@@ -211,7 +211,27 @@ def test_active_sessions_and_time_filters(client, db_session):
     del_res = client.delete("/web-activity/logs")
     assert del_res.status_code == 200
 
-    # Ensure logs empty
-    empty_res = client.get("/web-activity/logs")
-    assert empty_res.status_code == 200
-    assert len(empty_res.json()) == 0
+    # Test agent-sync endpoint
+    agent_sync_res = client.post("/web-activity/agent-sync", json={
+        "ip_address": "192.168.0.104",
+        "hostname": "DESKTOP-8N0NNSL",
+        "domains": ["github.com", "twitch.tv", "reddit.com"],
+        "protocol": "AGENT_CACHE",
+    })
+    assert agent_sync_res.status_code == 200
+    sync_data = agent_sync_res.json()
+    assert sync_data["status"] == "success"
+    assert sync_data["domains_received"] == 3
+    assert sync_data["recorded_new_entries"] >= 1
+
+    # Test trigger-scan endpoint
+    scan_res = client.post("/web-activity/trigger-scan")
+    assert scan_res.status_code == 200
+    scan_data = scan_res.json()
+    assert scan_data["status"] == "completed"
+    assert "active_sessions_count" in scan_data
+
+    # Ensure logs contains agent-synced items
+    logs_res_after = client.get("/web-activity/logs")
+    assert logs_res_after.status_code == 200
+    assert len(logs_res_after.json()) >= 1

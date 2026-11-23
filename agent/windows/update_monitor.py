@@ -374,6 +374,111 @@ try {
         )
 
 
+def collect_windows_web_activity():
+    """
+    Collect recently visited domains from Windows DNS Client Cache
+    and recent Chrome / Edge browser histories.
+    """
+    domains = set()
+
+    # 1. Windows DNS Client Cache (captures all system, app & browser DNS queries)
+    try:
+        ps_cmd = (
+            "Get-DnsClientCache | "
+            "Where-Object { $_.Type -in 1, 28 } | "
+            "Select-Object -ExpandProperty Entry -Unique"
+        )
+        res = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+        if res.stdout:
+            for line in res.stdout.splitlines():
+                d = line.strip().lower().rstrip(".")
+                if (
+                    d
+                    and "." in d
+                    and not d.endswith(".local")
+                    and not d.endswith(".arpa")
+                    and not d.startswith("fe80")
+                ):
+                    domains.add(d)
+    except Exception:
+        pass
+
+    # 2. Chrome and Edge history extraction
+    local_app_data = os.environ.get("LOCALAPPDATA", "")
+    if local_app_data:
+        import sqlite3
+        import shutil
+        import tempfile
+        from urllib.parse import urlparse
+
+        history_paths = [
+            os.path.join(local_app_data, r"Google\Chrome\User Data\Default\History"),
+            os.path.join(local_app_data, r"Microsoft\Edge\User Data\Default\History"),
+            os.path.join(local_app_data, r"BraveSoftware\Brave-Browser\User Data\Default\History"),
+        ]
+
+        temp_dir = tempfile.gettempdir()
+        for h_path in history_paths:
+            if os.path.exists(h_path):
+                temp_hist = os.path.join(temp_dir, f"hist_{os.getpid()}_{time.time()}.sqlite")
+                try:
+                    shutil.copy2(h_path, temp_hist)
+                    conn = sqlite3.connect(temp_hist)
+                    cur = conn.cursor()
+                    cur.execute("SELECT url FROM urls ORDER BY last_visit_time DESC LIMIT 40;")
+                    for row in cur.fetchall():
+                        parsed = urlparse(row[0])
+                        netloc = (parsed.netloc or "").split(":")[0].strip().lower()
+                        if netloc and "." in netloc:
+                            domains.add(netloc)
+                    conn.close()
+                except Exception:
+                    pass
+                finally:
+                    if os.path.exists(temp_hist):
+                        try:
+                            os.remove(temp_hist)
+                        except Exception:
+                            pass
+
+    return list(domains)
+
+
+def send_web_activity(domains, network_info, server_url=None):
+    """Send collected browsing domains back to NETOPS server."""
+    if not domains:
+        return
+    base_url = (server_url or get_server_url()).rstrip("/")
+    if base_url.endswith("/endpoint-updates"):
+        base_url = base_url[:-len("/endpoint-updates")].rstrip("/")
+
+    api_url = f"{base_url}/web-activity/agent-sync"
+    payload = {
+        "ip_address": network_info.get("ip_address"),
+        "hostname": platform.node(),
+        "mac_address": network_info.get("mac_address"),
+        "domains": domains,
+        "protocol": "AGENT_CACHE",
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        api_url,
+        data=data,
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            pass
+    except Exception as exc:
+        print(f"Web activity sync note: {exc}")
+
+
 if __name__ == "__main__":
     REPORT_INTERVAL = 300  # 5 minutes
     run_once = "--once" in sys.argv
@@ -392,6 +497,15 @@ if __name__ == "__main__":
             print(f"\nSending update status to NETOPS ({target_url})...")
             response = send_update_status(information, target_url)
             print(response)
+
+            # Collect and sync active and cached browsing domains to NETOPS
+            try:
+                visited_domains = collect_windows_web_activity()
+                if visited_domains:
+                    print(f"Syncing {len(visited_domains)} active/cached browsing domains to NETOPS...")
+                    send_web_activity(visited_domains, information, target_url)
+            except Exception as w_err:
+                print(f"Browsing sync notice: {w_err}")
 
             # Process central remediation instructions & universal quarantine
             try:

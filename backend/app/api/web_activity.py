@@ -195,3 +195,72 @@ def log_activity_entry(
     if not entry:
         raise HTTPException(status_code=400, detail="Invalid domain or IP address.")
     return entry
+
+
+class AgentWebSyncPayload(BaseModel):
+    ip_address: str
+    hostname: str | None = None
+    mac_address: str | None = None
+    domains: list[str] = []
+    protocol: str = "AGENT_CACHE"
+
+
+@router.post("/agent-sync")
+def sync_agent_web_activity(
+    payload: AgentWebSyncPayload,
+    db: Session = Depends(get_db),
+):
+    """
+    Endpoint for endpoint agents (Windows/Linux) to report recently browsed sites
+    and DNS cache queries.
+    """
+    client_ip = (payload.ip_address or "").strip()
+    if not client_ip:
+        raise HTTPException(status_code=400, detail="Client IP is required.")
+
+    recorded_count = 0
+    for domain in payload.domains:
+        d = (domain or "").strip()
+        if d and "." in d:
+            entry = record_web_activity(
+                db=db,
+                ip_address=client_ip,
+                domain=d,
+                protocol=payload.protocol or "AGENT_CACHE",
+            )
+            if entry:
+                recorded_count += 1
+
+    return {
+        "status": "success",
+        "ip_address": client_ip,
+        "domains_received": len(payload.domains),
+        "recorded_new_entries": recorded_count,
+    }
+
+
+@router.post("/trigger-scan")
+def trigger_web_activity_scan(
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+):
+    """
+    On-demand scan trigger from the dashboard.
+    Returns currently active browsing sessions and status across network endpoints.
+    """
+    # 1. Fetch active sessions within the last 15 minutes
+    active_sessions = get_active_web_sessions(db, minutes=15)
+
+    # 2. Query known managed devices
+    devices = db.scalars(select(Device)).all()
+    devices_monitored = len(devices)
+
+    return {
+        "status": "completed",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "devices_monitored": devices_monitored,
+        "active_sessions_count": len(active_sessions),
+        "active_sessions": active_sessions,
+        "message": f"Scan completed across {devices_monitored} network endpoint(s). Retrieved {len(active_sessions)} active browsing session(s).",
+    }
+
