@@ -23,6 +23,7 @@ export default function WebActivityPage({
   const [lastRefreshedAt, setLastRefreshedAt] = useState(new Date());
   const [clearingHistory, setClearingHistory] = useState(false);
   const [scanning, setScanning] = useState(false);
+  const [viewMode, setViewMode] = useState("grouped"); // 'grouped' (one card per machine) or 'flat'
 
   // Scan all connected endpoints for browsing and DNS activity
   const handleScanWebActivity = async () => {
@@ -376,103 +377,284 @@ export default function WebActivityPage({
         </div>
       </div>
 
-      {/* Live Active Connections Card (The user's direct request) */}
-      <div style={{ background: "#1e293b", border: "1px solid #334155", borderRadius: "8px", padding: "16px", marginBottom: "20px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px", flexWrap: "wrap", gap: "8px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <span style={{ display: "inline-block", width: "10px", height: "10px", borderRadius: "50%", background: "#10b981" }} className="live-dot" />
-            <span style={{ fontSize: "14px", fontWeight: "700", color: "#f8fafc" }}>
-              🟢 Currently Active Devices & Sites (Live Now)
-            </span>
-            <span style={{ background: "rgba(16, 185, 129, 0.2)", color: "#34d399", border: "1px solid rgba(16, 185, 129, 0.4)", borderRadius: "12px", padding: "2px 8px", fontSize: "11px", fontWeight: "700" }}>
-              {activeSessions.length} active connection{activeSessions.length === 1 ? "" : "s"}
-            </span>
-          </div>
+      {/* Live Active Connections Card */}
+      {(() => {
+        // Group active sessions by unique device IP / hostname
+        const groupedDevices = activeSessions.reduce((acc, s) => {
+          const key = s.ip_address || s.hostname || "unknown";
+          if (!acc[key]) {
+            acc[key] = {
+              ip_address: s.ip_address,
+              hostname: s.hostname || s.ip_address,
+              mac_address: s.mac_address,
+              device_id: s.device_id,
+              status: s.status,
+              minSecondsAgo: s.seconds_ago,
+              hasViolation: s.is_violation,
+              sites: [],
+            };
+          }
+          if (s.seconds_ago < acc[key].minSecondsAgo) {
+            acc[key].minSecondsAgo = s.seconds_ago;
+            acc[key].status = s.status;
+          }
+          if (s.is_violation) {
+            acc[key].hasViolation = true;
+          }
+          acc[key].sites.push(s);
+          return acc;
+        }, {});
 
-          <div style={{ fontSize: "11px", color: "#94a3b8" }}>
-            Auto-refreshes every {autoRefreshSecs}s • Devices disappear when user closes the site
-          </div>
-        </div>
+        const deviceList = Object.values(groupedDevices).sort((a, b) => a.minSecondsAgo - b.minSecondsAgo);
 
-        {activeSessions.length === 0 ? (
-          <div style={{ padding: "20px", textAlign: "center", background: "#0f172a", borderRadius: "6px", color: "#64748b", fontSize: "12px" }}>
-            <span>⚪ No devices actively streaming or browsing in the last 5 minutes.</span>
-            <div style={{ marginTop: "4px", fontSize: "11px", color: "#475569" }}>
-              When a laptop streams radio, opens Facebook, or visits a website, it will show up here instantly with its live status.
-            </div>
-          </div>
-        ) : (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "12px" }}>
-            {activeSessions.map((s, idx) => {
-              const badge = getCategoryBadge(s.category);
-              return (
-                <div
-                  key={`active-session-${idx}`}
-                  style={{
-                    background: "#0f172a",
-                    border: s.is_violation ? "1px solid rgba(239, 68, 68, 0.5)" : "1px solid #334155",
-                    borderRadius: "6px",
-                    padding: "12px",
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "8px",
-                  }}
-                >
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <div style={{ fontWeight: "700", color: "#f8fafc", fontSize: "13px" }}>
-                      {s.hostname || s.ip_address}
-                    </div>
-                    <span
-                      style={{
-                        fontSize: "10px",
-                        fontWeight: "700",
-                        padding: "2px 6px",
-                        borderRadius: "4px",
-                        background: s.status === "active" ? "rgba(16, 185, 129, 0.2)" : "rgba(245, 158, 11, 0.2)",
-                        color: s.status === "active" ? "#34d399" : "#fbbf24",
-                        border: s.status === "active" ? "1px solid #10b981" : "1px solid #f59e0b",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "4px",
-                      }}
-                    >
-                      <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: s.status === "active" ? "#10b981" : "#f59e0b" }} className={s.status === "active" ? "live-dot" : ""} />
-                      {s.seconds_ago < 60 ? `${s.seconds_ago}s ago` : `${Math.floor(s.seconds_ago / 60)}m ago`}
-                    </span>
-                  </div>
+        return (
+          <div style={{ background: "#1e293b", border: "1px solid #334155", borderRadius: "8px", padding: "16px", marginBottom: "20px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px", flexWrap: "wrap", gap: "10px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                <span style={{ display: "inline-block", width: "10px", height: "10px", borderRadius: "50%", background: "#10b981" }} className="live-dot" />
+                <span style={{ fontSize: "14px", fontWeight: "700", color: "#f8fafc" }}>
+                  🟢 Active Devices & Browsing Activity (Live Now)
+                </span>
+                <span style={{ background: "rgba(16, 185, 129, 0.2)", color: "#34d399", border: "1px solid rgba(16, 185, 129, 0.4)", borderRadius: "12px", padding: "2px 8px", fontSize: "11px", fontWeight: "700" }}>
+                  {deviceList.length} device{deviceList.length === 1 ? "" : "s"} • {activeSessions.length} active site{activeSessions.length === 1 ? "" : "s"}
+                </span>
+              </div>
 
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "12px" }}>
-                    <span style={{ fontFamily: "monospace", color: "#94a3b8" }}>{s.ip_address}</span>
-                    <span
-                      style={{
-                        fontSize: "10px",
-                        fontWeight: "700",
-                        padding: "1px 6px",
-                        borderRadius: "4px",
-                        background: badge.bg,
-                        color: badge.color,
-                        border: `1px solid ${badge.border}`,
-                      }}
-                    >
-                      {badge.label}
-                    </span>
-                  </div>
-
-                  <div style={{ fontSize: "13px", fontWeight: "700", color: "#60a5fa", fontFamily: "monospace", wordBreak: "break-all" }}>
-                    {s.domain}
-                  </div>
-
-                  {s.is_violation && (
-                    <div style={{ fontSize: "11px", color: "#f87171", background: "rgba(239, 68, 68, 0.1)", padding: "4px 8px", borderRadius: "4px", border: "1px solid rgba(239, 68, 68, 0.3)" }}>
-                      ⚠️ Prohibited activity during working hours
-                    </div>
-                  )}
+              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                {/* View toggle */}
+                <div style={{ display: "flex", background: "#0f172a", padding: "2px", borderRadius: "6px", border: "1px solid #334155" }}>
+                  <button
+                    type="button"
+                    onClick={() => setViewMode("grouped")}
+                    style={{
+                      background: viewMode === "grouped" ? "#2563eb" : "transparent",
+                      color: viewMode === "grouped" ? "#ffffff" : "#94a3b8",
+                      border: "none",
+                      borderRadius: "4px",
+                      padding: "4px 10px",
+                      fontSize: "11px",
+                      cursor: "pointer",
+                      fontWeight: viewMode === "grouped" ? "700" : "500",
+                    }}
+                    title="Show one consolidated card per machine with all its browsed websites"
+                  >
+                    💻 One Card per Machine
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setViewMode("flat")}
+                    style={{
+                      background: viewMode === "flat" ? "#2563eb" : "transparent",
+                      color: viewMode === "flat" ? "#ffffff" : "#94a3b8",
+                      border: "none",
+                      borderRadius: "4px",
+                      padding: "4px 10px",
+                      fontSize: "11px",
+                      cursor: "pointer",
+                      fontWeight: viewMode === "flat" ? "700" : "500",
+                    }}
+                    title="Show repeating individual site tiles"
+                  >
+                    🌐 Individual Sites
+                  </button>
                 </div>
-              );
-            })}
+
+                <div style={{ fontSize: "11px", color: "#94a3b8" }}>
+                  Auto-refreshes every {autoRefreshSecs}s
+                </div>
+              </div>
+            </div>
+
+            {deviceList.length === 0 ? (
+              <div style={{ padding: "20px", textAlign: "center", background: "#0f172a", borderRadius: "6px", color: "#64748b", fontSize: "12px" }}>
+                <span>⚪ No devices actively streaming or browsing in the last 5 minutes.</span>
+                <div style={{ marginTop: "4px", fontSize: "11px", color: "#475569" }}>
+                  When a laptop streams radio, opens YouTube, or visits a website, it will show up here instantly with its live status.
+                </div>
+              </div>
+            ) : viewMode === "grouped" ? (
+              /* GROUPED VIEW: Exactly 1 card per machine showing all its sites */
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(360px, 1fr))", gap: "14px" }}>
+                {deviceList.map((dev, dIdx) => (
+                  <div
+                    key={`device-card-${dIdx}`}
+                    style={{
+                      background: "#0f172a",
+                      border: dev.hasViolation ? "1px solid rgba(239, 68, 68, 0.6)" : "1px solid #334155",
+                      borderRadius: "8px",
+                      padding: "14px",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "10px",
+                      boxShadow: dev.hasViolation ? "0 0 10px rgba(239, 68, 68, 0.15)" : "none",
+                    }}
+                  >
+                    {/* Machine Header */}
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", borderBottom: "1px solid #1e293b", paddingBottom: "10px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                        <span style={{ fontSize: "22px" }}>💻</span>
+                        <div>
+                          <div style={{ fontWeight: "700", color: "#f8fafc", fontSize: "14px" }}>
+                            {dev.hostname}
+                          </div>
+                          <div style={{ fontSize: "11px", color: "#94a3b8", fontFamily: "monospace" }}>
+                            {dev.ip_address} {dev.mac_address ? `• ${dev.mac_address}` : ""}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "4px" }}>
+                        <span
+                          style={{
+                            fontSize: "10px",
+                            fontWeight: "700",
+                            padding: "2px 8px",
+                            borderRadius: "4px",
+                            background: dev.status === "active" ? "rgba(16, 185, 129, 0.2)" : "rgba(245, 158, 11, 0.2)",
+                            color: dev.status === "active" ? "#34d399" : "#fbbf24",
+                            border: dev.status === "active" ? "1px solid #10b981" : "1px solid #f59e0b",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "4px",
+                          }}
+                        >
+                          <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: dev.status === "active" ? "#10b981" : "#f59e0b" }} className={dev.status === "active" ? "live-dot" : ""} />
+                          {dev.minSecondsAgo < 60 ? `${dev.minSecondsAgo}s ago` : `${Math.floor(dev.minSecondsAgo / 60)}m ago`}
+                        </span>
+
+                        <span style={{ fontSize: "10px", color: "#94a3b8", background: "#1e293b", padding: "1px 6px", borderRadius: "4px" }}>
+                          {dev.sites.length} site{dev.sites.length === 1 ? "" : "s"} browsed
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Websites Browsed by this Machine */}
+                    <div style={{ display: "flex", flexDirection: "column", gap: "6px", maxHeight: "240px", overflowY: "auto", paddingRight: "4px" }}>
+                      {dev.sites.map((site, sIdx) => {
+                        const badge = getCategoryBadge(site.category);
+                        return (
+                          <div
+                            key={`site-${sIdx}`}
+                            style={{
+                              background: site.is_violation ? "rgba(239, 68, 68, 0.08)" : "#1e293b",
+                              border: site.is_violation ? "1px solid rgba(239, 68, 68, 0.3)" : "1px solid rgba(51, 65, 85, 0.5)",
+                              borderRadius: "6px",
+                              padding: "6px 10px",
+                              display: "flex",
+                              justifyContent: "space-between",
+                              alignItems: "center",
+                              gap: "8px",
+                            }}
+                          >
+                            <div style={{ display: "flex", alignItems: "center", gap: "6px", overflow: "hidden" }}>
+                              <span style={{ fontWeight: "600", color: "#60a5fa", fontFamily: "monospace", fontSize: "12px", textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
+                                {site.domain}
+                              </span>
+                              {site.is_violation && (
+                                <span style={{ fontSize: "10px", color: "#f87171", fontWeight: "700" }}>⚠️</span>
+                              )}
+                            </div>
+
+                            <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 }}>
+                              <span
+                                style={{
+                                  fontSize: "9px",
+                                  fontWeight: "700",
+                                  padding: "1px 6px",
+                                  borderRadius: "4px",
+                                  background: badge.bg,
+                                  color: badge.color,
+                                  border: `1px solid ${badge.border}`,
+                                }}
+                              >
+                                {badge.label}
+                              </span>
+                              <span style={{ fontSize: "10px", color: "#64748b" }}>
+                                {site.seconds_ago < 60 ? `${site.seconds_ago}s ago` : `${Math.floor(site.seconds_ago / 60)}m ago`}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              /* FLAT VIEW: Repeating individual site tiles */
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "12px" }}>
+                {activeSessions.map((s, idx) => {
+                  const badge = getCategoryBadge(s.category);
+                  return (
+                    <div
+                      key={`active-session-${idx}`}
+                      style={{
+                        background: "#0f172a",
+                        border: s.is_violation ? "1px solid rgba(239, 68, 68, 0.5)" : "1px solid #334155",
+                        borderRadius: "6px",
+                        padding: "12px",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "8px",
+                      }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <div style={{ fontWeight: "700", color: "#f8fafc", fontSize: "13px" }}>
+                          {s.hostname || s.ip_address}
+                        </div>
+                        <span
+                          style={{
+                            fontSize: "10px",
+                            fontWeight: "700",
+                            padding: "2px 6px",
+                            borderRadius: "4px",
+                            background: s.status === "active" ? "rgba(16, 185, 129, 0.2)" : "rgba(245, 158, 11, 0.2)",
+                            color: s.status === "active" ? "#34d399" : "#fbbf24",
+                            border: s.status === "active" ? "1px solid #10b981" : "1px solid #f59e0b",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "4px",
+                          }}
+                        >
+                          <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: s.status === "active" ? "#10b981" : "#f59e0b" }} className={s.status === "active" ? "live-dot" : ""} />
+                          {s.seconds_ago < 60 ? `${s.seconds_ago}s ago` : `${Math.floor(s.seconds_ago / 60)}m ago`}
+                        </span>
+                      </div>
+
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "12px" }}>
+                        <span style={{ fontFamily: "monospace", color: "#94a3b8" }}>{s.ip_address}</span>
+                        <span
+                          style={{
+                            fontSize: "10px",
+                            fontWeight: "700",
+                            padding: "1px 6px",
+                            borderRadius: "4px",
+                            background: badge.bg,
+                            color: badge.color,
+                            border: `1px solid ${badge.border}`,
+                          }}
+                        >
+                          {badge.label}
+                        </span>
+                      </div>
+
+                      <div style={{ fontSize: "13px", fontWeight: "700", color: "#60a5fa", fontFamily: "monospace", wordBreak: "break-all" }}>
+                        {s.domain}
+                      </div>
+
+                      {s.is_violation && (
+                        <div style={{ fontSize: "11px", color: "#f87171", background: "rgba(239, 68, 68, 0.1)", padding: "4px 8px", borderRadius: "4px", border: "1px solid rgba(239, 68, 68, 0.3)" }}>
+                          ⚠️ Prohibited activity during working hours
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
-        )}
-      </div>
+        );
+      })()}
 
       {/* Metrics Summary Cards */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: "14px", marginBottom: "22px" }}>
