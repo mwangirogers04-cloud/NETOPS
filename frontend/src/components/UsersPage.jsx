@@ -41,9 +41,7 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
   const isSuperAdmin =
     currentUser?.role === "super_admin" ||
     currentUser?.role === "developer" ||
-    currentUser?.username?.toLowerCase() === "developer" ||
-    currentUser?.username?.toLowerCase() === "rogers" ||
-    currentUser?.username?.toLowerCase() === "rogers mwangi";
+    currentUser?.username?.toLowerCase() === "developer";
   const [formState, setFormState] = useState({
     username: "",
     email: "",

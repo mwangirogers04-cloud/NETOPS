@@ -6,9 +6,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
   const isSuperAdmin =
     currentUser?.role === "super_admin" ||
     currentUser?.role === "developer" ||
-    currentUser?.username?.toLowerCase() === "developer" ||
-    currentUser?.username?.toLowerCase() === "rogers" ||
-    currentUser?.username?.toLowerCase() === "rogers mwangi";
+    currentUser?.username?.toLowerCase() === "developer";
   const [activeTab, setActiveTab] = useState("vlans"); // "vlans" | "ports" | "switch_settings"
 
   // Data states

@@ -165,7 +165,7 @@ def update_access_schedule(
 def delete_access_schedule(
     schedule_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_super_admin),
 ):
     schedule = db.get(AccessSchedule, schedule_id)
 

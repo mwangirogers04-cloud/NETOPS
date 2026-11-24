@@ -297,10 +297,7 @@ def get_endpoint_updates(
     is_admin = bool(
         current_user is None
         or urole in ("admin", "super_admin", "developer")
-        or "developer" in urole
-        or uname in ("developer", "admin", "rogers", "rogers mwangi")
-        or "developer" in uname
-        or "developer" in email
+        or uname in ("developer", "admin")
     )
 
     # Scope device inventory: Developers and Admins see all machines; standard users see their site/account

@@ -68,13 +68,9 @@ function App() {
   const [activePage, setActivePage] = useState("dashboard");
 
   const isDeveloper =
-    currentUser?.username?.toLowerCase() === "developer" ||
-    currentUser?.username?.toLowerCase() === "rogers" ||
-    currentUser?.username?.toLowerCase() === "rogers mwangi" ||
-    currentUser?.role?.toLowerCase() === "developer" ||
     currentUser?.role?.toLowerCase() === "super_admin" ||
-    (currentUser?.role && currentUser.role.toLowerCase().includes("dev")) ||
-    currentUser?.can_manage_updates === true;
+    currentUser?.role?.toLowerCase() === "developer" ||
+    currentUser?.username?.toLowerCase() === "developer";
   const isSuperAdmin =
     currentUser?.role === "super_admin" ||
     currentUser?.role === "developer" ||
