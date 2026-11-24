@@ -29,6 +29,13 @@ PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
+env_file = os.path.join(PROJECT_ROOT, ".env")
+if os.path.exists(env_file):
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(env_file)
+    except Exception:
+        pass
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 
 from backend.app.services.discovery import (
@@ -186,6 +193,32 @@ _synced_router_quarantined_ips: set[str] = set()
 _synced_router_allowed_ips: set[str] = set()
 _enforcement_initialized: bool = False
 _handled_reboot_job_ids: set[int] = set()
+
+
+def _get_local_db_devices() -> dict[str, dict]:
+    """Retrieve device approval and authorization status from local database."""
+    local_devs = {}
+    try:
+        from backend.app.database import SessionLocal
+        from backend.app.models.device import Device
+        from sqlalchemy import select
+        with SessionLocal() as db:
+            devs = db.scalars(select(Device)).all()
+            for d in devs:
+                mac = (d.mac_address or "").replace(":", "").replace("-", "").upper()
+                if mac:
+                    local_devs[mac] = {
+                        "id": d.id,
+                        "ip_address": d.ip_address,
+                        "mac_address": d.mac_address,
+                        "approval_status": d.approval_status,
+                        "internet_access_authorized": d.internet_access_authorized,
+                        "enforcement_status": d.enforcement_status,
+                        "vlan_id": d.vlan_id,
+                    }
+    except Exception as exc:
+        logger.debug("Local DB query note in cloud_sync: %s", exc)
+    return local_devs
 
 
 def _report_job_status_to_cloud(
@@ -412,15 +445,23 @@ def sync_to_cloud(server_url: str, devices: list, token: str | None = None, netw
                         logger.info("[🔓 HOST RESTORE] Central console allowed this host. Releasing host firewall...")
                         host_firewall.release_host()
 
+            # Reconcile local DB states so locally allowed devices are never re-quarantined
+            local_db_devs = _get_local_db_devices()
+            locally_allowed_ips = set()
+            for ld in local_db_devs.values():
+                if ld.get("approval_status") == "approved" and ld.get("internet_access_authorized") is True:
+                    if ld.get("ip_address"):
+                        locally_allowed_ips.add(ld["ip_address"])
+
             # 1. Immediate Layer-2 Restoration for allowed devices (unblock + authentic GARP restoration)
             for ip, dev in current_allowed_map.items():
-                if ip in current_quarantined_ips:
+                if ip in current_quarantined_ips and ip not in locally_allowed_ips:
                     continue
                 mac = dev.get("mac_address")
                 dev_iface = dev.get("network_interface") or dev.get("interface")
                 if ip in _locally_quarantined_ips or is_target_quarantined(ip, mac):
                     try:
-                        restore_device_l2(ip, mac, burst=5, interface=dev_iface)
+                        restore_device_l2(ip, mac, burst=15, interface="all")
                         _locally_quarantined_ips.discard(ip)
                         logger.info(f"[⚡ RESTORED] Rapid ARP unpoisoning & unblocking for {ip} ({mac})")
                     except Exception as r_exc:
@@ -429,8 +470,29 @@ def sync_to_cloud(server_url: str, devices: list, token: str | None = None, netw
             # 2. Immediate Layer-2 Quarantine for quarantined devices (block + continuous poison)
             for ip, dev in current_quarantined_map.items():
                 mac = dev.get("mac_address")
+                mac_clean = (mac or "").replace(":", "").replace("-", "").upper()
                 if is_protected(ip, mac):
                     continue
+
+                # If device is approved & authorized in local DB, do not re-quarantine it!
+                is_local_approved = (
+                    ip in locally_allowed_ips
+                    or (
+                        mac_clean in local_db_devs
+                        and local_db_devs[mac_clean].get("approval_status") == "approved"
+                        and local_db_devs[mac_clean].get("internet_access_authorized") is True
+                    )
+                )
+                if is_local_approved:
+                    if ip in _locally_quarantined_ips or is_target_quarantined(ip, mac):
+                        try:
+                            restore_device_l2(ip, mac, burst=15, interface="all")
+                            _locally_quarantined_ips.discard(ip)
+                            logger.info(f"[⚡ LOCAL-ALLOWED] Device {ip} ({mac}) is approved locally; restored L2 access.")
+                        except Exception:
+                            pass
+                    continue
+
                 dev_iface = dev.get("network_interface") or dev.get("interface")
                 if ip not in _locally_quarantined_ips or not is_target_quarantined(ip, mac):
                     try:
@@ -575,6 +637,20 @@ def run_sync_loop(server_url: str, interval: float = 2.0, token: str | None = No
                             mac_map[mac]["status"] = "online"
                             mac_map[mac]["ip_address"] = qd.get("ip_address") or mac_map[mac].get("ip_address")
                 devs_to_send = list(mac_map.values())
+                # Enrich with local database approval / authorization states
+                local_db_devs = _get_local_db_devices()
+                for dev in devs_to_send:
+                    m_clean = (dev.get("mac_address") or "").replace(":", "").replace("-", "").upper()
+                    if m_clean in local_db_devs:
+                        ld = local_db_devs[m_clean]
+                        if ld.get("approval_status"):
+                            dev["approval_status"] = ld["approval_status"]
+                        if ld.get("internet_access_authorized") is not None:
+                            dev["internet_access_authorized"] = ld["internet_access_authorized"]
+                        if ld.get("enforcement_status"):
+                            dev["enforcement_status"] = ld["enforcement_status"]
+                        if ld.get("vlan_id") is not None:
+                            dev["vlan_id"] = ld["vlan_id"]
 
             sync_to_cloud(server_url, devs_to_send, token, network_name=network_name)
         except Exception as exc:

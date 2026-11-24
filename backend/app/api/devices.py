@@ -580,17 +580,6 @@ def approve_device(
     if not device.status:
         device.status = "online"
 
-    if device.ip_address:
-        try:
-            dev_iface = getattr(device, "network_interface", None)
-            quarantine_device_l2(
-                device.ip_address,
-                device.mac_address,
-                burst=5,
-                interface=dev_iface if isinstance(dev_iface, str) else None,
-            )
-        except Exception:
-            pass
     db.commit()
     db.refresh(device)
 
@@ -736,11 +725,11 @@ def allow_device(
 
     if device.ip_address:
         try:
-            dev_iface = getattr(device, "network_interface", None)
             restore_device_l2(
                 device.ip_address,
                 device.mac_address,
-                interface=dev_iface if isinstance(dev_iface, str) else None,
+                burst=15,
+                interface="all",
             )
         except Exception:
             pass

@@ -835,6 +835,9 @@ function App() {
   const isPhoneDevice = (device) => {
     if (!device) return false;
     const t = (device.device_type || "").toLowerCase().trim();
+    if (t === "access_point" || t === "router" || t === "switch" || t === "printer" || t === "camera" || t === "server") {
+      return false;
+    }
     const h = (device.hostname || "").toLowerCase().trim();
     const os = (device.operating_system || "").toLowerCase().trim();
     const v = (device.vendor || "").toLowerCase().trim();
@@ -852,7 +855,7 @@ function App() {
       h.includes("vivo") ||
       h.includes("pixel")
     ) return true;
-    if (os.includes("ios") || os.includes("android") || os.includes("mobile")) return true;
+    if (os === "ios" || os === "android" || os === "mobile os" || (os.includes("mobile") && !os.includes("embedded"))) return true;
     if (v.includes("mobile phone") || v.includes("smartphone")) return true;
     return false;
   };
@@ -4175,6 +4178,32 @@ const DevicesPage = () => {
                                   {device.operating_system} {device.os_version || ""}
                                 </div>
                               )}
+                            </div>
+                          );
+                        }
+
+                        if (device.device_type === "access_point" || device.device_type === "router" || device.device_type === "switch") {
+                          return (
+                            <div>
+                              <span
+                                className="status-badge allowed"
+                                style={{
+                                  fontSize: "11px",
+                                  padding: "3px 8px",
+                                  background: "rgba(16, 185, 129, 0.12)",
+                                  color: "#065f46",
+                                  border: "1px solid rgba(16, 185, 129, 0.3)",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "4px",
+                                }}
+                                title="Network appliance running embedded firmware on VLAN 60."
+                              >
+                                📡 {device.device_type === "access_point" ? "AP FIRMWARE (VLAN 60)" : "ROUTER FIRMWARE"}
+                              </span>
+                              <div className="device-secondary" style={{ fontSize: "11px", marginTop: "3px" }}>
+                                {device.vendor || "Network Device"} (Up to Date)
+                              </div>
                             </div>
                           );
                         }
@@ -10994,8 +11023,18 @@ return (
     if (!currentUser) return;
     const loadDashboardEndpointUpdates = async () => {
       try {
+        const net = selectedNetwork;
+        const params = new URLSearchParams();
+        if (net && net !== "all") {
+          params.set("network_name", net);
+        }
+        if (net === "current" && detectedSubnet) {
+          params.set("subnet", detectedSubnet);
+        }
+        params.set("online_only", "true");
+
         const response = await fetch(
-          `${API_URL}/endpoint-updates/`,
+          `${API_URL}/endpoint-updates/?${params.toString()}`,
           { headers: { ...getAuthHeaders() } }
         );
 
@@ -11033,7 +11072,7 @@ return (
       window.removeEventListener("netops:refresh", onSyncTrigger);
       window.removeEventListener("focus", onSyncTrigger);
     };
-  }, [currentUser]);
+  }, [currentUser, selectedNetwork, detectedSubnet]);
 
 const Dashboard = () => {
 
@@ -11042,17 +11081,25 @@ const Dashboard = () => {
     return new Date(d.endsWith("Z") || d.includes("+") ? d : d + "Z");
   };
 
-  const dashboardUpdatesNeeded = dashboardEndpointUpdates.filter(
+  const onlineDashboardUpdates = dashboardEndpointUpdates.filter((endpoint) => {
+    return (
+      endpoint.device_status === "online" ||
+      endpoint.is_online === true ||
+      endpoint.status === "online"
+    );
+  });
+
+  const dashboardUpdatesNeeded = onlineDashboardUpdates.filter(
     (endpoint) =>
       (endpoint.update_status === "updates_available" || (endpoint.pending_updates && endpoint.pending_updates > 0)) &&
       endpoint.pending_updates !== 0
   ).length;
 
-  const dashboardUpToDate = dashboardEndpointUpdates.filter(
+  const dashboardUpToDate = onlineDashboardUpdates.filter(
     (endpoint) => endpoint.update_status === "up_to_date" || endpoint.pending_updates === 0
   ).length;
 
-  const dashboardPendingUpdates = dashboardEndpointUpdates.reduce(
+  const dashboardPendingUpdates = onlineDashboardUpdates.reduce(
     (total, endpoint) => total + (endpoint.pending_updates || 0),
     0
   );
@@ -11898,14 +11945,14 @@ const Dashboard = () => {
                 <tr>
                   <td colSpan="8">Loading endpoint reports...</td>
                 </tr>
-              ) : dashboardEndpointUpdates.length === 0 ? (
+              ) : onlineDashboardUpdates.length === 0 ? (
                 <tr>
                   <td colSpan="8">
                     No endpoint update reports available.
                   </td>
                 </tr>
               ) : (
-                dashboardEndpointUpdates.map((endpoint) => {
+                onlineDashboardUpdates.map((endpoint) => {
                   const checkedAt = parseEndpointDate(endpoint.last_checked);
 
                   const ageMinutes = checkedAt
@@ -12036,6 +12083,22 @@ const Dashboard = () => {
                             title="Mobile phones (iOS/Android) cannot receive remote network patch pushes. Updates are frozen and managed directly on the phone."
                           >
                             🔒 Frozen (Phone OTA)
+                          </span>
+                        ) : (endpoint.device_type === "access_point" || endpoint.device_type === "router" || endpoint.device_type === "switch") ? (
+                          <span
+                            className="status-badge"
+                            style={{
+                              background: "rgba(16, 185, 129, 0.12)",
+                              color: "#065f46",
+                              fontSize: "11px",
+                              border: "1px solid rgba(16, 185, 129, 0.3)",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "4px",
+                            }}
+                            title="Access Point running firmware on VLAN 60. Firmware is managed on the AP web console."
+                          >
+                            📡 AP Firmware (VLAN 60)
                           </span>
                         ) : isSuperAdmin ? (
                           <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
@@ -13243,6 +13306,22 @@ const EndpointUpdatesPage = () => {
                             title="Mobile phones (iOS/Android) cannot receive remote network patch pushes. Updates are frozen and managed directly on the phone."
                           >
                             🔒 Frozen (Phone OTA)
+                          </span>
+                        ) : (endpoint.device_type === "access_point" || endpoint.device_type === "router" || endpoint.device_type === "switch") ? (
+                          <span
+                            className="status-badge"
+                            style={{
+                              background: "rgba(16, 185, 129, 0.12)",
+                              color: "#065f46",
+                              fontSize: "11px",
+                              border: "1px solid rgba(16, 185, 129, 0.3)",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "4px",
+                            }}
+                            title="Access Point running firmware on VLAN 60. Firmware is managed on the AP web console."
+                          >
+                            📡 AP Firmware (VLAN 60)
                           </span>
                         ) : isSuperAdmin ? (
                           <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>

@@ -59,6 +59,10 @@ class AgentDeviceItem(BaseModel):
     interface: str | None = None
     network_name: str | None = None
     status: str | None = None
+    approval_status: str | None = None
+    internet_access_authorized: bool | None = None
+    enforcement_status: str | None = None
+    vlan_id: int | None = None
 
 
 class AgentSyncRequest(BaseModel):
@@ -431,6 +435,28 @@ def sync_agent_devices(
             network_name=site_name,
             mark_missing_offline=False,
         )
+
+        # Synchronize local authorization/approval states reported by on-prem agent
+        for rd in raw_devices:
+            mac_clean = (rd.get("mac_address") or "").replace(":", "").replace("-", "").upper()
+            if not mac_clean:
+                continue
+            if rd.get("approval_status") == "approved" and rd.get("internet_access_authorized") is True:
+                dev_obj = db.scalar(select(Device).where(func.upper(Device.mac_address) == mac_clean))
+                if dev_obj:
+                    dev_obj.approval_status = "approved"
+                    dev_obj.internet_access_authorized = True
+                    dev_obj.enforcement_status = "allowed"
+                    if dev_obj.vlan_id == 90 or not dev_obj.vlan_id:
+                        from ..services.vlan_policy import get_vlan_for_device_type
+                        dev_obj.vlan_id = get_vlan_for_device_type(dev_obj.device_type) or 20
+                    dev_obj.status = "online"
+            elif rd.get("enforcement_status") == "quarantined" and rd.get("internet_access_authorized") is False:
+                dev_obj = db.scalar(select(Device).where(func.upper(Device.mac_address) == mac_clean))
+                if dev_obj and dev_obj.approval_status != "approved":
+                    dev_obj.internet_access_authorized = False
+                    dev_obj.enforcement_status = "quarantined"
+
         db.commit()
 
         net_match = [func.lower(Device.network_name) == site_name.lower()]

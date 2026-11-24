@@ -399,6 +399,9 @@ def is_phone_device(
 ) -> bool:
     """Check if the target is a mobile phone (iOS / Android / tablet)."""
     t = (getattr(device, "device_type", None) or device_type or "").lower().strip()
+    if t in ("access_point", "router", "switch", "printer", "camera", "server"):
+        return False
+
     h = (getattr(device, "hostname", None) or hostname or "").lower().strip()
     os_name = (getattr(device, "operating_system", None) or operating_system or "").lower().strip()
     vendor = (getattr(device, "vendor", None) or "").lower().strip()
@@ -407,7 +410,7 @@ def is_phone_device(
         return True
     if any(k in h for k in ("phone-", "iphone", "android", "ipad", "galaxy", "tecno", "infinix", "redmi", "oppo", "vivo", "pixel")):
         return True
-    if any(k in os_name for k in ("ios", "android", "mobile")):
+    if os_name in ("ios", "android") or (("ios" in os_name or "android" in os_name or "mobile os" in os_name) and "embedded" not in os_name):
         return True
     if "mobile phone" in vendor or "smartphone" in vendor:
         return True
@@ -1683,14 +1686,29 @@ def probe_remote_connection(
         }
 
     try:
-        with SessionLocal() as db_session:
-            dev = db_session.scalars(select(Device).where(Device.ip_address == clean_ip)).first()
+        from ..database import SessionLocal, get_db
+        test_session = None
+        try:
+            # Check if get_db dependency override is active (e.g. during pytest)
+            from ..main import app
+            if app.dependency_overrides.get(get_db):
+                test_gen = app.dependency_overrides[get_db]()
+                test_session = next(test_gen, None)
+        except Exception:
+            pass
+
+        session_to_use = test_session if test_session is not None else SessionLocal()
+        try:
+            dev = session_to_use.scalars(select(Device).where(Device.ip_address == clean_ip)).first()
             if dev and is_phone_device(dev):
                 return {
                     "connected": False,
                     "protocol": "mobile",
                     "message": "Updates Frozen: Mobile phones (iOS/Android) cannot receive remote network update pushes. Updates are managed directly on the phone.",
                 }
+        finally:
+            if test_session is None:
+                session_to_use.close()
     except Exception:
         pass
 

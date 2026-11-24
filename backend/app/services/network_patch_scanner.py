@@ -310,12 +310,21 @@ def assess_and_record_device_updates(
             update_status = "up_to_date"
             pending_updates = 0
     elif is_non_computer:
-        # Non-computer endpoints (mobile phones, IoT, network switches, routers) do not pull OS package rollups
+        # Non-computer endpoints (access points, routers, switches, mobile phones, IoT) do not pull OS package rollups
         update_status = "up_to_date"
         pending_updates = 0
-        operating_system = getattr(existing_update, "operating_system", None) or "Embedded / Mobile Device"
-        os_version = getattr(existing_update, "os_version", None) or "Latest Firmware"
-        architecture = getattr(existing_update, "architecture", None) or "ARM / Embedded"
+        if device_type_clean in ("access_point", "router", "switch"):
+            operating_system = "Access Point Firmware" if device_type_clean == "access_point" else "RouterOS / Firmware"
+            architecture = "MIPS / ARM"
+            os_version = getattr(existing_update, "os_version", None) or "Latest Firmware"
+        elif device_type_clean in ("phone", "mobile", "tablet"):
+            operating_system = "Mobile OS"
+            architecture = "ARM / Embedded"
+            os_version = getattr(existing_update, "os_version", None) or "Latest OTA"
+        else:
+            operating_system = "Embedded Device Firmware"
+            architecture = "ARM / Embedded"
+            os_version = getattr(existing_update, "os_version", None) or "Latest Firmware"
         hostname = device.hostname or (existing_update.hostname if existing_update else None) or f"DEVICE-{device.id}"
     elif has_completed_job:
         # A patch remediation job for this machine completed successfully!

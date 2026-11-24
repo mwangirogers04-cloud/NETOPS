@@ -424,6 +424,8 @@ def ensure_iptables_quarantine_chain() -> None:
                             src = parts[3]
                             if is_valid_quarantine_ip(src):
                                 _currently_blocked_ips.add(src)
+                            if len(parts) >= 5 and is_valid_quarantine_ip(parts[4]):
+                                _currently_blocked_ips.add(parts[4])
                     break
             except Exception:
                 continue
@@ -768,7 +770,7 @@ def quarantine_device_l2(
 def restore_device_l2(
     ip_address: str | None,
     mac_address: str | None,
-    burst: int = 5,
+    burst: int = 15,
     interface: str | None = None,
 ) -> bool:
     """
@@ -777,8 +779,9 @@ def restore_device_l2(
     1. Deregistering from the continuous poison worker
     2. Removing the kernel iptables blocks
     3. Emitting authentic unicast & Gratuitous ARP (GARP) broadcast restoration frames
-       with true hardware Ethernet MACs for immediate recovery (< 50ms)
+       with true hardware Ethernet MACs across all active physical interfaces (< 50ms)
     4. Flushing local kernel neighbor cache
+    5. Unblocking router access controls (e.g. Tenda Parental Control)
     """
     if _is_test_env() or _is_cloud_host() or not ip_address or not mac_address:
         return False
@@ -793,7 +796,17 @@ def restore_device_l2(
     # 2. Remove kernel iptables block
     remove_iptables_quarantine_ip(clean_ip, clean_mac)
 
-    # 3. Flush local neighbor cache
+    # 3. Flush local neighbor cache across all interfaces
+    for dev_name in ("eth0", "wlan0", "lan0"):
+        try:
+            subprocess.run(
+                ["ip", "-4", "neigh", "del", clean_ip, "dev", dev_name],
+                capture_output=True,
+                check=False,
+                timeout=1,
+            )
+        except Exception:
+            pass
     try:
         subprocess.run(
             ["ip", "-4", "neigh", "flush", "to", clean_ip],
@@ -804,15 +817,13 @@ def restore_device_l2(
     except Exception:
         pass
 
-    # 4. Restore true ARP mapping between gateway and target device
+    # 4. Restore true ARP mapping between gateway and target device across all active interfaces
     gateways = _get_active_gateways()
     bcast_mac = "FF:FF:FF:FF:FF:FF"
     zero_mac = "00:00:00:00:00:00"
 
     for gw in gateways:
         iface = gw["interface"]
-        if interface and interface != "all" and iface != interface:
-            continue
         gw_ip = gw["gw_ip"]
         gw_mac = gw.get("gw_mac")
 
@@ -839,6 +850,15 @@ def restore_device_l2(
             _send_arp_frames(iface, frames)
             if burst > 1:
                 time.sleep(0.01)
+
+    # 5. Non-blocking hardware router unblock (e.g. Tenda Parental Control)
+    try:
+        from .router.manager import get_active_router_driver
+        router_driver = get_active_router_driver()
+        if router_driver and router_driver.get_vendor_id() != "universal_arp":
+            router_driver.allow_device(clean_ip, clean_mac)
+    except Exception as r_err:
+        logger.debug(f"Router unblock error in restore_device_l2: {r_err}")
 
     return True
 
@@ -871,6 +891,8 @@ def is_target_quarantined(ip_address: str | None, mac_address: str | None = None
 def clear_all_l2_quarantines() -> None:
     """Restore all quarantined targets and clear active registry."""
     with _quarantine_lock:
+        if not _active_quarantine_targets and not _currently_blocked_ips:
+            return
         targets = dict(_active_quarantine_targets)
         _active_quarantine_targets.clear()
     for ip, info in targets.items():
@@ -885,7 +907,8 @@ def clear_all_l2_quarantines() -> None:
 def sync_quarantined_targets_from_db(db=None) -> int:
     """
     Enrolls all currently quarantined/isolated devices in the database
-    into the active continuous L2 quarantine worker.
+    into the active continuous L2 quarantine worker, and flushes/removes
+    quarantine rules for any devices that are not marked quarantined.
     """
     if _is_test_env() or _is_cloud_host():
         return 0
@@ -903,6 +926,23 @@ def sync_quarantined_targets_from_db(db=None) -> int:
             Device.enforcement_status.in_(["quarantined", "isolated"]),
             Device.ip_address.isnot(None),
         ).all()
+        quarantined_ips = {d.ip_address.strip() for d in devices if d.ip_address}
+
+        # If no devices are quarantined in DB, ensure iptables chain is completely clean
+        if not quarantined_ips:
+            clear_all_l2_quarantines()
+            return 0
+
+        # Remove stale entries that are no longer quarantined
+        with _quarantine_lock:
+            active_ips = list(_active_quarantine_targets.keys())
+        for ip in active_ips:
+            if ip not in quarantined_ips:
+                with _quarantine_lock:
+                    target = _active_quarantine_targets.pop(ip, None)
+                mac = target.get("mac") if target else None
+                remove_iptables_quarantine_ip(ip, mac)
+
         enrolled = 0
         for dev in devices:
             if dev.ip_address and dev.mac_address and not is_protected(dev.ip_address, dev.mac_address):

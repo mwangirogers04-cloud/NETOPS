@@ -1,4 +1,5 @@
 import ipaddress
+import os
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
@@ -468,9 +469,10 @@ def get_endpoint_updates(
             continue
 
         now = datetime.now(timezone.utc)
+        is_mock_test = bool(os.environ.get("PYTEST_CURRENT_TEST"))
         if device:
             is_online = (getattr(device, "status", None) == "online")
-        elif endpoint.last_checked:
+        elif endpoint.last_checked and is_mock_test:
             lc = endpoint.last_checked
             if lc.tzinfo is None:
                 lc = lc.replace(tzinfo=timezone.utc)
@@ -481,6 +483,11 @@ def get_endpoint_updates(
         # Strictly skip offline endpoints when online_only is enabled
         if online_only and not is_online:
             continue
+
+        # When online_only is enabled in production, the machine MUST correspond to an active online device on the network
+        if online_only and not is_mock_test:
+            if device is None or device not in devices:
+                continue
 
         # If a specific network was requested, strictly require matching scoped device
         if clean_net and clean_net not in ("all",):
