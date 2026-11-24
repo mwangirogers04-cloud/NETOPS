@@ -309,4 +309,22 @@ def test_http_scan_unreachable_network_returns_informative_status(monkeypatch):
         assert "10.50.0.0/24" in data["probe_command"]
 
 
+def test_cloud_scan_when_empty_returns_waiting_for_agent_and_no_fake_devices(monkeypatch):
+    monkeypatch.setattr(discovery, "discover_devices", MagicMock(return_value=[]))
+    monkeypatch.setattr("os.path.exists", lambda path: False)
+    monkeypatch.setenv("CLOUD_MODE", "true")
+
+    response = client.post(
+        "/discovery/scan",
+        json={"network": "192.168.0.0/24", "network_name": "NonExistentSiteXYZ"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "waiting_for_agent"
+    assert data["devices_discovered"] == 0
+    assert len(data["devices"]) == 0
+    assert "probe_command" in data
+
+
+
 

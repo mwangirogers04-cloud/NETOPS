@@ -70,106 +70,10 @@ class AgentSyncRequest(BaseModel):
 
 def generate_cloud_subnet_devices(target_network: str, clean_iface: str | None, owner_id: int | None) -> list[dict]:
     """
-    When running on a cloud-hosted VPS or when physical L2 ARP cannot reach
-    a private client subnet, synthesizes realistic, isolated endpoints
-    tailored to the user's requested network CIDR range.
+    Deprecated: Synthetic devices are disabled so fictitious endpoints never
+    pollute the network inventory.
     """
-    import hashlib
-    uid = owner_id if (owner_id is not None and owner_id > 0) else 1
-    u_hex = f"{uid % 256:02X}"
-
-    clean = target_network.split("/")[0].strip()
-    parts = clean.split(".")
-    if len(parts) >= 3:
-        prefix = f"{parts[0]}.{parts[1]}.{parts[2]}"
-    else:
-        prefix = "192.168.0"
-
-    # Derive unique, deterministic subnet hex bytes so different networks never collide or share MACs
-    net_hash = hashlib.md5(target_network.strip().encode("utf-8")).hexdigest()
-    net_hex = net_hash[:2].upper()
-    sub_hex = net_hash[2:4].upper()
-
-    iface_wlan = clean_iface if clean_iface and clean_iface != "all" else "wlan0"
-    iface_eth = clean_iface if clean_iface and clean_iface != "all" else "eth0"
-
-    templates = [
-        {
-            "host_suffix": 1,
-            "hostname": "Router-Gateway",
-            "vendor": "TP-Link Technologies",
-            "device_type": "router",
-            "oui": "50:0F:F5",
-            "interface": iface_eth,
-        },
-        {
-            "host_suffix": 10,
-            "hostname": "Workstation-Office",
-            "vendor": "Dell Inc.",
-            "device_type": "computer",
-            "oui": "F0:1F:AF",
-            "interface": iface_eth,
-        },
-        {
-            "host_suffix": 12,
-            "hostname": "Host-Laptop",
-            "vendor": "HP Inc.",
-            "device_type": "computer",
-            "oui": "3C:52:82",
-            "interface": iface_wlan,
-        },
-        {
-            "host_suffix": 101,
-            "hostname": f"Phone-{prefix.replace('.', '-')}-101",
-            "vendor": "Apple Inc.",
-            "device_type": "phone",
-            "oui": "BC:D0:74",
-            "interface": iface_wlan,
-        },
-        {
-            "host_suffix": 105,
-            "hostname": "Office-LaserJet",
-            "vendor": "Canon Inc.",
-            "device_type": "printer",
-            "oui": "70:85:C2",
-            "interface": iface_eth,
-        },
-        {
-            "host_suffix": 150,
-            "hostname": "Conference-SmartTV",
-            "vendor": "Samsung Electronics",
-            "device_type": "iot",
-            "oui": "58:20:B1",
-            "interface": iface_wlan,
-        },
-        {
-            "host_suffix": 200,
-            "hostname": "Security-Camera-LAN",
-            "vendor": "Raspberry Pi Foundation",
-            "device_type": "iot",
-            "oui": "EC:FA:BC",
-            "interface": iface_eth,
-        },
-    ]
-
-    devices = []
-    for t in templates:
-        last_byte = t["host_suffix"]
-        oui = t["oui"]
-        # Authentic IEEE OUI MAC format: [Vendor 3-byte OUI] : [Subnet Hash B1] : [Subnet Hash B2] : [Host Suffix]
-        mac = f"{oui}:{net_hex}:{sub_hex}:{last_byte:02X}"
-        ip = f"{prefix}.{last_byte}"
-        devices.append({
-            "ip_address": ip,
-            "mac_address": mac,
-            "hostname": t["hostname"],
-            "vendor": t["vendor"],
-            "device_type": t["device_type"],
-            "network_interface": t["interface"],
-            "status": "online",
-        })
-
-    return devices
+    return []
 
 
 @router.post("/scan")
@@ -276,41 +180,47 @@ def run_discovery_scan(
 
         # If running in cloud VPS environment without physical broadcast domain,
         # check if real devices have already been registered by the local agent for this network
-        elif not discovered_devices and (is_cloud_env or not has_physical_net or is_mock_env):
+        elif not discovered_devices and (is_cloud_env or not has_physical_net):
             site_aliases = [target_network_name.lower()]
             if target_network_name.lower() in ("home network", "current"):
                 site_aliases.extend(["home network", "current"])
-            existing_real = db.scalars(
-                select(Device).where(
-                    Device.owner_id == owner_id,
-                    or_(
-                        func.lower(Device.network_name).in_(site_aliases),
-                        Device.network_name.is_(None) if any(a in ("home network", "current") for a in site_aliases) else False,
-                    )
+
+            # Query real physical devices previously synced for this site/network
+            existing_query = select(Device).where(
+                or_(
+                    func.lower(Device.network_name).in_(site_aliases),
+                    Device.network_name.is_(None) if any(a in ("home network", "current") for a in site_aliases) else False,
                 )
-            ).all()
+            )
+            if owner_id is not None:
+                existing_query = existing_query.where(
+                    or_(Device.owner_id == owner_id, Device.owner_id.is_(None))
+                )
+
+            existing_real = db.scalars(existing_query).all()
 
             if existing_real:
-                # Real physical devices exist! Do NOT overwrite with fake templates
+                # Real physical devices exist! Return real inventory rather than generating fake ones
                 saved_devices = existing_real
             else:
-                discovered_devices = generate_cloud_subnet_devices(
-                    target_network=target_network,
-                    clean_iface=clean_iface,
-                    owner_id=owner_id,
-                )
-                for d in discovered_devices:
-                    d["network_name"] = target_network_name
-
-                saved_devices = save_discovered_devices(
-                    discovered_devices,
-                    db,
-                    scanned_interface=clean_iface,
-                    owner_id=owner_id,
-                    network_name=target_network_name,
-                    scanned_network=target_network,
-                    mark_missing_offline=False,
-                )
+                return {
+                    "status": "waiting_for_agent",
+                    "message": (
+                        f"No physical devices discovered for '{target_network_name}' ({target_network}). "
+                        f"Because this NETOPS console is hosted in the cloud, direct Layer-2 network discovery "
+                        f"requires your local Linux machine or NETOPS probe to be active and connected to your network. "
+                        f"Please ensure your local Linux machine is awake and the 'netops-cloud-sync' service is running."
+                    ),
+                    "network": target_network,
+                    "network_name": target_network_name,
+                    "interface": clean_iface,
+                    "devices_discovered": 0,
+                    "devices_processed": 0,
+                    "devices": [],
+                    "duplicate_ips": [],
+                    "ip_conflicts_count": 0,
+                    "probe_command": f"python3 agent/netops_probe.py --network {target_network} --network-name \"{target_network_name}\"",
+                }
         else:
             saved_devices = save_discovered_devices(
                 discovered_devices,

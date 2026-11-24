@@ -602,7 +602,7 @@ function App() {
       }
       const data = await response.json();
       setLanDevicesResult(data);
-      if (data.status === "unreachable_network") {
+      if (data.status === "unreachable_network" || data.status === "waiting_for_agent") {
         setShowProbeModal(true);
       }
       await loadDevices();
