@@ -1,5 +1,6 @@
 import logging
 import os
+import socket
 import ssl
 import time
 import urllib.parse
@@ -43,7 +44,7 @@ RULE_NAME = "NETOPS_Quarantine_Block"
 
 
 _sophos_last_failure_time: float = 0.0
-_SOPHOS_FAILURE_COOLDOWN: float = 45.0
+_SOPHOS_FAILURE_COOLDOWN: float = 120.0
 
 
 def _is_test_env() -> bool:
@@ -53,7 +54,7 @@ def _is_test_env() -> bool:
 
 
 def is_sophos_configured(bypass_cooldown: bool = False) -> bool:
-    """Check if Sophos firewall credentials and URL are configured and circuit is closed."""
+    """Check if Sophos firewall credentials and URL are configured, circuit is closed, and host is reachable."""
     global _sophos_last_failure_time
     if not bypass_cooldown and not _is_test_env():
         if time.time() - _sophos_last_failure_time < _SOPHOS_FAILURE_COOLDOWN:
@@ -72,10 +73,22 @@ def is_sophos_configured(bypass_cooldown: bool = False) -> bool:
                 return False
         except Exception:
             return False
+
+    if not _is_test_env():
+        try:
+            parsed = urllib.parse.urlparse(url)
+            host = parsed.hostname or ""
+            port = parsed.port or 4444
+            with socket.create_connection((host, port), timeout=0.15):
+                pass
+        except Exception:
+            _sophos_last_failure_time = time.time()
+            return False
+
     return True
 
 
-def _send_sophos_xml(req_xml: str, timeout: float = 2.5) -> str:
+def _send_sophos_xml(req_xml: str, timeout: float = 0.8) -> str:
     """Send an authenticated XML request to the Sophos WebConsole APIController."""
     global _sophos_last_failure_time
     base_url = settings.sophos_base_url.strip().rstrip("/")
@@ -206,7 +219,7 @@ def get_current_quarantined_hosts() -> list[str]:
         return [DUMMY_HOST]
     except Exception as exc:
         logger.error(f"Failed to fetch Sophos quarantined host group: {exc}")
-        return [DUMMY_HOST]
+        raise
 
 
 def sophos_block_device(ip_address: str, hostname: str | None = None) -> dict:

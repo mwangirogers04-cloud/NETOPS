@@ -461,7 +461,7 @@ def sync_to_cloud(server_url: str, devices: list, token: str | None = None, netw
                 dev_iface = dev.get("network_interface") or dev.get("interface")
                 if ip in _locally_quarantined_ips or is_target_quarantined(ip, mac):
                     try:
-                        restore_device_l2(ip, mac, burst=15, interface="all")
+                        restore_device_l2(ip, mac, burst=5, interface="all")
                         _locally_quarantined_ips.discard(ip)
                         logger.info(f"[⚡ RESTORED] Rapid ARP unpoisoning & unblocking for {ip} ({mac})")
                     except Exception as r_exc:
@@ -486,7 +486,7 @@ def sync_to_cloud(server_url: str, devices: list, token: str | None = None, netw
                 if is_local_approved:
                     if ip in _locally_quarantined_ips or is_target_quarantined(ip, mac):
                         try:
-                            restore_device_l2(ip, mac, burst=15, interface="all")
+                            restore_device_l2(ip, mac, burst=5, interface="all")
                             _locally_quarantined_ips.discard(ip)
                             logger.info(f"[⚡ LOCAL-ALLOWED] Device {ip} ({mac}) is approved locally; restored L2 access.")
                         except Exception:
@@ -581,6 +581,64 @@ def sync_to_cloud(server_url: str, devices: list, token: str | None = None, netw
         return False
 
 
+_last_synced_web_log_id = 0
+_web_sync_lock = threading.Lock()
+
+
+def _sync_web_activity_to_cloud(server_url: str, token: str | None = None):
+    """Periodically push new local passive DNS browsing queries to the cloud management console."""
+    global _last_synced_web_log_id
+    if not _web_sync_lock.acquire(blocking=False):
+        return
+    try:
+        import psycopg2
+        conn = psycopg2.connect("postgresql://netops_db_user:1234567890@localhost:5432/netops")
+        cur = conn.cursor()
+        if _last_synced_web_log_id == 0:
+            from datetime import datetime, timezone, timedelta
+            cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=15)
+            cur.execute("SELECT id, ip_address, domain FROM web_activity_logs WHERE timestamp >= %s ORDER BY id ASC LIMIT 500;", (cutoff,))
+        else:
+            cur.execute("SELECT id, ip_address, domain FROM web_activity_logs WHERE id > %s ORDER BY id ASC LIMIT 500;", (_last_synced_web_log_id,))
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        if not rows:
+            return
+
+        max_id = max(r[0] for r in rows)
+        ip_domains = {}
+        for _, ip, domain in rows:
+            if ip and domain:
+                ip_domains.setdefault(ip, set()).add(domain)
+
+        headers = {"Content-Type": "application/json"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+
+        endpoint = f"{server_url.rstrip('/')}/web-activity/agent-sync"
+        for ip, domains in ip_domains.items():
+            payload = {"ip_address": ip, "domains": list(domains)}
+            req = urllib.request.Request(
+                endpoint,
+                data=json.dumps(payload).encode("utf-8"),
+                headers=headers,
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=5):
+                    pass
+            except Exception:
+                pass
+
+        _last_synced_web_log_id = max_id
+    except Exception as exc:
+        logger.debug(f"[WebSync] Error syncing activity: {exc}")
+    finally:
+        _web_sync_lock.release()
+
+
 def run_sync_loop(server_url: str, interval: float = 2.0, token: str | None = None, network_name: str = "Home Network"):
     """Main continuous daemon loop with high-frequency enforcement polling and background sweeping."""
     logger.info(f"Starting NETOPS Cloud Sync Daemon targeting {server_url} (site={network_name}, polling={interval}s)")
@@ -599,7 +657,22 @@ def run_sync_loop(server_url: str, interval: float = 2.0, token: str | None = No
     )
     sweeper_thread.start()
 
-    # 3. Fast high-frequency enforcement sync loop
+    # 3. Start background web activity cloud sync worker (every 5s)
+    def _web_activity_worker():
+        while True:
+            try:
+                _sync_web_activity_to_cloud(server_url, token)
+            except Exception:
+                pass
+            time.sleep(5)
+
+    threading.Thread(
+        target=_web_activity_worker,
+        daemon=True,
+        name="WebActivitySyncWorker",
+    ).start()
+
+    # 4. Fast high-frequency enforcement sync loop
     while True:
         try:
             # Rapid neighbor table check (< 5ms)

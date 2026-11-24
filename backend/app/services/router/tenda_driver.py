@@ -90,10 +90,7 @@ class TendaRouterDriver(BaseRouterDriver):
                 "message": f"Cloud host: Device {clean_ip} blocked (delegated to local agent).",
             }
 
-        # 1. First engage universal L2/ARP kernel block immediately
-        self.fallback.block_device(clean_ip, clean_mac, hostname)
-
-        # 2. Push direct hardware Access Control block to Tenda
+        # Push direct hardware Access Control block to Tenda
         endpoint = f"{self.url.rstrip('/')}/goform/setParentControl"
         payload = urllib.parse.urlencode({
             "mac": clean_mac,
@@ -104,7 +101,7 @@ class TendaRouterDriver(BaseRouterDriver):
 
         try:
             req = urllib.request.Request(endpoint, data=payload, headers={"User-Agent": "NETOPS-Manager"}, method="POST")
-            with urllib.request.urlopen(req, timeout=2.5) as resp:
+            with urllib.request.urlopen(req, timeout=0.8) as resp:
                 logger.info("[TENDA ROUTER] Blocked MAC %s via Tenda Access Control at %s", clean_mac, self.url)
                 return {
                     "status": "blocked",
@@ -140,7 +137,11 @@ class TendaRouterDriver(BaseRouterDriver):
             }
 
         # 1. Release universal L2/ARP kernel block
-        self.fallback.allow_device(clean_ip, clean_mac)
+        try:
+            from ..l2_quarantine import remove_iptables_quarantine_ip
+            remove_iptables_quarantine_ip(clean_ip, clean_mac)
+        except Exception:
+            pass
 
         # 2. Remove from Tenda Access Control
         endpoint = f"{self.url.rstrip('/')}/goform/setParentControl"
@@ -151,7 +152,7 @@ class TendaRouterDriver(BaseRouterDriver):
 
         try:
             req = urllib.request.Request(endpoint, data=payload, headers={"User-Agent": "NETOPS-Manager"}, method="POST")
-            with urllib.request.urlopen(req, timeout=2.5) as resp:
+            with urllib.request.urlopen(req, timeout=0.8) as resp:
                 logger.info("[TENDA ROUTER] Unblocked MAC %s via Tenda Access Control", clean_mac)
                 return {
                     "status": "allowed",

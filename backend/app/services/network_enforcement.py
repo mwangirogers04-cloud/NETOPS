@@ -171,7 +171,8 @@ def enforce_device_access(
                 restore_device_l2(
                     device.ip_address,
                     device.mac_address,
-                    interface=dev_iface if isinstance(dev_iface, str) else None,
+                    burst=5,
+                    interface="all",
                 )
             except Exception:
                 pass

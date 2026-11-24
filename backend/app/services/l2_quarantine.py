@@ -285,6 +285,7 @@ def _is_interface_carrier_up(iface: str) -> bool:
 def _resolve_ip_mac(ip_addr: str, iface: str) -> str | None:
     """Actively resolve the MAC address of an IP on a specific interface."""
     try:
+        # 1. Quick check in kernel neighbor table
         res = subprocess.run(
             ["ip", "-4", "neigh", "show", ip_addr, "dev", iface],
             capture_output=True,
@@ -300,8 +301,28 @@ def _resolve_ip_mac(ip_addr: str, iface: str) -> str | None:
                     m = parts[idx + 1].strip().upper()
                     if len(m) == 17:
                         return m
+
+        # 2. Trigger fast kernel ARP resolution via UDP probe (< 20ms)
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.connect((ip_addr, 80))
+                s.send(b"")
+        except Exception:
+            pass
+
+        # Check /proc/net/arp or neighbor table after kernel probe
+        if os.path.exists("/proc/net/arp"):
+            with open("/proc/net/arp", "r", encoding="utf-8") as f:
+                for line in f.readlines()[1:]:
+                    parts = line.split()
+                    if len(parts) >= 6 and parts[0] == ip_addr:
+                        m = parts[3].strip().upper()
+                        if len(m) == 17 and m != "00:00:00:00:00:00":
+                            return m
+
+        # 3. Fallback arping with tight 200ms timeout
         subprocess.run(
-            ["arping", "-c", "1", "-w", "1", "-i", iface, ip_addr],
+            ["arping", "-c", "1", "-C", "1", "-w", "0.2", "-i", iface, ip_addr],
             capture_output=True,
             check=False,
             timeout=1,
@@ -317,6 +338,9 @@ def _resolve_ip_mac(ip_addr: str, iface: str) -> str | None:
     except Exception:
         pass
     return None
+
+
+_cached_gateway_macs: dict[str, str] = {}
 
 
 def _get_active_gateways() -> list[dict]:
@@ -347,7 +371,13 @@ def _get_active_gateways() -> list[dict]:
                 seen.add(key)
 
                 iface_mac, iface_ip = _get_interface_mac_and_ip(iface)
-                gw_mac = neigh_map.get(gw_ip) or _resolve_ip_mac(gw_ip, iface)
+                gw_mac = neigh_map.get(gw_ip) or _cached_gateway_macs.get(gw_ip)
+                if not gw_mac:
+                    gw_mac = _resolve_ip_mac(gw_ip, iface)
+                    if gw_mac:
+                        _cached_gateway_macs[gw_ip] = gw_mac
+                elif gw_mac and gw_ip not in _cached_gateway_macs:
+                    _cached_gateway_macs[gw_ip] = gw_mac
                 if iface_mac and iface_ip:
                     gateways.append({
                         "interface": iface,
@@ -467,26 +497,44 @@ def remove_iptables_quarantine_ip(ip_address: str, mac_address: str | None = Non
     if _is_test_env() or not ip_address:
         return
     ensure_iptables_quarantine_chain()
-    while _run_iptables(["-D", IPTABLES_CHAIN, "-s", ip_address, "-p", "tcp", "-j", "REJECT", "--reject-with", "tcp-reset"]):
-        pass
-    while _run_iptables(["-D", IPTABLES_CHAIN, "-s", ip_address, "-j", "REJECT", "--reject-with", "icmp-host-prohibited"]):
-        pass
-    while _run_iptables(["-D", IPTABLES_CHAIN, "-s", ip_address, "-j", "DROP"]):
-        pass
-    while _run_iptables(["-D", IPTABLES_CHAIN, "-d", ip_address, "-j", "DROP"]):
-        pass
-    while _run_iptables(["-D", IPTABLES_CHAIN, "-s", ip_address, "-j", "REJECT"]):
-        pass
-    while _run_iptables(["-D", IPTABLES_CHAIN, "-d", ip_address, "-j", "REJECT"]):
-        pass
-    if mac_address:
-        clean_mac = mac_address.strip().upper()
-        while _run_iptables(["-D", IPTABLES_CHAIN, "-m", "mac", "--mac-source", clean_mac, "-p", "tcp", "-j", "REJECT", "--reject-with", "tcp-reset"]):
-            pass
-        while _run_iptables(["-D", IPTABLES_CHAIN, "-m", "mac", "--mac-source", clean_mac, "-j", "REJECT", "--reject-with", "icmp-host-prohibited"]):
-            pass
-        while _run_iptables(["-D", IPTABLES_CHAIN, "-m", "mac", "--mac-source", clean_mac, "-j", "DROP"]):
-            pass
+    clean_mac = mac_address.strip().upper() if mac_address else None
+
+    for prefix in (["sudo", "-n", "/usr/sbin/iptables"], ["/usr/sbin/iptables"]):
+        try:
+            res = subprocess.run(
+                prefix + ["-L", IPTABLES_CHAIN, "-n", "--line-numbers"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=2,
+            )
+            if res.returncode == 0:
+                matching_lines = []
+                for line in res.stdout.splitlines():
+                    tokens = line.split()
+                    if tokens and tokens[0].isdigit():
+                        line_num = int(tokens[0])
+                        # Rule line format: <num> <target> <prot> <opt> <source> <destination> ...
+                        if (
+                            ip_address in tokens
+                            or (len(tokens) > 3 and tokens[3].startswith(ip_address))
+                            or (len(tokens) > 4 and tokens[4].startswith(ip_address))
+                            or (clean_mac and clean_mac in line.upper())
+                        ):
+                            matching_lines.append(line_num)
+
+                # Delete matching rules in descending order so line numbers remain valid
+                for num in reversed(matching_lines):
+                    subprocess.run(
+                        prefix + ["-D", IPTABLES_CHAIN, str(num)],
+                        capture_output=True,
+                        check=False,
+                        timeout=2,
+                    )
+                break
+        except Exception:
+            continue
+
     _currently_blocked_ips.discard(ip_address)
 
 
@@ -770,7 +818,7 @@ def quarantine_device_l2(
 def restore_device_l2(
     ip_address: str | None,
     mac_address: str | None,
-    burst: int = 15,
+    burst: int = 5,
     interface: str | None = None,
 ) -> bool:
     """
@@ -850,15 +898,6 @@ def restore_device_l2(
             _send_arp_frames(iface, frames)
             if burst > 1:
                 time.sleep(0.01)
-
-    # 5. Non-blocking hardware router unblock (e.g. Tenda Parental Control)
-    try:
-        from .router.manager import get_active_router_driver
-        router_driver = get_active_router_driver()
-        if router_driver and router_driver.get_vendor_id() != "universal_arp":
-            router_driver.allow_device(clean_ip, clean_mac)
-    except Exception as r_err:
-        logger.debug(f"Router unblock error in restore_device_l2: {r_err}")
 
     return True
 

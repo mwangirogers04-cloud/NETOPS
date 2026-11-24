@@ -14,7 +14,7 @@ export default function WebActivityPage({
   const [refreshing, setRefreshing] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [violationsOnly, setViolationsOnly] = useState(false);
-  const [timeRange, setTimeRange] = useState("live"); // 'live' (<5m), '15m', '1h', '24h', 'all'
+  const [timeRange, setTimeRange] = useState("1h"); // 'live' (<5m), '15m', '1h', '24h', 'all'
   const [searchQuery, setSearchQuery] = useState("");
   const [showPolicyModal, setShowPolicyModal] = useState(false);
   const [savingPolicy, setSavingPolicy] = useState(false);
@@ -44,7 +44,7 @@ export default function WebActivityPage({
     }
   };
 
-  const [activeMinutes, setActiveMinutes] = useState(5);
+  const [activeMinutes, setActiveMinutes] = useState(15);
 
   // Fetch active sessions (devices communicating in the last N minutes)
   const fetchActiveSessions = async (mins = activeMinutes) => {
@@ -124,10 +124,15 @@ export default function WebActivityPage({
 
   const loadAll = async () => {
     setRefreshing(true);
-    await Promise.all([fetchActiveSessions(), fetchLogs(), fetchAnalytics(), fetchPolicy()]);
-    setLastRefreshedAt(new Date());
-    setLoading(false);
-    setRefreshing(false);
+    try {
+      await Promise.all([fetchActiveSessions(), fetchLogs(), fetchAnalytics(), fetchPolicy()]);
+      setLastRefreshedAt(new Date());
+    } catch (err) {
+      console.error("Error loading web activity data:", err);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   };
 
   useEffect(() => {
@@ -484,10 +489,8 @@ export default function WebActivityPage({
 
       {/* Live Active Connections Card */}
       {(() => {
-        const visibleSessions = activeSessions.filter((s) => !hideNoise || !isSystemNoise(s.domain));
-
-        // Group active sessions by unique device IP / hostname
-        const groupedDevices = visibleSessions.reduce((acc, s) => {
+        // Group all devices from activeSessions first so NO connected device is ever omitted
+        const groupedDevices = activeSessions.reduce((acc, s) => {
           const key = s.ip_address || s.hostname || "unknown";
           if (!acc[key]) {
             acc[key] = {
@@ -496,19 +499,20 @@ export default function WebActivityPage({
               mac_address: s.mac_address,
               device_id: s.device_id,
               status: s.status,
-              minSecondsAgo: s.seconds_ago,
+              minSecondsAgo: s.seconds_ago !== undefined ? s.seconds_ago : 9999,
               hasViolation: s.is_violation,
               sitesMap: {},
             };
           }
-          if (s.seconds_ago < acc[key].minSecondsAgo) {
+          if (s.seconds_ago !== undefined && s.seconds_ago < acc[key].minSecondsAgo) {
             acc[key].minSecondsAgo = s.seconds_ago;
             acc[key].status = s.status;
           }
           if (s.is_violation) {
             acc[key].hasViolation = true;
           }
-          if (s.domain && s.domain !== "__idle__") {
+          // Only add site to the machine's browsed list if it has a real domain and is not filtered noise:
+          if (s.domain && s.domain !== "__idle__" && (!hideNoise || !isSystemNoise(s.domain))) {
             if (!acc[key].sitesMap[s.domain]) {
               acc[key].sitesMap[s.domain] = { ...s, count: 1 };
             } else {
@@ -522,10 +526,54 @@ export default function WebActivityPage({
           return acc;
         }, {});
 
-        const deviceList = Object.values(groupedDevices).map(dev => ({
+        const deviceList = Object.values(groupedDevices).map((dev) => ({
           ...dev,
-          sites: Object.values(dev.sitesMap).sort((a, b) => a.seconds_ago - b.seconds_ago)
+          sites: Object.values(dev.sitesMap).sort((a, b) => a.seconds_ago - b.seconds_ago),
         })).sort((a, b) => a.minSecondsAgo - b.minSecondsAgo);
+
+        const displayedDevices = deviceList
+          .map((dev) => {
+            const q = searchQuery.toLowerCase().trim();
+            const devMatches =
+              !q ||
+              (dev.hostname || "").toLowerCase().includes(q) ||
+              (dev.ip_address || "").toLowerCase().includes(q) ||
+              (dev.mac_address || "").toLowerCase().includes(q);
+
+            const filteredSites = dev.sites.filter((site) => {
+              if (categoryFilter !== "all" && site.category !== categoryFilter) return false;
+              if (violationsOnly && !site.is_violation) return false;
+              if (!q || devMatches) return true;
+              return (site.domain || "").toLowerCase().includes(q);
+            });
+
+            if ((categoryFilter !== "all" || violationsOnly || (q && !devMatches)) && filteredSites.length === 0) {
+              return null;
+            }
+
+            return {
+              ...dev,
+              sites: filteredSites,
+            };
+          })
+          .filter(Boolean);
+
+        const visibleActiveSitesCount = displayedDevices.reduce((sum, d) => sum + d.sites.length, 0);
+        const visibleSessions = activeSessions.filter((s) => {
+          if (!s.domain || s.domain === "__idle__") return false;
+          if (hideNoise && isSystemNoise(s.domain)) return false;
+          if (categoryFilter !== "all" && s.category !== categoryFilter) return false;
+          if (violationsOnly && !s.is_violation) return false;
+          if (searchQuery) {
+            const q = searchQuery.toLowerCase().trim();
+            const match =
+              (s.domain || "").toLowerCase().includes(q) ||
+              (s.hostname || "").toLowerCase().includes(q) ||
+              (s.ip_address || "").toLowerCase().includes(q);
+            if (!match) return false;
+          }
+          return true;
+        });
 
         return (
           <div style={{ background: "#1e293b", border: "1px solid #334155", borderRadius: "8px", padding: "16px", marginBottom: "20px" }}>
@@ -536,12 +584,29 @@ export default function WebActivityPage({
                   🟢 Connected Computers & Browsing Activity
                 </span>
                 <span style={{ background: "rgba(16, 185, 129, 0.2)", color: "#34d399", border: "1px solid rgba(16, 185, 129, 0.4)", borderRadius: "12px", padding: "2px 8px", fontSize: "11px", fontWeight: "700" }}>
-                  {deviceList.length} computer{deviceList.length === 1 ? "" : "s"} • {visibleSessions.length} active site{visibleSessions.length === 1 ? "" : "s"}
+                  {deviceList.length} computer{deviceList.length === 1 ? "" : "s"} • {visibleActiveSitesCount} active site{visibleActiveSitesCount === 1 ? "" : "s"}
                 </span>
               </div>
 
               {/* Time Window & Noise Controls */}
               <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                {/* Search input */}
+                <input
+                  type="text"
+                  placeholder="🔍 Search host, IP, site..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  style={{
+                    fontSize: "11px",
+                    padding: "4px 10px",
+                    width: "175px",
+                    background: "#0f172a",
+                    border: "1px solid #334155",
+                    color: "#f8fafc",
+                    borderRadius: "6px",
+                  }}
+                />
+
                 {/* Time Range */}
                 <div style={{ display: "flex", background: "#0f172a", padding: "2px", borderRadius: "6px", border: "1px solid #334155", gap: "2px" }}>
                   <button
@@ -645,7 +710,97 @@ export default function WebActivityPage({
               </div>
             </div>
 
-            {deviceList.length === 0 ? (
+            {/* Category Filter Pills */}
+            <div style={{ display: "flex", gap: "6px", alignItems: "center", marginBottom: "14px", flexWrap: "wrap" }}>
+              <span style={{ fontSize: "11px", color: "#94a3b8", fontWeight: "700", marginRight: "2px" }}>CATEGORY:</span>
+              <button
+                type="button"
+                onClick={() => { setCategoryFilter("all"); setViolationsOnly(false); }}
+                style={{
+                  fontSize: "11px",
+                  padding: "3px 10px",
+                  borderRadius: "14px",
+                  border: "1px solid",
+                  borderColor: categoryFilter === "all" && !violationsOnly ? "#3b82f6" : "#334155",
+                  background: categoryFilter === "all" && !violationsOnly ? "#2563eb" : "#0f172a",
+                  color: categoryFilter === "all" && !violationsOnly ? "#ffffff" : "#94a3b8",
+                  cursor: "pointer",
+                  fontWeight: "600",
+                }}
+              >
+                All Activity
+              </button>
+              <button
+                type="button"
+                onClick={() => { setCategoryFilter("streaming"); setViolationsOnly(false); }}
+                style={{
+                  fontSize: "11px",
+                  padding: "3px 10px",
+                  borderRadius: "14px",
+                  border: "1px solid",
+                  borderColor: categoryFilter === "streaming" ? "#ef4444" : "#334155",
+                  background: categoryFilter === "streaming" ? "rgba(239, 68, 68, 0.2)" : "#0f172a",
+                  color: categoryFilter === "streaming" ? "#f87171" : "#94a3b8",
+                  cursor: "pointer",
+                  fontWeight: "600",
+                }}
+              >
+                🎬 Streaming
+              </button>
+              <button
+                type="button"
+                onClick={() => { setCategoryFilter("gaming"); setViolationsOnly(false); }}
+                style={{
+                  fontSize: "11px",
+                  padding: "3px 10px",
+                  borderRadius: "14px",
+                  border: "1px solid",
+                  borderColor: categoryFilter === "gaming" ? "#a855f7" : "#334155",
+                  background: categoryFilter === "gaming" ? "rgba(168, 85, 247, 0.2)" : "#0f172a",
+                  color: categoryFilter === "gaming" ? "#c084fc" : "#94a3b8",
+                  cursor: "pointer",
+                  fontWeight: "600",
+                }}
+              >
+                🎮 Gaming
+              </button>
+              <button
+                type="button"
+                onClick={() => { setCategoryFilter("social_media"); setViolationsOnly(false); }}
+                style={{
+                  fontSize: "11px",
+                  padding: "3px 10px",
+                  borderRadius: "14px",
+                  border: "1px solid",
+                  borderColor: categoryFilter === "social_media" ? "#3b82f6" : "#334155",
+                  background: categoryFilter === "social_media" ? "rgba(59, 130, 246, 0.2)" : "#0f172a",
+                  color: categoryFilter === "social_media" ? "#60a5fa" : "#94a3b8",
+                  cursor: "pointer",
+                  fontWeight: "600",
+                }}
+              >
+                📱 Social Media
+              </button>
+              <button
+                type="button"
+                onClick={() => { setViolationsOnly(true); setCategoryFilter("all"); }}
+                style={{
+                  fontSize: "11px",
+                  padding: "3px 10px",
+                  borderRadius: "14px",
+                  border: "1px solid",
+                  borderColor: violationsOnly ? "#dc2626" : "#334155",
+                  background: violationsOnly ? "#dc2626" : "#0f172a",
+                  color: violationsOnly ? "#ffffff" : "#94a3b8",
+                  cursor: "pointer",
+                  fontWeight: "600",
+                }}
+              >
+                ⚠️ Violations Only
+              </button>
+            </div>
+
+            {displayedDevices.length === 0 ? (
               <div style={{ padding: "24px", textAlign: "center", background: "#0f172a", borderRadius: "6px", color: "#64748b", fontSize: "12px" }}>
                 <span>⚪ No web browsing activity detected in the last {activeMinutes} minutes.</span>
                 <div style={{ marginTop: "4px", fontSize: "11px", color: "#475569" }}>
@@ -655,7 +810,7 @@ export default function WebActivityPage({
             ) : viewMode === "grouped" ? (
               /* GROUPED VIEW: Exactly 1 card per machine showing all its sites */
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(360px, 1fr))", gap: "14px" }}>
-                {deviceList.map((dev, dIdx) => (
+                {displayedDevices.map((dev, dIdx) => (
                   <div
                     key={`device-card-${dIdx}`}
                     style={{

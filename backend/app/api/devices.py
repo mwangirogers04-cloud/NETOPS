@@ -307,15 +307,14 @@ def get_devices(
         current_user.role in ("admin", "super_admin")
         or current_user.username.lower() in ("developer", "admin")
     )
-    if current_user.role == "super_admin" or (is_admin and scope == "all"):
-        # Super admin / Fleet-wide management across all network devices
-        pass
-    elif is_admin and scope and scope.startswith("user_"):
-        try:
-            uid = int(scope.replace("user_", ""))
-            query = query.where(Device.owner_id == uid)
-        except ValueError:
-            query = query.where(Device.owner_id == current_user.id)
+    if is_admin:
+        if scope and scope.startswith("user_"):
+            try:
+                uid = int(scope.replace("user_", ""))
+                query = query.where(Device.owner_id == uid)
+            except ValueError:
+                pass
+        # Admins and Super Admins manage and see all network devices by default
     else:
         # Strict per-user network isolation for standard users
         query = query.where(Device.owner_id == current_user.id)
@@ -723,17 +722,6 @@ def allow_device(
         force=True,
     )
 
-    if device.ip_address:
-        try:
-            restore_device_l2(
-                device.ip_address,
-                device.mac_address,
-                burst=15,
-                interface="all",
-            )
-        except Exception:
-            pass
-
     create_event(
         db,
         "internet_access_allowed",
@@ -805,18 +793,6 @@ def disallow_device(
         db,
         force=True,
     )
-
-    if device.ip_address:
-        try:
-            dev_iface = getattr(device, "network_interface", None)
-            quarantine_device_l2(
-                device.ip_address,
-                device.mac_address,
-                burst=5,
-                interface=dev_iface if isinstance(dev_iface, str) else None,
-            )
-        except Exception:
-            pass
 
     create_event(
         db,
@@ -1367,18 +1343,6 @@ def isolate_device(
         db,
         force=True,
     )
-
-    if device.ip_address:
-        try:
-            dev_iface = getattr(device, "network_interface", None)
-            quarantine_device_l2(
-                device.ip_address,
-                device.mac_address,
-                burst=5,
-                interface=dev_iface if isinstance(dev_iface, str) else None,
-            )
-        except Exception:
-            pass
 
     create_event(
         db,

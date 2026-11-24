@@ -2029,9 +2029,18 @@ const loadEvents = async () => {
       return;
     }
 
-    // Refresh devices and events
-    await loadDevices();
-    await loadEvents();
+    // Dismiss loading state and update local state immediately so action buttons respond instantly
+    setActionLoading(null);
+
+    if (result && typeof result === "object") {
+      setDevices((prev) =>
+        prev.map((d) => (d.id === deviceId ? { ...d, ...result } : d))
+      );
+    }
+
+    // Refresh devices and events in background without blocking the UI
+    loadDevices().catch(console.error);
+    loadEvents().catch(console.error);
 
     if (action === "approve") {
       const devName = result.hostname || result.ip_address || "Device";

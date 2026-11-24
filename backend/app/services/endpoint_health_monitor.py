@@ -17,7 +17,7 @@ from .vlan_policy import get_vlan_for_device_type, is_type_and_vlan_matching
 
 
 STALE_AFTER_MINUTES = 15
-CHECK_INTERVAL_SECONDS = 3
+CHECK_INTERVAL_SECONDS = 10
 
 # In-memory debounce tracking to prevent flapping on transient ARP packet drops
 _consecutive_misses: dict[str, int] = {}
