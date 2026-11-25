@@ -660,9 +660,34 @@ def get_arp_scan_devices(network: str | None = None, interface: str | None = Non
 def detect_local_subnets() -> dict:
     """
     Detect local IPv4 subnets across wired (LAN) and wireless (WLAN/Wi-Fi) network interfaces.
-    Returns default network and detected interfaces with medium metadata.
+    Identifies the active default gateway interface and returns detected interfaces with medium metadata.
     """
     detected = []
+    default_iface = None
+    default_gw = None
+
+    # 1. Determine active default gateway interface from system routing table
+    try:
+        route_res = subprocess.run(
+            ["ip", "-4", "route", "show", "default"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=2,
+        )
+        for line in route_res.stdout.splitlines():
+            parts = line.split()
+            if "via" in parts and "dev" in parts:
+                gw = parts[parts.index("via") + 1]
+                dev = parts[parts.index("dev") + 1]
+                if not default_iface:
+                    default_iface = dev
+                    default_gw = gw
+                break
+    except Exception:
+        pass
+
+    # 2. Enumerate all global IPv4 addresses
     try:
         cmd = ["ip", "-4", "-o", "addr", "show", "scope", "global"]
         res = subprocess.run(cmd, capture_output=True, text=True, check=True)
@@ -683,6 +708,7 @@ def detect_local_subnets() -> dict:
                     label = f"Wired LAN ({iface})"
                 try:
                     net = ipaddress.ip_interface(cidr).network
+                    is_primary = (iface == default_iface)
                     detected.append({
                         "interface": iface,
                         "ip": cidr.split("/")[0],
@@ -693,52 +719,61 @@ def detect_local_subnets() -> dict:
                         "medium": medium,
                         "ssid": ssid,
                         "label": label,
+                        "gateway": default_gw if is_primary else None,
+                        "is_default": is_primary,
                     })
                 except Exception:
                     continue
     except Exception as exc:
         print(f"[DISCOVERY] Error detecting local subnets: {exc}")
 
-    # Ensure standard physical interfaces (eth0 LAN and wlan0 Wi-Fi) are present
-    has_wlan = any(d.get("is_wireless") or d.get("interface") == "wlan0" for d in detected)
-    has_lan = any(d.get("interface") in ("eth0", "en0", "lan0") for d in detected)
+    # Fallback only when absolutely no interfaces were found (e.g., bare test environment)
+    if not detected:
+        detected = [
+            {
+                "interface": "eth0",
+                "ip": "192.168.0.1",
+                "cidr": "192.168.0.1/24",
+                "network": "192.168.0.0/24",
+                "is_virtual": False,
+                "is_wireless": False,
+                "medium": "wired",
+                "ssid": None,
+                "label": "Wired LAN (eth0)",
+                "is_default": True,
+            }
+        ]
 
-    if not has_wlan:
-        detected.append({
-            "interface": "wlan0",
-            "ip": "192.168.0.101",
-            "cidr": "192.168.0.101/24",
-            "network": "192.168.0.0/24",
-            "is_virtual": False,
-            "is_wireless": True,
-            "medium": "wireless",
-            "ssid": None,
-            "label": "Wi-Fi WLAN (wlan0)",
-        })
-    if not has_lan:
-        detected.insert(0, {
-            "interface": "eth0",
-            "ip": "192.168.0.1",
-            "cidr": "192.168.0.1/24",
-            "network": "192.168.0.0/24",
-            "is_virtual": False,
-            "is_wireless": False,
-            "medium": "wired",
-            "ssid": None,
-            "label": "Wired LAN (eth0)",
-        })
+    # Select the default subnet:
+    # 1. First choice: from the active default gateway interface
+    default_sub = None
+    active_ssid = None
+    if default_iface:
+        for d in detected:
+            if d["interface"] == default_iface and not d["is_virtual"]:
+                default_sub = d["network"]
+                active_ssid = d.get("ssid")
+                break
 
-    if any(d.get("interface") == "ens3" for d in detected):
-        default_sub = "192.168.0.0/24"
-    else:
+    # 2. Second choice: first non-virtual physical interface
+    if not default_sub:
         physical = [d for d in detected if not d["is_virtual"]]
-        default_sub = (
-            physical[0]["network"]
-            if physical
-            else (detected[0]["network"] if detected else "192.168.0.0/24")
-        )
+        if physical:
+            default_sub = physical[0]["network"]
+            active_ssid = physical[0].get("ssid")
+            if not default_iface:
+                default_iface = physical[0]["interface"]
+        else:
+            default_sub = detected[0]["network"] if detected else "192.168.0.0/24"
+
+    # Sort so default/primary physical interface appears first
+    detected.sort(key=lambda x: (not x.get("is_default", False), x.get("is_virtual", False)))
+
     return {
         "default_network": default_sub,
+        "default_interface": default_iface,
+        "default_gateway": default_gw,
+        "active_ssid": active_ssid,
         "interfaces": detected,
     }
 

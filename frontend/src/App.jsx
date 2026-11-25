@@ -418,6 +418,8 @@ function App() {
       return "192.168.0.0/24";
     }
   });
+  const [showCustomSubnetOverride, setShowCustomSubnetOverride] = useState(false);
+  const [activeNetworkDetails, setActiveNetworkDetails] = useState(null);
 
   const updateCustomSubnet = (newSubnet) => {
     if (newSubnet !== undefined) {
@@ -430,6 +432,24 @@ function App() {
         }
       }
     }
+  };
+
+  const getConnectedNetworkLabel = () => {
+    if (selectedInterface === "wlan0") {
+      const wlan = detectedInterfaces.find((i) => i.interface === "wlan0" || i.is_wireless);
+      if (wlan) {
+        return `${wlan.ssid ? `Wi-Fi (${wlan.ssid})` : "Wi-Fi"} • ${wlan.network || detectedSubnet}`;
+      }
+    } else if (selectedInterface === "eth0") {
+      const eth = detectedInterfaces.find((i) => i.interface === "eth0" || (!i.is_wireless && !i.is_virtual));
+      if (eth) {
+        return `Wired (${eth.interface}) • ${eth.network || detectedSubnet}`;
+      }
+    }
+    if (activeNetworkDetails?.active_ssid) {
+      return `Wi-Fi (${activeNetworkDetails.active_ssid}) • ${detectedSubnet}`;
+    }
+    return `Auto-Detected • ${detectedSubnet}`;
   };
   const [detectedInterfaces, setDetectedInterfaces] = useState([]);
   const [selectedInterface, setSelectedInterface] = useState("all");
@@ -541,6 +561,7 @@ function App() {
       const response = await fetch(`${API_URL}/discovery/local-subnets`);
       if (response.ok) {
         const data = await response.json();
+        setActiveNetworkDetails(data);
         if (data.default_network) {
           setDetectedSubnet(data.default_network);
         }
@@ -5033,49 +5054,89 @@ const LanScannerPage = () => {
                 Wired LAN (eth0) ({ethDevicesCount})
               </button>
 
-              <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", marginLeft: "4px", flexWrap: "wrap" }}>
-                <span style={{ fontSize: "11px", color: "#334155", fontWeight: "700" }}>Target Subnet:</span>
-                <input
-                  type="text"
-                  value={detectedSubnet}
-                  onChange={(e) => updateCustomSubnet(e.target.value)}
-                  placeholder="e.g. 192.168.0.0/24"
+              <div style={{ display: "inline-flex", alignItems: "center", gap: "8px", marginLeft: "4px", flexWrap: "wrap" }}>
+                <div
                   style={{
-                    background: "#eff6ff",
-                    border: "1.5px solid #2563eb",
-                    color: "#1e3a8a",
-                    fontWeight: "700",
-                    padding: "6px 12px",
-                    borderRadius: "6px",
-                    fontSize: "12.5px",
-                    fontFamily: "monospace",
-                    width: "155px",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    background: "#f0fdf4",
+                    border: "1.5px solid #86efac",
+                    padding: "5px 12px",
+                    borderRadius: "8px",
+                    boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
                   }}
-                  title="Enter any custom IPv4 CIDR subnet (e.g. 192.168.0.0/24, 192.168.1.0/24, 10.0.0.0/24)"
-                />
-                <div style={{ display: "inline-flex", gap: "4px", flexWrap: "wrap", alignItems: "center" }}>
-                  {["192.168.0.0/24", "192.168.1.0/24", "10.0.0.0/24", "172.16.0.0/24"].map((preset) => (
-                    <button
-                      key={`ls-preset-${preset}`}
-                      type="button"
-                      onClick={() => updateCustomSubnet(preset)}
-                      style={{
-                        padding: "4px 8px",
-                        fontSize: "11px",
-                        borderRadius: "4px",
-                        border: detectedSubnet === preset ? "1.5px solid #2563eb" : "1px solid #cbd5e1",
-                        background: detectedSubnet === preset ? "#2563eb" : "#ffffff",
-                        color: detectedSubnet === preset ? "#ffffff" : "#475569",
-                        fontWeight: detectedSubnet === preset ? "700" : "500",
-                        cursor: "pointer",
-                        fontFamily: "monospace",
-                      }}
-                      title={`Click to set target network to ${preset}`}
-                    >
-                      {preset}
-                    </button>
-                  ))}
+                  title="NetOps automatically detects the network your machine is connected to"
+                >
+                  <span style={{ display: "inline-block", width: "8px", height: "8px", borderRadius: "50%", background: "#16a34a", boxShadow: "0 0 6px #22c55e" }}></span>
+                  <span style={{ fontSize: "12px", color: "#166534", fontWeight: "700" }}>
+                    Network: {getConnectedNetworkLabel()}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowCustomSubnetOverride(!showCustomSubnetOverride)}
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      color: "#0369a1",
+                      fontSize: "11px",
+                      fontWeight: "600",
+                      cursor: "pointer",
+                      textDecoration: "underline",
+                      padding: "0 2px",
+                      marginLeft: "4px",
+                    }}
+                    title="Click if you want to manually type a different subnet"
+                  >
+                    {showCustomSubnetOverride ? "Hide Override" : "⚙️ Change Subnet"}
+                  </button>
                 </div>
+
+                {showCustomSubnetOverride && (
+                  <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", flexWrap: "wrap", background: "#f8fafc", padding: "4px 8px", borderRadius: "6px", border: "1px dashed #94a3b8" }}>
+                    <span style={{ fontSize: "11px", color: "#334155", fontWeight: "700" }}>Custom:</span>
+                    <input
+                      type="text"
+                      value={detectedSubnet}
+                      onChange={(e) => updateCustomSubnet(e.target.value)}
+                      placeholder="e.g. 192.168.0.0/24"
+                      style={{
+                        background: "#eff6ff",
+                        border: "1.5px solid #2563eb",
+                        color: "#1e3a8a",
+                        fontWeight: "700",
+                        padding: "4px 8px",
+                        borderRadius: "6px",
+                        fontSize: "12px",
+                        fontFamily: "monospace",
+                        width: "140px",
+                      }}
+                      title="Enter any custom IPv4 CIDR subnet (e.g. 192.168.0.0/24, 192.168.1.0/24, 10.0.0.0/24)"
+                    />
+                    <div style={{ display: "inline-flex", gap: "4px", flexWrap: "wrap", alignItems: "center" }}>
+                      {["192.168.0.0/24", "192.168.1.0/24", "10.0.0.0/24", "172.16.0.0/24"].map((preset) => (
+                        <button
+                          key={`ls-preset-${preset}`}
+                          type="button"
+                          onClick={() => updateCustomSubnet(preset)}
+                          style={{
+                            padding: "3px 6px",
+                            fontSize: "10.5px",
+                            borderRadius: "4px",
+                            border: detectedSubnet === preset ? "1.5px solid #2563eb" : "1px solid #cbd5e1",
+                            background: detectedSubnet === preset ? "#2563eb" : "#ffffff",
+                            color: detectedSubnet === preset ? "#ffffff" : "#475569",
+                            fontWeight: detectedSubnet === preset ? "700" : "500",
+                            cursor: "pointer",
+                            fontFamily: "monospace",
+                          }}
+                        >
+                          {preset}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -11452,32 +11513,24 @@ const Dashboard = () => {
 
             {isAdmin && (
               <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
-                <input
-                  type="text"
-                  value={detectedSubnet}
-                  onChange={(e) => updateCustomSubnet(e.target.value)}
-                  placeholder="e.g. 192.168.0.0/24"
-                  style={{
-                    padding: "4px 8px",
-                    fontSize: "11.5px",
-                    fontFamily: "monospace",
-                    borderRadius: "6px",
-                    border: "1.5px solid #3b82f6",
-                    background: "#eff6ff",
-                    color: "#1e3a8a",
-                    width: "135px",
-                    fontWeight: "700",
-                  }}
-                  title="Enter any custom IPv4 subnet range (e.g. 192.168.0.0/24, 192.168.1.0/24, 10.0.0.0/24)"
-                />
                 <button
                   type="button"
                   className="primary-button small"
                   onClick={() => scanAllLanDevices(detectedSubnet, "all")}
                   disabled={lanDevicesScanning}
-                  style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    background: "#0284c7",
+                    boxShadow: "0 2px 6px rgba(2, 132, 199, 0.25)",
+                    padding: "6px 14px",
+                    fontWeight: "700",
+                  }}
+                  title={`Scan all devices connected to ${getConnectedNetworkLabel()}`}
                 >
-                  <span>{lanDevicesScanning ? "⏳" : "📡"}</span> {lanDevicesScanning ? "Scanning..." : "Run Discovery Scan"}
+                  <span>{lanDevicesScanning ? "⏳" : "📡"}</span>
+                  {lanDevicesScanning ? "Scanning Network..." : `Scan Network (${detectedSubnet || "Auto"})`}
                 </button>
               </div>
             )}

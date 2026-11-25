@@ -100,15 +100,16 @@ def run_discovery_scan(
             else None
         )
         target_network = (request.network or "").strip()
+        subnets_info = detect_local_subnets()
+
         # Auto-resolve network subnet for the specific interface if not explicitly provided
-        if not target_network or target_network.lower() == "auto":
-            subnets_info = detect_local_subnets()
+        if not target_network or target_network.lower() in ("auto", "current"):
             if clean_iface:
                 for if_info in subnets_info.get("interfaces", []):
                     if if_info.get("interface") == clean_iface and if_info.get("network"):
                         target_network = if_info["network"]
                         break
-            if not target_network:
+            if not target_network or target_network.lower() in ("auto", "current"):
                 target_network = subnets_info.get("default_network", "192.168.0.0/24")
 
         if target_network and "/" not in target_network:
@@ -131,11 +132,24 @@ def run_discovery_scan(
             )
 
         target_network_name = (request.network_name or "").strip()
-        if not target_network_name:
-            if "192.168.0." in target_network:
+        if not target_network_name or target_network_name.lower() in ("auto", "current", "all"):
+            # Check if target_network matches any local physical interface
+            matched_iface = None
+            for if_info in subnets_info.get("interfaces", []):
+                if if_info.get("network") == target_network and not if_info.get("is_virtual"):
+                    matched_iface = if_info
+                    break
+            if matched_iface:
+                if matched_iface.get("ssid"):
+                    target_network_name = f"Wi-Fi ({matched_iface['ssid']})"
+                elif matched_iface.get("medium") == "wired":
+                    target_network_name = f"Wired Network ({matched_iface.get('interface', 'eth0')})"
+                else:
+                    target_network_name = "Local Network"
+            elif "192.168.0." in target_network:
                 target_network_name = "Home Network"
             else:
-                target_network_name = "Remote Network"
+                target_network_name = f"Network ({target_network})"
 
         has_physical_net = (
             os.path.exists("/sys/class/net/eth0")
@@ -326,6 +340,7 @@ def run_discovery_scan(
         return {
             "status": "completed",
             "network": target_network,
+            "network_name": target_network_name,
             "interface": clean_iface or "all",
             "devices_discovered": len(
                 discovered_devices
