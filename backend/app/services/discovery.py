@@ -436,10 +436,9 @@ def _verify_device_liveness(ip: str, iface: str | None = None) -> bool:
         )
         for line in res.stdout.splitlines():
             line_upper = line.upper()
-            if "FAILED" in line_upper or "INCOMPLETE" in line_upper:
-                return False
-            if "REACHABLE" in line_upper or "PERMANENT" in line_upper:
-                return True
+            if any(st in line_upper for st in ("REACHABLE", "PERMANENT", "STALE", "DELAY")):
+                if "LLADDR" in line_upper:
+                    return True
     except Exception:
         pass
 
@@ -1145,6 +1144,47 @@ def discover_devices(network: str, interface: str | None = None):
         neighbor["medium"] = "wireless" if is_wireless_interface(iface) else "wired"
         discovered_by_mac[mac_address] = neighbor
 
+    # ---------------------------------------------------------
+    # 6. Ingest Connected Devices from Active Router / AP Client Table
+    # Pulls devices registered in the router/AP (including sleeping mobile devices)
+    # ---------------------------------------------------------
+    try:
+        from .router.manager import get_active_router_driver
+        router_engine = get_active_router_driver()
+        router_devs = router_engine.get_connected_devices()
+        for r_dev in router_devs:
+            r_ip = r_dev.get("ip_address")
+            r_mac = r_dev.get("mac_address")
+            if not r_mac or not r_ip:
+                continue
+            try:
+                if ipaddress.ip_address(r_ip) not in parsed_network:
+                    continue
+            except Exception:
+                continue
+            r_mac = r_mac.upper()
+            if r_mac in discovered_by_mac:
+                if not discovered_by_mac[r_mac].get("ip_address"):
+                    discovered_by_mac[r_mac]["ip_address"] = r_ip
+            else:
+                r_vendor = resolve_mac_vendor(r_mac)
+                r_iface = r_dev.get("interface") or specific_iface
+                discovered_by_mac[r_mac] = {
+                    "ip_address": r_ip,
+                    "mac_address": r_mac,
+                    "interface": r_iface,
+                    "medium": "wireless" if (r_iface and is_wireless_interface(r_iface)) else "wired",
+                    "hostname": r_dev.get("hostname"),
+                    "vendor": r_vendor,
+                    "device_type": classify_device(
+                        hostname=r_dev.get("hostname"),
+                        vendor=r_vendor,
+                        mac_address=r_mac,
+                    ),
+                }
+    except Exception as r_err:
+        pass
+
     # Ensure the local host interface IP/MAC is present when scanning
     host_ifaces = [specific_iface] if specific_iface else ["eth0", "wlan0"]
     for h_iface in host_ifaces:
@@ -1384,7 +1424,7 @@ def save_discovered_devices(
         if existing_device:
             if existing_device.mac_address != mac_address:
                 existing_device.mac_address = mac_address
-            if owner_id is not None and (existing_device.owner_id is None or existing_device.owner_id == owner_id):
+            if owner_id is not None:
                 existing_device.owner_id = owner_id
             if clean_network_name:
                 existing_device.network_name = clean_network_name

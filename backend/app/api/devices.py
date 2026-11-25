@@ -316,8 +316,13 @@ def get_devices(
                 pass
         # Admins and Super Admins manage and see all network devices by default
     else:
-        # Strict per-user network isolation for standard users
-        query = query.where(Device.owner_id == current_user.id)
+        # Standard users see devices they own or unassigned network infrastructure devices
+        query = query.where(
+            or_(
+                Device.owner_id == current_user.id,
+                Device.owner_id.is_(None),
+            )
+        )
 
     clean_net = (network_name or "").strip().lower()
     if clean_net and clean_net not in ("all", "current"):
