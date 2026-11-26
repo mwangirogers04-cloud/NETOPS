@@ -22,11 +22,6 @@ import {
   EyeOff,
   RefreshCw,
   HelpCircle,
-  Camera,
-  Cable,
-  Globe,
-  Laptop,
-  Cpu,
 } from "lucide-react";
 
 const formatFetchError = (err, defaultMsg = "Request failed.") => {
@@ -1253,27 +1248,6 @@ export default function LoginPage({
             >
               <Lock size={13} style={{ display: "inline-block", verticalAlign: "middle", marginRight: "4px" }} /> <strong>Need an account?</strong> User self-registration is disabled. New accounts can only be provisioned by an <strong>Administrator</strong> or <strong>Developer</strong>. Please contact your system administrator to request access.
             </div>
-
-            {/* ROLE-BASED SECURITY POLICY */}
-            <div className="quick-roles-panel">
-              <div className="quick-roles-title" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                <Lock size={13} /> Role-Based Security Policy
-              </div>
-              <div
-                style={{
-                  background: "#f8fafc",
-                  border: "1px solid #cbd5e1",
-                  borderRadius: "8px",
-                  padding: "10px 12px",
-                  fontSize: "11px",
-                  color: "#475569",
-                  lineHeight: 1.5,
-                }}
-              >
-                <div><strong style={{ color: "#2563eb", display: "inline-flex", alignItems: "center", gap: "4px" }}><ShieldCheck size={13} /> Administrators:</strong> Full access to LAN scanning, endpoint patching, firewall enforcement & report exports.</div>
-                <div style={{ marginTop: "4px" }}><strong style={{ color: "#0f172a", display: "inline-flex", alignItems: "center", gap: "4px" }}><User size={13} /> Standard Users:</strong> Restricted to read-only Dashboard view only (LAN scan updates & report downloads disabled).</div>
-              </div>
-            </div>
           </form>
         )}
 
@@ -1571,35 +1545,9 @@ export default function LoginPage({
           </div>
         )}
 
-        <div style={{ textAlign: "center", marginTop: "24px", paddingTop: "14px", borderTop: "1px solid #e2e8f0", fontSize: "12px", color: "#64748b" }}>
-          <div><strong style={{ color: "#0f172a" }}>NETOPS Version 2</strong> • copyright 2026</div>
-          <div style={{ marginTop: "8px", fontSize: "11px", color: "#475569", display: "flex", justifyContent: "center", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-            <span style={{ fontWeight: 600, color: "#334155" }}>Support &amp; Inquiries:</span>
-            <a href="tel:+254704393504" style={{ color: "#2563eb", textDecoration: "none", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: "4px" }}>
-              <Phone size={12} /> +254704393504
-            </a>
-            <span style={{ color: "#cbd5e1" }}>•</span>
-            <a href="mailto:rogersiru@gmail.com" style={{ color: "#2563eb", textDecoration: "none", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: "4px" }}>
-              <Mail size={12} /> rogersiru@gmail.com
-            </a>
-          </div>
-
-          <div style={{ marginTop: "12px", paddingTop: "10px", borderTop: "1px dashed #e2e8f0" }}>
-            <div style={{ fontSize: "10px", fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "6px" }}>
-              Services We Offer
-            </div>
-            <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "6px" }}>
-              <span style={{ background: "#f1f5f9", color: "#334155", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 500, display: "inline-flex", alignItems: "center", gap: "4px" }}><Camera size={12} /> CCTV Installation</span>
-              <span style={{ background: "#f1f5f9", color: "#334155", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 500, display: "inline-flex", alignItems: "center", gap: "4px" }}><Cable size={12} /> Structured Cabling</span>
-              <span style={{ background: "#f1f5f9", color: "#334155", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 500, display: "inline-flex", alignItems: "center", gap: "4px" }}><Globe size={12} /> Websites Maintenance</span>
-              <span style={{ background: "#f1f5f9", color: "#334155", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 500, display: "inline-flex", alignItems: "center", gap: "4px" }}><Laptop size={12} /> Software Installations &amp; Updates</span>
-              <span style={{ background: "#f1f5f9", color: "#334155", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 500, display: "inline-flex", alignItems: "center", gap: "4px" }}><Cpu size={12} /> Hardware Performance Maintenance</span>
-            </div>
-          </div>
-
-          {/* FAQS SECTION ON LOGIN */}
-          <div style={{ marginTop: "14px", paddingTop: "10px", borderTop: "1px dashed #e2e8f0" }}>
-            <button
+        {/* FAQS SECTION ON LOGIN */}
+        <div style={{ textAlign: "center", marginTop: "20px", paddingTop: "14px", borderTop: "1px solid #e2e8f0" }}>
+          <button
               type="button"
               onClick={() => setShowLoginFaqs(!showLoginFaqs)}
               style={{
@@ -1669,7 +1617,6 @@ export default function LoginPage({
               </div>
             )}
           </div>
-        </div>
       </div>
     </div>
   );
