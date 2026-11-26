@@ -452,7 +452,27 @@ function App() {
     return `Auto-Detected • ${detectedSubnet}`;
   };
   const [detectedInterfaces, setDetectedInterfaces] = useState([]);
-  const [selectedInterface, setSelectedInterface] = useState("all");
+  const [selectedInterface, setSelectedInterface] = useState(() => {
+    try {
+      return localStorage.getItem("netops_selected_interface") || "all";
+    } catch {
+      return "all";
+    }
+  });
+
+  const handleSelectInterface = (ifaceName) => {
+    const val = ifaceName || "all";
+    setSelectedInterface(val);
+    try {
+      localStorage.setItem("netops_selected_interface", val);
+    } catch (_) {}
+    if (val !== "all" && Array.isArray(detectedInterfaces)) {
+      const match = detectedInterfaces.find((i) => i.interface === val);
+      if (match && match.network) {
+        updateCustomSubnet(match.network);
+      }
+    }
+  };
   const [lanSearchQuery, setLanSearchQuery] = useState("");
   const [deviceSearchQuery, setDeviceSearchQuery] = useState("");
   const [lanFilterStatus, setLanFilterStatus] = useState("all");
@@ -591,7 +611,7 @@ function App() {
         targetNetwork = `${targetNetwork}/24`;
       }
     }
-    setSelectedInterface(targetInterface);
+    handleSelectInterface(targetInterface);
     updateCustomSubnet(targetNetwork);
     setLanDevicesScanning(true);
     const controller = new AbortController();
@@ -1114,34 +1134,6 @@ function App() {
     return fields.some((f) => (f || "").toString().toLowerCase().includes(q));
   };
 
-  const isDeviceOnWlan = (device) => {
-    const iface = (device.network_interface || "").toLowerCase();
-    if (iface) {
-      return iface === "wlan0" || iface.startsWith("wl");
-    }
-    return device.medium === "wireless";
-  };
-
-  const isDeviceOnEth0 = (device) => {
-    const iface = (device.network_interface || "").toLowerCase();
-    if (iface) {
-      return iface === "eth0" || iface === "lan" || iface.startsWith("eth");
-    }
-    return device.medium === "wired" || device.medium === "ethernet";
-  };
-
-  const matchesSelectedInterface = (device) => {
-    if (!selectedInterface || selectedInterface === "all") return true;
-    if (selectedInterface === "lan" || selectedInterface === "eth0" || selectedInterface === "wired") {
-      return isDeviceOnEth0(device);
-    }
-    if (selectedInterface === "wlan0" || selectedInterface === "wireless" || selectedInterface === "wifi") {
-      return isDeviceOnWlan(device);
-    }
-    const iface = (device.network_interface || "").toLowerCase();
-    return iface === selectedInterface.toLowerCase();
-  };
-
   const isIpInCidr = (ip, cidr) => {
     if (!ip || !cidr || !cidr.includes("/")) return false;
     try {
@@ -1155,6 +1147,54 @@ function App() {
     } catch {
       return false;
     }
+  };
+
+  const isDeviceOnWlan = (device) => {
+    if (!device) return false;
+    const iface = (device.network_interface || "").trim().toLowerCase();
+    if (iface) {
+      if (
+        iface === "wlan0" ||
+        iface.startsWith("wl") ||
+        iface.includes("wifi") ||
+        iface.includes("wireless") ||
+        iface.includes("probe")
+      ) return true;
+    }
+    const med = (device.medium || "").trim().toLowerCase();
+    if (med === "wireless" || med === "wifi") return true;
+    if (Array.isArray(detectedInterfaces) && device.ip_address) {
+      const wlanIface = detectedInterfaces.find((i) => i.interface === "wlan0" || i.is_wireless);
+      if (wlanIface && wlanIface.network && isIpInCidr(device.ip_address, wlanIface.network)) return true;
+    }
+    return false;
+  };
+
+  const isDeviceOnEth0 = (device) => {
+    if (!device) return false;
+    const iface = (device.network_interface || "").trim().toLowerCase();
+    if (iface) {
+      if (iface === "eth0" || iface === "lan" || iface.startsWith("eth") || iface.startsWith("en") || iface.includes("wired") || iface.includes("ethernet")) return true;
+    }
+    const med = (device.medium || "").trim().toLowerCase();
+    if (med === "wired" || med === "ethernet") return true;
+    if (Array.isArray(detectedInterfaces) && device.ip_address) {
+      const ethIface = detectedInterfaces.find((i) => i.interface === "eth0" || (!i.is_wireless && !i.is_virtual));
+      if (ethIface && ethIface.network && isIpInCidr(device.ip_address, ethIface.network)) return true;
+    }
+    return false;
+  };
+
+  const matchesSelectedInterface = (device) => {
+    if (!selectedInterface || selectedInterface === "all") return true;
+    if (selectedInterface === "lan" || selectedInterface === "eth0" || selectedInterface === "wired") {
+      return isDeviceOnEth0(device);
+    }
+    if (selectedInterface === "wlan0" || selectedInterface === "wireless" || selectedInterface === "wifi") {
+      return isDeviceOnWlan(device);
+    }
+    const iface = (device.network_interface || "").trim().toLowerCase();
+    return iface === selectedInterface.toLowerCase();
   };
 
   const matchesSelectedNetwork = (device) => {
@@ -1189,9 +1229,12 @@ function App() {
 
   const wlanScopedCount = siteScopedDevices.filter(isDeviceOnWlan).length;
 
-  const scopedDevices = (selectedInterface && selectedInterface !== "all")
+  const rawScopedDevices = (selectedInterface && selectedInterface !== "all")
     ? siteScopedDevices.filter(matchesSelectedInterface).slice().sort((a, b) => compareIpAddresses(a.ip_address, b.ip_address))
     : siteScopedDevices.slice().sort((a, b) => compareIpAddresses(a.ip_address, b.ip_address));
+
+  const hasScopedMismatch = (selectedInterface && selectedInterface !== "all") && rawScopedDevices.length === 0 && siteScopedDevices.length > 0;
+  const scopedDevices = hasScopedMismatch ? siteScopedDevices.slice().sort((a, b) => compareIpAddresses(a.ip_address, b.ip_address)) : rawScopedDevices;
 
   const totalDevices = siteScopedDevices.length;
   const onlineDevices = siteScopedDevices.filter((device) => isDeviceActuallyOnline(device)).length;
@@ -1577,7 +1620,7 @@ const loadEvents = async () => {
     const searchValue = dev?.ip_address || dev?.mac_address || "";
 
     setDeviceFilter("all");
-    setSelectedInterface("all");
+    handleSelectInterface("all");
     setLanFilterStatus("all");
     setDeviceSearchQuery(searchValue);
     setLanSearchQuery(searchValue);
@@ -2839,7 +2882,7 @@ const DevicesPage = () => {
             <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
               <button
                 type="button"
-                onClick={() => setSelectedInterface("all")}
+                onClick={() => handleSelectInterface("all")}
                 style={{
                   padding: "8px 16px",
                   borderRadius: "8px",
@@ -2862,7 +2905,7 @@ const DevicesPage = () => {
 
               <button
                 type="button"
-                onClick={() => setSelectedInterface("eth0")}
+                onClick={() => handleSelectInterface("eth0")}
                 style={{
                   padding: "8px 16px",
                   borderRadius: "8px",
@@ -2885,7 +2928,7 @@ const DevicesPage = () => {
 
               <button
                 type="button"
-                onClick={() => setSelectedInterface("wlan0")}
+                onClick={() => handleSelectInterface("wlan0")}
                 style={{
                   padding: "8px 16px",
                   borderRadius: "8px",
@@ -2917,7 +2960,7 @@ const DevicesPage = () => {
                     <button
                       key={`inv-iface-${iface.interface}`}
                       type="button"
-                      onClick={() => setSelectedInterface(iface.interface)}
+                      onClick={() => handleSelectInterface(iface.interface)}
                       style={{
                         padding: "8px 16px",
                         borderRadius: "8px",
@@ -2976,6 +3019,8 @@ const DevicesPage = () => {
               <span>
                 {selectedInterface === "all"
                   ? `Showing all ${siteScopedDevices.length} devices across all interfaces`
+                  : hasScopedMismatch
+                  ? `Showing all ${scopedDevices.length} devices (0 found on ${selectedInterface === "eth0" ? "Wired LAN" : selectedInterface}; showing all network devices)`
                   : `Showing ${scopedDevices.length} of ${siteScopedDevices.length} devices on ${
                       (selectedInterface === "eth0" || selectedInterface === "lan")
                         ? "Wired LAN (eth0)"
@@ -2990,11 +3035,55 @@ const DevicesPage = () => {
               <button
                 type="button"
                 className="secondary-button"
-                onClick={() => setSelectedInterface("all")}
+                onClick={() => handleSelectInterface("all")}
                 style={{ fontSize: "12px", padding: "6px 12px", fontWeight: "600" }}
               >
                 ✕ Show All Devices
               </button>
+            )}
+
+            {hasScopedMismatch && (
+              <div
+                style={{
+                  width: "100%",
+                  marginTop: "8px",
+                  padding: "8px 14px",
+                  borderRadius: "6px",
+                  background: "#fffbeb",
+                  border: "1.5px solid #f59e0b",
+                  color: "#92400e",
+                  fontSize: "12.5px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: "10px",
+                  flexWrap: "wrap",
+                }}
+              >
+                <span>
+                  ⚠️ <strong>Interface Fallback:</strong> 0 devices detected on <strong>{selectedInterface === "eth0" ? "Wired LAN (eth0)" : selectedInterface}</strong>. Displaying all {scopedDevices.length} network devices below so you can approve, configure VLANs, or isolate them without restriction.
+                </span>
+                <div style={{ display: "flex", gap: "6px" }}>
+                  {wlanScopedCount > 0 && selectedInterface !== "wlan0" && (
+                    <button
+                      type="button"
+                      className="secondary-button small"
+                      onClick={() => handleSelectInterface("wlan0")}
+                      style={{ fontSize: "11px", fontWeight: "700", background: "#ecfdf5", borderColor: "#10b981", color: "#065f46" }}
+                    >
+                      📶 Switch to Wi-Fi ({wlanScopedCount})
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="secondary-button small"
+                    onClick={() => handleSelectInterface("all")}
+                    style={{ fontSize: "11px", fontWeight: "700" }}
+                  >
+                    Reset Filter
+                  </button>
+                </div>
+              </div>
             )}
           </div>
         </div>
@@ -4688,9 +4777,10 @@ const DevicesPage = () => {
 // ------------------------------------------------------------
 
 const LanScannerPage = () => {
+  const [filterTableByInterface, setFilterTableByInterface] = useState(false);
   const interfaceDevices = devices.filter(matchesSelectedNetwork);
   const isAllInterfaces = !selectedInterface || selectedInterface === "all";
-  const displayedInterfaceDevices = isAllInterfaces
+  const rawInterfaceDevices = (!filterTableByInterface || isAllInterfaces)
     ? interfaceDevices
     : interfaceDevices.filter((d) => {
         if (selectedInterface === "eth0" || selectedInterface === "lan") {
@@ -4701,6 +4791,11 @@ const LanScannerPage = () => {
         }
         return (d.network_interface || "").toLowerCase() === selectedInterface.toLowerCase();
       });
+
+  const hasInterfaceMismatch = filterTableByInterface && !isAllInterfaces && rawInterfaceDevices.length === 0 && interfaceDevices.length > 0;
+  // If the selected interface has 0 devices but other network interfaces have discovered devices,
+  // do not hide them! Fall back to displaying all devices so the admin can approve and manage them.
+  const displayedInterfaceDevices = hasInterfaceMismatch ? interfaceDevices : rawInterfaceDevices;
 
   const onlineDevices = displayedInterfaceDevices.filter((d) => isDeviceActuallyOnline(d));
   const offlineDevices = displayedInterfaceDevices.filter((d) => isDeviceOfflineRegistered(d));
@@ -4790,7 +4885,7 @@ const LanScannerPage = () => {
           <button
             type="button"
             className="secondary-button"
-            onClick={() => setSelectedInterface("all")}
+            onClick={() => handleSelectInterface("all")}
             style={{
               fontSize: "13px",
               fontWeight: "700",
@@ -4803,7 +4898,7 @@ const LanScannerPage = () => {
               borderColor: selectedInterface === "all" ? "#1d4ed8" : "#cbd5e1",
               cursor: "pointer",
             }}
-            title="Filter to view all devices across all interfaces without scanning"
+            title="Target all interfaces (Wired LAN and Wi-Fi) for discovery scan and monitoring"
           >
             <span>🌐</span>
             All Interfaces ({interfaceDevices.length})
@@ -4812,7 +4907,7 @@ const LanScannerPage = () => {
           <button
             type="button"
             className="secondary-button"
-            onClick={() => setSelectedInterface("eth0")}
+            onClick={() => handleSelectInterface("eth0")}
             style={{
               fontSize: "13px",
               fontWeight: "700",
@@ -4825,7 +4920,7 @@ const LanScannerPage = () => {
               borderColor: selectedInterface === "eth0" ? "#1e293b" : "#cbd5e1",
               cursor: "pointer",
             }}
-            title="Filter to view only devices on eth0 without scanning"
+            title="Target Wired LAN (eth0) for discovery scan"
           >
             <span>🔌</span>
             Wired LAN (eth0) ({ethDevicesCount})
@@ -4834,7 +4929,7 @@ const LanScannerPage = () => {
           <button
             type="button"
             className="secondary-button"
-            onClick={() => setSelectedInterface("wlan0")}
+            onClick={() => handleSelectInterface("wlan0")}
             style={{
               fontSize: "13px",
               fontWeight: "700",
@@ -4847,7 +4942,7 @@ const LanScannerPage = () => {
               borderColor: selectedInterface === "wlan0" ? "#047857" : "#cbd5e1",
               cursor: "pointer",
             }}
-            title="Filter to view only devices on wlan0 without scanning"
+            title="Target Wi-Fi (wlan0) for discovery scan"
           >
             <span>📶</span>
             Wi-Fi (wlan0) ({wlanDevicesCount})
@@ -4981,12 +5076,12 @@ const LanScannerPage = () => {
         <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", gap: "16px" }}>
           <div>
             <div style={{ fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.08em", color: "#475569", fontWeight: "700" }}>
-              SELECT INTERFACE TO VIEW &amp; SCAN
+              TARGET INTERFACE TO SCAN
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "8px", flexWrap: "wrap" }}>
               <button
                 type="button"
-                onClick={() => setSelectedInterface("all")}
+                onClick={() => handleSelectInterface("all")}
                 style={{
                   padding: "7px 14px",
                   borderRadius: "8px",
@@ -5001,6 +5096,7 @@ const LanScannerPage = () => {
                   gap: "6px",
                   boxShadow: selectedInterface === "all" ? "0 2px 6px rgba(37, 99, 235, 0.3)" : "none",
                 }}
+                title="Select All Interfaces to scan both Wired LAN and Wi-Fi"
               >
                 <span>🌐</span>
                 All Interfaces ({interfaceDevices.length})
@@ -5008,9 +5104,7 @@ const LanScannerPage = () => {
 
               <button
                 type="button"
-                onClick={() => {
-                  setSelectedInterface("wlan0");
-                }}
+                onClick={() => handleSelectInterface("wlan0")}
                 style={{
                   padding: "7px 14px",
                   borderRadius: "8px",
@@ -5025,6 +5119,7 @@ const LanScannerPage = () => {
                   gap: "6px",
                   boxShadow: selectedInterface === "wlan0" ? "0 2px 6px rgba(5, 150, 105, 0.3)" : "none",
                 }}
+                title="Select Wi-Fi (wlan0) to scan wireless connected devices"
               >
                 <span>📶</span>
                 Wi-Fi WLAN (wlan0) ({wlanDevicesCount})
@@ -5032,9 +5127,7 @@ const LanScannerPage = () => {
 
               <button
                 type="button"
-                onClick={() => {
-                  setSelectedInterface("eth0");
-                }}
+                onClick={() => handleSelectInterface("eth0")}
                 style={{
                   padding: "7px 14px",
                   borderRadius: "8px",
@@ -5049,6 +5142,7 @@ const LanScannerPage = () => {
                   gap: "6px",
                   boxShadow: selectedInterface === "eth0" ? "0 2px 6px rgba(51, 65, 85, 0.3)" : "none",
                 }}
+                title="Select Wired LAN (eth0) to scan ethernet connected devices"
               >
                 <span>🔌</span>
                 Wired LAN (eth0) ({ethDevicesCount})
@@ -5272,14 +5366,14 @@ const LanScannerPage = () => {
           </div>
         )}
         {/* ACTIVE FILTER NOTICE */}
-        {!isAllInterfaces && (
+        {((!isAllInterfaces && filterTableByInterface) || hasInterfaceMismatch) && (
           <div
             style={{
               marginTop: "16px",
               padding: "12px 16px",
               borderRadius: "8px",
-              background: selectedInterface === "wlan0" ? "#ecfdf5" : "#f1f5f9",
-              border: selectedInterface === "wlan0" ? "1.5px solid #10b981" : "1.5px solid #64748b",
+              background: hasInterfaceMismatch ? "#fffbeb" : (selectedInterface === "wlan0" ? "#ecfdf5" : "#f1f5f9"),
+              border: hasInterfaceMismatch ? "1.5px solid #f59e0b" : (selectedInterface === "wlan0" ? "1.5px solid #10b981" : "1.5px solid #64748b"),
               display: "flex",
               justifyContent: "space-between",
               alignItems: "center",
@@ -5287,20 +5381,46 @@ const LanScannerPage = () => {
               gap: "12px",
             }}
           >
-            <div style={{ fontSize: "13px", color: selectedInterface === "wlan0" ? "#065f46" : "#1e293b", display: "flex", alignItems: "center", gap: "8px" }}>
-              <span>ℹ️</span>
+            <div style={{ fontSize: "13px", color: hasInterfaceMismatch ? "#92400e" : (selectedInterface === "wlan0" ? "#065f46" : "#1e293b"), display: "flex", alignItems: "center", gap: "8px" }}>
+              <span>{hasInterfaceMismatch ? "⚠️" : "ℹ️"}</span>
               <span>
-                Displaying <strong>{displayedInterfaceDevices.length}</strong> device(s) on <strong>{selectedInterface === "wlan0" ? "Wi-Fi (wlan0)" : "Wired LAN (eth0)"}</strong>. Devices on other interfaces ({devices.length - displayedInterfaceDevices.length}) are hidden by this filter.
+                {hasInterfaceMismatch ? (
+                  <>
+                    No active devices detected strictly on <strong>{selectedInterface === "wlan0" ? "Wi-Fi (wlan0)" : `Wired LAN (${selectedInterface})`}</strong>. Showing all <strong>{displayedInterfaceDevices.length}</strong> active device(s) discovered on your network (including Wi-Fi & probes) so you can approve, give internet access, block, isolate, or assign VLANs without restriction.
+                  </>
+                ) : (
+                  <>
+                    Displaying <strong>{displayedInterfaceDevices.length}</strong> device(s) on <strong>{selectedInterface === "wlan0" ? "Wi-Fi (wlan0)" : `Wired LAN (${selectedInterface})`}</strong>. Devices on other interfaces ({interfaceDevices.length - displayedInterfaceDevices.length}) are hidden by this filter.
+                  </>
+                )}
               </span>
             </div>
-            <button
-              type="button"
-              className="secondary-button small"
-              onClick={() => setSelectedInterface("all")}
-              style={{ fontWeight: "700", background: "#ffffff", borderColor: "#cbd5e1" }}
-            >
-              🌐 Show All {devices.length} Devices
-            </button>
+            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+              {hasInterfaceMismatch && selectedInterface !== "wlan0" && wlanDevicesCount > 0 && (
+                <button
+                  type="button"
+                  className="secondary-button small"
+                  onClick={() => {
+                    handleSelectInterface("wlan0");
+                    setFilterTableByInterface(true);
+                  }}
+                  style={{ fontWeight: "700", background: "#ecfdf5", borderColor: "#10b981", color: "#065f46" }}
+                >
+                  📶 Switch to Wi-Fi ({wlanDevicesCount})
+                </button>
+              )}
+              <button
+                type="button"
+                className="secondary-button small"
+                onClick={() => {
+                  setFilterTableByInterface(false);
+                  handleSelectInterface("all");
+                }}
+                style={{ fontWeight: "700", background: "#ffffff", borderColor: "#cbd5e1" }}
+              >
+                🌐 Show All ({interfaceDevices.length})
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -5572,16 +5692,57 @@ const LanScannerPage = () => {
 
       {/* DISCOVERED DEVICES TABLE */}
       <div className="panel">
-        <div className="panel-header">
+        <div className="panel-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px" }}>
           <div>
             <div className="panel-title">
-              Connected {selectedInterface === "all" ? "LAN & WLAN0" : selectedInterface === "wlan0" ? "WLAN0 (Wi-Fi)" : `LAN (${selectedInterface})`} Devices ({filteredDevices.length})
+              Connected {filterTableByInterface && !isAllInterfaces ? (selectedInterface === "wlan0" ? "WLAN0 (Wi-Fi)" : `LAN (${selectedInterface})`) : "Network"} Devices ({filteredDevices.length})
             </div>
             <div className="panel-subtitle">
-              Live machines connected to {selectedInterface === "all" ? `all interfaces (${detectedSubnet})` : `${selectedInterface} (${detectedSubnet})`} sorted in IP order. Click any action button to disconnect, allow, or isolate devices in order.
+              Live machines discovered across network ({detectedSubnet}) sorted in IP order. Click any action button to disconnect, allow, or isolate devices.
             </div>
           </div>
+          {!isAllInterfaces && (
+            <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+              <button
+                type="button"
+                className={!filterTableByInterface ? "primary-button small" : "secondary-button small"}
+                onClick={() => setFilterTableByInterface(false)}
+                style={{ fontSize: "11.5px", padding: "4px 10px" }}
+              >
+                🌐 All Devices ({interfaceDevices.length})
+              </button>
+              <button
+                type="button"
+                className={filterTableByInterface ? "primary-button small" : "secondary-button small"}
+                onClick={() => setFilterTableByInterface(true)}
+                style={{ fontSize: "11.5px", padding: "4px 10px" }}
+              >
+                {selectedInterface === "wlan0" ? "📶" : "🔌"} {selectedInterface.toUpperCase()} Only ({interfaceDevices.filter(selectedInterface === "wlan0" ? isDeviceOnWlan : isDeviceOnEth0).length})
+              </button>
+            </div>
+          )}
         </div>
+
+        {lanDevicesScanning && (
+          <div
+            style={{
+              padding: "10px 18px",
+              background: "#eff6ff",
+              borderBottom: "1.5px solid #bfdbfe",
+              display: "flex",
+              alignItems: "center",
+              gap: "10px",
+              color: "#1d4ed8",
+              fontSize: "12.5px",
+              fontWeight: "600",
+            }}
+          >
+            <span style={{ display: "inline-block", animation: "spin 1s linear infinite", fontSize: "15px" }}>🔄</span>
+            <span>
+              Network discovery sweep in progress on <strong>{selectedInterface === "all" ? "All Physical Interfaces" : selectedInterface.toUpperCase()}</strong> ({detectedSubnet}). Discovered machines will refresh automatically when scan finishes...
+            </span>
+          </div>
+        )}
 
         <div className="table-container">
           <table className="data-table">
@@ -5599,8 +5760,42 @@ const LanScannerPage = () => {
             <tbody>
               {filteredDevices.length === 0 ? (
                 <tr>
-                  <td colSpan={7} style={{ textAlign: "center", padding: "32px", color: "#475569" }}>
-                    No devices match the selected filter. Click <strong>"Scan All LAN Devices"</strong> above to discover live machines on the subnet.
+                  <td colSpan={7} style={{ textAlign: "center", padding: "40px 20px", color: "#475569" }}>
+                    <div style={{ fontSize: "28px", marginBottom: "8px" }}>
+                      {selectedInterface === "wlan0" ? "📶" : selectedInterface === "eth0" ? "🔌" : "🌐"}
+                    </div>
+                    <div style={{ fontWeight: "700", color: "#1e293b", fontSize: "14px" }}>
+                      {filterTableByInterface && !isAllInterfaces
+                        ? `No devices currently recorded on ${selectedInterface === "wlan0" ? "Wi-Fi (wlan0)" : selectedInterface === "eth0" ? "Wired LAN (eth0)" : selectedInterface.toUpperCase()}`
+                        : "No devices match the selected filter."}
+                    </div>
+                    <div style={{ fontSize: "12px", color: "#64748b", marginTop: "6px", marginBottom: "16px" }}>
+                      {filterTableByInterface && !isAllInterfaces
+                        ? `The network sweep for ${selectedInterface} has not discovered devices yet. Click below to scan this interface now, or view all discovered devices.`
+                        : "Click below to scan and discover live machines on the subnet."}
+                    </div>
+                    <div style={{ display: "inline-flex", gap: "10px", alignItems: "center", flexWrap: "wrap", justifyContent: "center" }}>
+                      <button
+                        type="button"
+                        className="primary-button"
+                        onClick={() => scanAllLanDevices(detectedSubnet, selectedInterface || "all")}
+                        disabled={lanDevicesScanning}
+                      >
+                        {lanDevicesScanning ? "⏳ Scanning..." : `🚀 Scan ${selectedInterface === "all" ? "All Interfaces" : selectedInterface.toUpperCase()} Now`}
+                      </button>
+                      {(filterTableByInterface || !isAllInterfaces) && (
+                        <button
+                          type="button"
+                          className="secondary-button"
+                          onClick={() => {
+                            setFilterTableByInterface(false);
+                            handleSelectInterface("all");
+                          }}
+                        >
+                          🌐 Show All {interfaceDevices.length} Discovered Devices
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ) : (
@@ -15478,8 +15673,9 @@ const EndpointUpdatesPage = () => {
     const token = localStorage.getItem("netops_token") || "";
     const siteName = selectedNetwork && selectedNetwork !== "all" ? selectedNetwork : "Remote Network";
     const targetNet = detectedSubnet || "192.168.1.0/24";
-    const curlCmd = `curl -sSL "${API_URL}/discovery/probe-script" | python3 - --server "${API_URL}" --token "${token}" --network "${targetNet}" --network-name "${siteName}"`;
-    const winCmd = `powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-RestMethod -Uri '${API_URL}/discovery/probe-script' | python - --server '${API_URL}' --token '${token}' --network '${targetNet}' --network-name '${siteName}'"`;
+    const ifaceParam = selectedInterface && selectedInterface !== "all" ? ` --interface "${selectedInterface}"` : "";
+    const curlCmd = `curl -sSL "${API_URL}/discovery/probe-script" | python3 - --server "${API_URL}" --token "${token}" --network "${targetNet}" --network-name "${siteName}"${ifaceParam}`;
+    const winCmd = `powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-RestMethod -Uri '${API_URL}/discovery/probe-script' | python - --server '${API_URL}' --token '${token}' --network '${targetNet}' --network-name '${siteName}'${ifaceParam}"`;
 
     return (
       <div

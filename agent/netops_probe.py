@@ -216,6 +216,29 @@ def get_local_ip_and_subnet():
     return local_ip, subnet
 
 
+def get_local_interface():
+    """Detect local active network interface name (e.g. wlan0, eth0, Wi-Fi, Ethernet)."""
+    system = platform.system().lower()
+    try:
+        if system == "linux":
+            out = subprocess.check_output(["ip", "-4", "route", "get", "8.8.8.8"], text=True, stderr=subprocess.DEVNULL)
+            parts = out.split()
+            if "dev" in parts:
+                return parts[parts.index("dev") + 1]
+        elif system == "darwin":
+            out = subprocess.check_output(["route", "-n", "get", "default"], text=True, stderr=subprocess.DEVNULL)
+            for line in out.splitlines():
+                if "interface:" in line:
+                    return line.split(":")[1].strip()
+        elif system == "windows":
+            out = subprocess.check_output(["netsh", "wlan", "show", "interfaces"], text=True, stderr=subprocess.DEVNULL)
+            if "State" in out and "connected" in out.lower():
+                return "wlan0"
+    except Exception:
+        pass
+    return "wlan0"
+
+
 def awaken_silent_devices(network_cidr):
     """
     Transmit multi-protocol awakening broadcast and multicast frames
@@ -392,7 +415,7 @@ def resolve_hostname(ip):
     return f"Host-{ip.replace('.', '-')}"
 
 
-def scan_local_subnet(network_cidr, max_workers=60):
+def scan_local_subnet(network_cidr, max_workers=60, interface=None):
     """
     Zero-Blindspot local subnet scan:
     1. Transmits multi-protocol awakening broadcast/multicasts.
@@ -400,7 +423,9 @@ def scan_local_subnet(network_cidr, max_workers=60):
     3. Harvests all active ARP/neighbour bindings from OS tables.
     Guarantees no active endpoint (wired, wireless, sleeping, or firewalled) is left out.
     """
-    print(f"[*] Initiating Zero-Blindspot sweep on subnet: {network_cidr} ...")
+    if not interface:
+        interface = get_local_interface()
+    print(f"[*] Initiating Zero-Blindspot sweep on subnet: {network_cidr} (Interface: {interface}) ...")
     net = ipaddress.ip_network(network_cidr, strict=False)
     hosts = [str(ip) for ip in net.hosts()][:254]
 
@@ -455,7 +480,7 @@ def scan_local_subnet(network_cidr, max_workers=60):
             "hostname": hostname,
             "vendor": vendor,
             "device_type": dev_type,
-            "network_interface": "client-probe",
+            "network_interface": interface,
         })
 
     print(f"[✓] Zero-Blindspot scan complete: Discovered {len(devices)} active LAN/WLAN endpoint(s).")
@@ -481,12 +506,14 @@ def login_for_token(server_url, username, password):
         return None
 
 
-def sync_to_netops(server_url, token, network, devices, network_name="Remote Network"):
+def sync_to_netops(server_url, token, network, devices, network_name="Remote Network", interface=None):
     """Upload discovered devices to NETOPS cloud endpoint."""
+    if not interface:
+        interface = get_local_interface()
     endpoint = f"{server_url.rstrip('/')}/discovery/agent-sync"
     payload = {
         "network": network,
-        "interface": "client-probe",
+        "interface": interface,
         "network_name": network_name,
         "devices": devices,
     }
@@ -547,6 +574,7 @@ def main():
     parser.add_argument("--password", help="Your NETOPS account password")
     parser.add_argument("--network", help="Subnet to scan (defaults to auto-detected local LAN e.g. 192.168.1.0/24)")
     parser.add_argument("--network-name", default=os.environ.get("NETOPS_NETWORK_NAME", "Remote Network"), help="Site / network label (defaults to 'Remote Network')")
+    parser.add_argument("--interface", default=None, help="Network interface being scanned (e.g. wlan0, eth0, auto-detected)")
     parser.add_argument("--interactive", action="store_true", help="Prompt interactively for credentials and network")
 
     args = parser.parse_args()
@@ -555,6 +583,7 @@ def main():
     token = args.token
     network = args.network
     network_name = args.network_name or "Remote Network"
+    interface = args.interface or get_local_interface()
 
     if not token and (args.username and args.password):
         print(f"[*] Authenticating with {server_url} as {args.username}...")
@@ -586,13 +615,13 @@ def main():
         network = auto_subnet
         print(f"[*] Auto-detected local IP: {local_ip} on subnet {network}")
 
-    devices = scan_local_subnet(network)
+    devices = scan_local_subnet(network, interface=interface)
     print(f"[*] Discovered {len(devices)} device(s) on local physical network.")
     for d in devices:
         print(f"    - IP: {d['ip_address']:16} MAC: {d['mac_address']:17} [{d['vendor']}] Name: {d['hostname']}")
 
-    print(f"[*] Syncing {len(devices)} device(s) to {server_url} (Site: {network_name}) ...")
-    sync_to_netops(server_url, token, network, devices, network_name=network_name)
+    print(f"[*] Syncing {len(devices)} device(s) to {server_url} (Site: {network_name}, Interface: {interface}) ...")
+    sync_to_netops(server_url, token, network, devices, network_name=network_name, interface=interface)
     print("=" * 64)
     print("  All done! Refresh your dashboard at https://www.netops.co.ke")
     print("=" * 64)
