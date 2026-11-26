@@ -1,5 +1,34 @@
 import React, { useEffect, useState } from "react";
 import { isTypeAndVlanMatching, getExpectedVlanForType } from "../utils/networkInterfaceStatus";
+import {
+  Network,
+  Plus,
+  RefreshCw,
+  Check,
+  CheckCircle2,
+  AlertTriangle,
+  AlertCircle,
+  ShieldAlert,
+  Tag,
+  Cable,
+  FileText,
+  Settings,
+  Pencil,
+  Trash2,
+  Zap,
+  Lock,
+  Unlock,
+  Eye,
+  Download,
+  Search,
+  Camera,
+  Clock,
+  X,
+  Copy,
+  Scale,
+  Rocket,
+  SlidersHorizontal,
+} from "lucide-react";
 
 export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, devices = [] }) {
   const isAdmin = currentUser?.role === "admin" || currentUser?.role === "super_admin";
@@ -401,7 +430,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
 
     if (!skipConfirm) {
       const promptText = (isBulk || targetPorts.length > 1)
-        ? `🔄 RESET ${targetPorts.length} SWITCH PORTS?\n\n` +
+        ? `RESET ${targetPorts.length} SWITCH PORTS?\n\n` +
           `Ports to reset:\n${targetPorts.join(", ")}\n\n` +
           `This will restore these ${targetPorts.length} ports to factory defaults:\n` +
           `• Mode: Access (untagged)\n` +
@@ -410,7 +439,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
           `• Quarantine: Cleared\n\n` +
           `All other ports and switch settings remain untouched.\n` +
           `Are you sure you want to proceed?`
-        : `🔄 RESET SWITCH PORT '${targetPorts[0]}'?\n\n` +
+        : `RESET SWITCH PORT '${targetPorts[0]}'?\n\n` +
           `This action will reset ONLY this port (${targetPorts[0]}) to factory defaults:\n` +
           `• Port Mode: Access (untagged)\n` +
           `• Assigned VLAN: Default VLAN 1\n` +
@@ -677,7 +706,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Failed to save schedule policy.");
       setBackupSchedule(data.settings);
-      setCycleFeedback({ type: "success", text: "✅ Automated switch backup policy updated successfully." });
+      setCycleFeedback({ type: "success", text: "Automated switch backup policy updated successfully." });
     } catch (err) {
       setCycleFeedback({ type: "error", text: err.message });
     } finally {
@@ -697,7 +726,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
       if (!res.ok) throw new Error(data.detail || "Failed to execute backup cycle.");
       setCycleFeedback({
         type: "success",
-        text: `✅ ${data.message}`,
+        text: data.message,
       });
       await loadBackups();
       await loadBackupSchedule();
@@ -730,7 +759,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
       <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "16px" }}>
         <div>
           <div className="page-title" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <span>🔀</span>
+            <Network size={24} color="#2563eb" />
             <span>Switch & VLAN Automation Center</span>
           </div>
           <div className="page-description">
@@ -746,7 +775,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
               onClick={() => setShowCreateVlanModal(true)}
               style={{ display: "flex", alignItems: "center", gap: "6px" }}
             >
-              <span>➕</span> Create New VLAN on Switch
+              <Plus size={15} /> Create New VLAN on Switch
             </button>
             <button
               type="button"
@@ -754,8 +783,9 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
               onClick={loadAllData}
               disabled={loading}
               title="Refresh live VLANs and switch ports"
+              style={{ display: "flex", alignItems: "center", gap: "6px" }}
             >
-              🔄 Refresh
+              <RefreshCw size={14} className={loading ? "spin" : ""} /> Refresh
             </button>
           </div>
         )}
@@ -777,7 +807,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
             gap: "8px",
           }}
         >
-          <span>{statusMessage.type === "success" ? "✓" : "⚠️"}</span>
+          {statusMessage.type === "success" ? <CheckCircle2 size={16} color="#059669" /> : <AlertTriangle size={16} color="#dc2626" />}
           <span>{statusMessage.text}</span>
         </div>
       )}
@@ -842,7 +872,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
             gap: "8px",
           }}
         >
-          <span>🏷️</span> VLAN Management Table ({vlans.length})
+          <Tag size={16} /> VLAN Management Table ({vlans.length})
         </button>
 
         <button
@@ -862,7 +892,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
             gap: "8px",
           }}
         >
-          <span>🔌</span> Switch Panel & Port Matrix ({activeSwitch?.config?.total_ports || (ports.length > 24 ? 48 : 24)}P)
+          <Cable size={16} /> Switch Panel & Port Matrix ({activeSwitch?.config?.total_ports || (ports.length > 24 ? 48 : 24)}P)
         </button>
 
         {isAdmin && (
@@ -887,7 +917,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
               gap: "8px",
             }}
           >
-            <span>📜</span> Config Backups & CLI Diff
+            <FileText size={16} /> Config Backups & CLI Diff
           </button>
         )}
 
@@ -909,7 +939,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
               gap: "8px",
             }}
           >
-            <span>⚙️</span> Multi-Vendor Switch Configuration {!isSuperAdmin && "(Locked)"}
+            <Settings size={16} /> Multi-Vendor Switch Configuration {!isSuperAdmin && "(Locked)"}
           </button>
         )}
       </div>
@@ -965,8 +995,8 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                     <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
                       <span>Devices: <strong>{matchingDevices.length}</strong></span>
                       {matchingDevices.filter((d) => !isTypeAndVlanMatching(d)).length > 0 && (
-                        <span style={{ fontSize: "10px", color: "#b45309", background: "rgba(245, 158, 11, 0.15)", padding: "1px 6px", borderRadius: "4px", fontWeight: "700" }}>
-                          ⚠️ {matchingDevices.filter((d) => !isTypeAndVlanMatching(d)).length} Mismatched
+                        <span style={{ fontSize: "10px", color: "#b45309", background: "rgba(245, 158, 11, 0.15)", padding: "1px 6px", borderRadius: "4px", fontWeight: "700", display: "inline-flex", alignItems: "center", gap: "3px" }}>
+                          <AlertTriangle size={11} /> {matchingDevices.filter((d) => !isTypeAndVlanMatching(d)).length} Mismatched
                         </span>
                       )}
                     </div>
@@ -974,11 +1004,11 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                       <button
                         type="button"
                         className="secondary-button small"
-                        style={{ padding: "2px 8px", fontSize: "11px", height: "auto", borderColor: theme.border }}
+                        style={{ padding: "2px 8px", fontSize: "11px", height: "auto", borderColor: theme.border, display: "inline-flex", alignItems: "center", gap: "3px" }}
                         onClick={() => handleOpenEditVlan(v)}
                         title="Customize VLAN name and department"
                       >
-                        ✏️ Edit
+                        <Pencil size={11} /> Edit
                       </button>
                     )}
                   </div>
@@ -1015,7 +1045,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                   {vlans.length === 0 && (
                     <tr>
                       <td colSpan={isAdmin ? 7 : 6} style={{ textAlign: "center", padding: "32px", color: "#64748b" }}>
-                        {loading ? "⏳ Loading VLAN configuration from switch..." : "No VLANs found. Click '+ Create New VLAN' to add one."}
+                        {loading ? "Loading VLAN configuration from switch..." : "No VLANs found. Click '+ Create New VLAN' to add one."}
                       </td>
                     </tr>
                   )}
@@ -1050,8 +1080,8 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                           </span>
                         </td>
                         <td>
-                          <span className="status-badge online" style={{ fontSize: "10px" }}>
-                            🟢 {v.status || "active"}
+                          <span className="status-badge online" style={{ fontSize: "10px", display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#10b981", display: "inline-block" }} /> {v.status || "active"}
                           </span>
                         </td>
                         {isAdmin && (
@@ -1060,20 +1090,21 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                               <button
                                 type="button"
                                 className="secondary-button small"
+                                style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}
                                 onClick={() => handleOpenEditVlan(v)}
                                 title="Customize department name, description, and subnet"
                               >
-                                ✏️ Edit
+                                <Pencil size={11} /> Edit
                               </button>
                               {isSuperAdmin && !v.is_default && !v.is_quarantine && (
                                 <button
                                   type="button"
                                   className="secondary-button small"
-                                  style={{ color: "#dc2626", borderColor: "#fca5a5" }}
+                                  style={{ color: "#dc2626", borderColor: "#fca5a5", display: "inline-flex", alignItems: "center", gap: "4px" }}
                                   onClick={() => handleDeleteVlan(v.vlan_id, v.name)}
                                   title="Delete this VLAN from the switch"
                                 >
-                                  🗑️ Delete
+                                  <Trash2 size={11} /> Delete
                                 </button>
                               )}
                             </div>
@@ -1201,7 +1232,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                     boxShadow: "0 1px 3px rgba(0,0,0,0.4)",
                   }}
                 >
-                  ✓
+                  <Check size={9} color="#ffffff" />
                 </div>
               )}
 
@@ -1318,7 +1349,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                     boxShadow: "0 1px 3px rgba(0,0,0,0.4)",
                   }}
                 >
-                  ✓
+                  <Check size={9} color="#ffffff" />
                 </div>
               )}
               {/* SFP 10G LED */}
@@ -1455,7 +1486,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                       }}
                       title="Toggle Multi-Select Mode to select multiple ports for batch VLAN configuration"
                     >
-                      <span>{multiSelectMode ? "☑️" : "☐"}</span> {multiSelectMode ? "Multi-Select Mode (Active)" : "Multi-Select Mode"}
+                      {multiSelectMode ? <CheckCircle2 size={14} color="#1d4ed8" /> : <SlidersHorizontal size={14} />} {multiSelectMode ? "Multi-Select Mode (Active)" : "Multi-Select Mode"}
                     </button>
                   )}
 
@@ -1476,7 +1507,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                       }}
                       title="Automatically configure switch uplink ports as 802.1Q Trunk Uplinks"
                     >
-                      <span>🔀</span> {configuringUplinks ? "Configuring Uplinks..." : (is48Port ? "Set 10G SFP+ as Trunk Uplinks" : "Set Last 2 Ports as Trunk Uplinks")}
+                      <Network size={14} /> {configuringUplinks ? "Configuring Uplinks..." : (is48Port ? "Set 10G SFP+ as Trunk Uplinks" : "Set Last 2 Ports as Trunk Uplinks")}
                     </button>
                   )}
                 </div>
@@ -1501,7 +1532,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                 >
                   <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
                     <span style={{ fontSize: "14px", fontWeight: "900", color: "#fbbf24", display: "flex", alignItems: "center", gap: "6px" }}>
-                      <span>⚡</span> {selectedPortNames.length} Ports Selected:
+                      <Zap size={15} /> {selectedPortNames.length} Ports Selected:
                     </span>
                     <div style={{ display: "flex", gap: "4px", flexWrap: "wrap", maxWidth: "550px" }}>
                       {selectedPortNames.map((pName) => (
@@ -1545,7 +1576,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                       }}
                       title={`Configure all ${selectedPortNames.length} selected ports simultaneously`}
                     >
-                      <span>⚡</span> Assign VLAN to {selectedPortNames.length} Ports
+                      <Zap size={14} /> Assign VLAN to {selectedPortNames.length} Ports
                     </button>
 
                     <button
@@ -1564,7 +1595,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                       }}
                       title="Reset all selected ports back to default Access VLAN 1"
                     >
-                      <span>🔄</span> Reset Selected ({selectedPortNames.length})
+                      <RefreshCw size={13} className={resettingPort ? "spin" : ""} /> Reset Selected ({selectedPortNames.length})
                     </button>
 
                     <button
@@ -1592,11 +1623,11 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                   <span style={{ width: "10px", height: "10px", borderRadius: "50%", background: "#94a3b8", display: "inline-block" }}></span> Idle / Disconnected
                 </span>
                 <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                  <span style={{ width: "10px", height: "10px", borderRadius: "50%", background: "#a855f7", display: "inline-block" }}></span> 🔀 Trunk Uplink
+                  <span style={{ width: "10px", height: "10px", borderRadius: "50%", background: "#a855f7", display: "inline-block" }}></span> Trunk Uplink
                 </span>
                 {is48Port && (
                   <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                    <span style={{ width: "10px", height: "10px", borderRadius: "50%", background: "#c084fc", display: "inline-block" }}></span> ⚡ 10G SFP+
+                    <span style={{ width: "10px", height: "10px", borderRadius: "50%", background: "#c084fc", display: "inline-block" }}></span> 10G SFP+
                   </span>
                 )}
                 <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
@@ -1681,8 +1712,8 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                     >
                       {/* SFP TOP ROW */}
                       <div style={{ marginBottom: "6px" }}>
-                        <div style={{ fontSize: "10px", fontWeight: "800", color: "#c084fc", textTransform: "uppercase", letterSpacing: "1px", marginBottom: "4px" }}>
-                          ⚡ 10G SFP+ (Top)
+                        <div style={{ fontSize: "10px", fontWeight: "800", color: "#c084fc", textTransform: "uppercase", letterSpacing: "1px", marginBottom: "4px", display: "flex", alignItems: "center", gap: "4px" }}>
+                          <Zap size={11} /> 10G SFP+ (Top)
                         </div>
                         <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.max(1, sfpTopRow.length)}, minmax(48px, 1fr))`, gap: "6px" }}>
                           {sfpTopRow.map(renderSfpPort)}
@@ -1701,8 +1732,8 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
 
                       {/* SFP BOTTOM ROW */}
                       <div>
-                        <div style={{ fontSize: "10px", fontWeight: "800", color: "#c084fc", textTransform: "uppercase", letterSpacing: "1px", marginBottom: "4px" }}>
-                          ⚡ 10G SFP+ (Bottom)
+                        <div style={{ fontSize: "10px", fontWeight: "800", color: "#c084fc", textTransform: "uppercase", letterSpacing: "1px", marginBottom: "4px", display: "flex", alignItems: "center", gap: "4px" }}>
+                          <Zap size={11} /> 10G SFP+ (Bottom)
                         </div>
                         <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.max(1, sfpBottomRow.length)}, minmax(48px, 1fr))`, gap: "6px" }}>
                           {sfpBottomRow.map(renderSfpPort)}
@@ -1793,7 +1824,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                         color: portTableFilter === "sfp" ? "#ffffff" : "#475569",
                       }}
                     >
-                      ⚡ 10G SFP+ ({sfpPorts.length})
+                      10G SFP+ ({sfpPorts.length})
                     </button>
                   )}
                   <button
@@ -1835,7 +1866,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
               {selectedPortNames.length > 0 && (
                 <div style={{ padding: "10px 20px", background: "#f0f9ff", borderBottom: "1.5px solid #bae6fd", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px" }}>
                   <div style={{ fontSize: "13px", fontWeight: "800", color: "#0369a1", display: "flex", alignItems: "center", gap: "8px" }}>
-                    <span>☑️</span>
+                    <CheckCircle2 size={15} color="#0284c7" />
                     <span>{selectedPortNames.length} Ports Selected:</span>
                     <span style={{ fontSize: "12px", color: "#0284c7", fontWeight: "600" }}>
                       ({selectedPortNames.slice(0, 5).join(", ")}{selectedPortNames.length > 5 ? `, +${selectedPortNames.length - 5} more` : ""})
@@ -1848,16 +1879,16 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                       onClick={handleOpenBulkAssignModal}
                       style={{ background: "#10b981", borderColor: "#059669", fontWeight: "800", display: "flex", alignItems: "center", gap: "6px" }}
                     >
-                      <span>⚡</span> Assign VLAN to {selectedPortNames.length} Ports
+                      <Zap size={14} /> Assign VLAN to {selectedPortNames.length} Ports
                     </button>
                     <button
                       type="button"
                       className="secondary-button small"
                       onClick={() => handleResetPort({ isBulk: true, ports: selectedPortNames })}
                       disabled={resettingPort}
-                      style={{ color: "#b45309", borderColor: "#fcd34d", background: "#fffbeb", fontWeight: "700" }}
+                      style={{ color: "#b45309", borderColor: "#fcd34d", background: "#fffbeb", fontWeight: "700", display: "inline-flex", alignItems: "center", gap: "5px" }}
                     >
-                      <span>🔄</span> Reset Selected ({selectedPortNames.length})
+                      <RefreshCw size={13} className={resettingPort ? "spin" : ""} /> Reset Selected ({selectedPortNames.length})
                     </button>
                     <button
                       type="button"
@@ -1926,8 +1957,8 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                           <td>
                             <strong>{p.port}</strong>
                             {isSfp && (
-                              <span style={{ marginLeft: "6px", fontSize: "10px", background: "#f5f3ff", color: "#6d28d9", border: "1px solid #c4b5fd", padding: "1px 5px", borderRadius: "4px", fontWeight: "800" }}>
-                                ⚡ 10G SFP+
+                              <span style={{ marginLeft: "6px", fontSize: "10px", background: "#f5f3ff", color: "#6d28d9", border: "1px solid #c4b5fd", padding: "1px 5px", borderRadius: "4px", fontWeight: "800", display: "inline-flex", alignItems: "center", gap: "2px" }}>
+                                <Zap size={9} /> 10G SFP+
                               </span>
                             )}
                             {isTrunkPort && !isSfp && (
@@ -1938,9 +1969,13 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                           </td>
                         <td>
                           {p.status === "connected" ? (
-                            <span className="status-badge online" style={{ fontSize: "10px" }}>🟢 connected</span>
+                            <span className="status-badge online" style={{ fontSize: "10px", display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                              <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#10b981", display: "inline-block" }} /> connected
+                            </span>
                           ) : (
-                            <span className="status-badge offline" style={{ fontSize: "10px" }}>⚪ notconnect</span>
+                            <span className="status-badge offline" style={{ fontSize: "10px", display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                              <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#94a3b8", display: "inline-block" }} /> notconnect
+                            </span>
                           )}
                         </td>
                         <td>
@@ -1966,8 +2001,8 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                         </td>
                         <td>
                           {isTrunkPort ? (
-                            <span style={{ background: "#f5f3ff", color: "#6d28d9", border: "1px solid #c4b5fd", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: "800" }}>
-                              🔀 TRUNK (802.1Q)
+                            <span style={{ background: "#f5f3ff", color: "#6d28d9", border: "1px solid #c4b5fd", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: "800", display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                              <Network size={11} /> TRUNK (802.1Q)
                             </span>
                           ) : (
                             <span style={{ background: "#f1f5f9", color: "#475569", border: "1px solid #cbd5e1", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: "600" }}>
@@ -1989,33 +2024,34 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                               <button
                                 type="button"
                                 className="secondary-button small"
+                                style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}
                                 onClick={() => {
                                   setSelectedPort(p);
                                   setTargetVlanId(String(p.vlan || 1));
                                   setIsTrunk(p.mode === "trunk" || !!p.is_uplink);
                                 }}
                               >
-                                ✏️ Configure Port
+                                <Pencil size={11} /> Configure Port
                               </button>
                               <button
                                 type="button"
                                 className="secondary-button small"
-                                style={{ color: "#b45309", borderColor: "#fcd34d", background: "#fffbeb" }}
+                                style={{ color: "#b45309", borderColor: "#fcd34d", background: "#fffbeb", display: "inline-flex", alignItems: "center", gap: "4px" }}
                                 onClick={() => handleResetPort(p)}
                                 disabled={resettingPort}
                                 title={`Reset ${p.port} back to factory default VLAN 1 (Access mode) so it can be assigned to another VLAN`}
                               >
-                                🔄 Reset
+                                <RefreshCw size={11} className={resettingPort ? "spin" : ""} /> Reset
                               </button>
                               {p.vlan !== 90 && !isTrunkPort && (
                                 <button
                                   type="button"
                                   className="secondary-button small"
-                                  style={{ color: "#dc2626", borderColor: "#fca5a5" }}
+                                  style={{ color: "#dc2626", borderColor: "#fca5a5", display: "inline-flex", alignItems: "center", gap: "4px" }}
                                   onClick={() => handleQuarantinePort(p)}
                                   title="Instantly isolate this port to Quarantine VLAN 90"
                                 >
-                                  🔒 Quarantine
+                                  <Lock size={11} /> Quarantine
                                 </button>
                               )}
                             </div>
@@ -2041,7 +2077,8 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
           {!isSuperAdmin && (
             <div className="panel" style={{ background: "#fff1f2", border: "1px solid #fecdd3", padding: "18px 20px", borderRadius: "10px", marginBottom: "20px" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "10px", color: "#9f1239", fontWeight: "800", fontSize: "16px" }}>
-                <span>🔒</span> Cisco &amp; Enterprise Switch Secrets Locked (Developer Only)
+                <Lock size={18} color="#9f1239" />
+                <span>Cisco &amp; Enterprise Switch Secrets Locked (Developer Only)</span>
               </div>
               <div style={{ fontSize: "13px", color: "#881337", marginTop: "8px", lineHeight: "1.5" }}>
                 Modifying Cisco Switch SSH credentials, enable secrets, switch management IPs, and hardware profiles is strictly restricted to the <strong>Developer / Super Administrator</strong>. Administrators have full access to configure VLANs, assign switch ports, and isolate devices, but core hardware connection secrets are locked against tampering.
@@ -2217,9 +2254,13 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                     borderRadius: "8px",
                     marginBottom: "16px",
                     fontSize: "13px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
                   }}
                 >
-                  <strong>{testResult.success ? "✓ Test Passed:" : "⚠️ Test Failed:"}</strong> {testResult.message}
+                  {testResult.success ? <CheckCircle2 size={15} color="#059669" /> : <AlertTriangle size={15} color="#dc2626" />}
+                  <strong>{testResult.success ? "Test Passed:" : "Test Failed:"}</strong> {testResult.message}
                 </div>
               )}
 
@@ -2232,7 +2273,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                   title={!isSuperAdmin ? "Only Super Admin can test switch credentials" : "Test switch reachability and credentials"}
                   style={{ display: "flex", alignItems: "center", gap: "6px" }}
                 >
-                  <span>🔌</span> {testingSwitch ? "Testing Switch Connection..." : "Test Switch Connection"}
+                  <Cable size={14} /> {testingSwitch ? "Testing Switch Connection..." : "Test Switch Connection"}
                 </button>
 
                 <button
@@ -2242,7 +2283,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                   title={!isSuperAdmin ? "Only Super Admin can save switch credentials" : "Save switch profile"}
                   style={{ display: "flex", alignItems: "center", gap: "6px", opacity: !isSuperAdmin ? 0.6 : 1 }}
                 >
-                  <span>{isSuperAdmin ? "💾" : "🔒"}</span> {savingSwitch ? "Saving & Activating..." : isSuperAdmin ? "Save & Activate Switch Profile" : "Switch Secrets Locked (Developer Only)"}
+                  {isSuperAdmin ? <CheckCircle2 size={14} /> : <Lock size={14} />} {savingSwitch ? "Saving & Activating..." : isSuperAdmin ? "Save & Activate Switch Profile" : "Switch Secrets Locked (Developer Only)"}
                 </button>
               </div>
             </form>
@@ -2284,9 +2325,13 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                         <td>{cfg.total_ports || 24} Ports</td>
                         <td>
                           {cfg.is_active ? (
-                            <span className="status-badge online" style={{ fontSize: "10px" }}>🟢 ACTIVE SWITCH</span>
+                            <span className="status-badge online" style={{ fontSize: "10px", display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                              <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#10b981", display: "inline-block" }} /> ACTIVE SWITCH
+                            </span>
                           ) : (
-                            <span className="status-badge offline" style={{ fontSize: "10px" }}>⚪ Standby</span>
+                            <span className="status-badge offline" style={{ fontSize: "10px", display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                              <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#94a3b8", display: "inline-block" }} /> Standby
+                            </span>
                           )}
                         </td>
                         <td style={{ textAlign: "right" }}>
@@ -2295,13 +2340,15 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                               type="button"
                               className="secondary-button small"
                               onClick={() => handleActivateSwitch(cfg.id, cfg.name)}
-                              style={{ marginRight: "6px" }}
+                              style={{ marginRight: "6px", display: "inline-flex", alignItems: "center", gap: "4px" }}
                             >
-                              ⚡ Activate
+                              <Zap size={11} /> Activate
                             </button>
                           )}
                           {!isSuperAdmin && (
-                            <span style={{ fontSize: "11px", color: "#94a3b8" }}>🔒 Read-Only</span>
+                            <span style={{ fontSize: "11px", color: "#94a3b8", display: "inline-flex", alignItems: "center", gap: "3px" }}>
+                              <Lock size={11} /> Read-Only
+                            </span>
                           )}
                         </td>
                       </tr>
@@ -2324,7 +2371,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "16px", marginBottom: "16px" }}>
               <div>
                 <div style={{ fontSize: "17px", fontWeight: "800", color: "#0f172a", display: "flex", alignItems: "center", gap: "8px" }}>
-                  <span>📜</span>
+                  <FileText size={18} color="#2563eb" />
                   <span>Switch Running-Configuration Backups & CLI Diff Inspector</span>
                 </div>
                 <div style={{ fontSize: "13px", color: "#64748b", marginTop: "4px" }}>
@@ -2341,7 +2388,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                   style={{ display: "inline-flex", alignItems: "center", gap: "6px", background: "#f0fdf4", borderColor: "#86efac", color: "#15803d", fontWeight: "700" }}
                   title="Run instant automated backup and drift inspection across all switches"
                 >
-                  <span>⚡</span> {runningCycle ? "Auditing Switches..." : "Run Auto-Backup Cycle"}
+                  <Zap size={14} /> {runningCycle ? "Auditing Switches..." : "Run Auto-Backup Cycle"}
                 </button>
                 <button
                   type="button"
@@ -2350,16 +2397,16 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                   disabled={loadingBackups}
                   style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
                 >
-                  <span>🔄</span> {loadingBackups ? "Refreshing..." : "Refresh Backups"}
+                  <RefreshCw size={13} className={loadingBackups ? "spin" : ""} /> {loadingBackups ? "Refreshing..." : "Refresh Backups"}
                 </button>
               </div>
             </div>
 
             {/* AUTOMATED BACKUP POLICY & DRIFT CONTROLS */}
             <div style={{ background: "#f8fafc", border: "1px solid #cbd5e1", borderRadius: "10px", padding: "14px 16px", marginBottom: "16px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px", marginBottom: "10px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "gap", gap: "10px", marginBottom: "10px" }}>
                 <div style={{ fontSize: "13px", fontWeight: "800", color: "#1e293b", display: "flex", alignItems: "center", gap: "6px" }}>
-                  <span>⏰</span> Automated Switch Backup &amp; CLI Drift Detection Daemon
+                  <Clock size={16} color="#1e293b" /> Automated Switch Backup &amp; CLI Drift Detection Daemon
                 </div>
                 <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
                   <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", fontWeight: "700", cursor: "pointer", color: backupSchedule.enabled ? "#15803d" : "#64748b" }}>
@@ -2431,7 +2478,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
             {/* QUICK SNAPSHOT CREATOR */}
             <form onSubmit={handleTakeBackup} style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "14px 16px" }}>
               <div style={{ fontSize: "13px", fontWeight: "700", color: "#334155", marginBottom: "10px", display: "flex", alignItems: "center", gap: "6px" }}>
-                <span>📸</span> Create On-Demand Configuration Snapshot
+                <Camera size={15} /> Create On-Demand Configuration Snapshot
               </div>
               <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", alignItems: "center" }}>
                 <input
@@ -2471,7 +2518,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                   disabled={takingBackup}
                   style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "8px 16px", fontWeight: "700" }}
                 >
-                  <span>📥</span> {takingBackup ? "Pulling Running-Config..." : "Backup Running-Config Now"}
+                  <Download size={14} /> {takingBackup ? "Pulling Running-Config..." : "Backup Running-Config Now"}
                 </button>
               </div>
             </form>
@@ -2481,7 +2528,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
           {backups.length > 0 && (
             <div className="panel" style={{ marginBottom: "20px", background: "linear-gradient(135deg, #f8fafc 0%, #eff6ff 100%)", border: "1px solid #bfdbfe" }}>
               <div style={{ fontSize: "15px", fontWeight: "800", color: "#1e3a8a", display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
-                <span>🔍</span> Interactive CLI Diff Comparator
+                <Search size={16} /> Interactive CLI Diff Comparator
               </div>
               <div style={{ fontSize: "12px", color: "#475569", marginBottom: "14px" }}>
                 Compare live running configuration against a known baseline, or compare two historical snapshots to identify exact command additions, removals, or unauthorized modifications.
@@ -2510,8 +2557,8 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                     onChange={(e) => setDiffCompareMode(e.target.value)}
                     style={{ padding: "6px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12px", background: "#fff", fontWeight: "600" }}
                   >
-                    <option value="live">⚡ Live Active Switch vs Base</option>
-                    <option value="two_backups">⚖️ Compare Two Saved Backups</option>
+                    <option value="live">Live Active Switch vs Base</option>
+                    <option value="two_backups">Compare Two Saved Backups</option>
                   </select>
                 </div>
 
@@ -2545,7 +2592,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                   }}
                   disabled={diffLoading}
                 >
-                  <span>🔍</span> {diffLoading ? "Analyzing Diff..." : (diffCompareMode === "live" ? "Compare Live Switch vs Base" : "Compare Two Snapshots")}
+                  <Search size={14} /> {diffLoading ? "Analyzing Diff..." : (diffCompareMode === "live" ? "Compare Live Switch vs Base" : "Compare Two Snapshots")}
                 </button>
               </div>
             </div>
@@ -2641,51 +2688,52 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                               <button
                                 type="button"
                                 className="secondary-button small"
+                                style={{ display: "inline-flex", alignItems: "center", gap: "3px" }}
                                 onClick={() => handleViewBackup(b.id)}
                                 title="View full running-configuration text"
                               >
-                                👁️ View
+                                <Eye size={11} /> View
                               </button>
                               <a
                                 href={`${API_URL}/switches/backups/${b.id}/download`}
                                 className="secondary-button small"
-                                style={{ textDecoration: "none", display: "inline-flex", alignItems: "center" }}
+                                style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "3px" }}
                                 title="Download .cfg file"
                                 target="_blank"
                                 rel="noreferrer"
                               >
-                                💾 Download
+                                <Download size={11} /> Download
                               </a>
                               {prevB && (
                                 <button
                                   type="button"
                                   className="secondary-button small"
-                                  style={{ borderColor: "#93c5fd", color: "#1d4ed8" }}
+                                  style={{ borderColor: "#93c5fd", color: "#1d4ed8", display: "inline-flex", alignItems: "center", gap: "3px" }}
                                   onClick={() => handleRunDiff(prevB.id, b.id, false)}
                                   title={`Compare changes between #${prevB.id} and #${b.id}`}
                                 >
-                                  🔍 Diff vs Prev
+                                  <Search size={11} /> Diff vs Prev
                                 </button>
                               )}
                               <button
                                 type="button"
                                 className="secondary-button small"
-                                style={{ borderColor: "#a7f3d0", color: "#065f46" }}
+                                style={{ borderColor: "#a7f3d0", color: "#065f46", display: "inline-flex", alignItems: "center", gap: "3px" }}
                                 onClick={() => handleRunDiff(b.id, null, true)}
                                 title="Diff live active switch against this backup"
                               >
-                                ⚡ Diff vs Live
+                                <Zap size={11} /> Diff vs Live
                               </button>
                               {isSuperAdmin && (
                                 <button
                                   type="button"
                                   className="secondary-button small"
-                                  style={{ color: "#dc2626", borderColor: "#fca5a5" }}
+                                  style={{ color: "#dc2626", borderColor: "#fca5a5", display: "inline-flex", alignItems: "center" }}
                                   onClick={() => handleDeleteBackup(b.id)}
                                   disabled={deletingBackupId === b.id}
                                   title="Permanently delete this backup (Super Admin only)"
                                 >
-                                  {deletingBackupId === b.id ? "..." : "🗑️"}
+                                  {deletingBackupId === b.id ? "..." : <Trash2 size={11} />}
                                 </button>
                               )}
                             </div>
@@ -2732,7 +2780,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
               <div style={{ fontSize: "16px", fontWeight: "800", color: "#0f172a", display: "flex", alignItems: "center", gap: "8px" }}>
-                <span>🏷️</span>
+                <Tag size={18} color="#2563eb" />
                 <span>Create & Deploy VLAN to Switch</span>
               </div>
               <button
@@ -2822,8 +2870,9 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                   type="submit"
                   className="primary-button small"
                   disabled={creatingVlan}
+                  style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
                 >
-                  {creatingVlan ? "Deploying to Switch..." : "🚀 Provision to Switch"}
+                  <Rocket size={13} /> {creatingVlan ? "Deploying to Switch..." : "Provision to Switch"}
                 </button>
               </div>
             </form>
@@ -2864,7 +2913,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
               <div style={{ fontSize: "16px", fontWeight: "800", color: "#0f172a", display: "flex", alignItems: "center", gap: "8px" }}>
-                <span>✏️</span>
+                <Pencil size={18} color="#2563eb" />
                 <span>Customize VLAN {editingVlan.vlan_id} Department Name</span>
               </div>
               <button
@@ -2984,8 +3033,9 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                   type="submit"
                   className="primary-button small"
                   disabled={savingEditVlan}
+                  style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
                 >
-                  {savingEditVlan ? "Updating Switch..." : "💾 Save & Deploy to Switch"}
+                  <CheckCircle2 size={13} /> {savingEditVlan ? "Updating Switch..." : "Save & Deploy to Switch"}
                 </button>
               </div>
             </form>
@@ -3024,7 +3074,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
               <div style={{ fontSize: "16px", fontWeight: "800", color: "#0f172a", display: "flex", alignItems: "center", gap: "8px" }}>
-                <span>🔌</span>
+                <Cable size={18} color="#2563eb" />
                 <span>{selectedPort.isBulk ? `Assign ${selectedPort.ports.length} Switch Ports` : `Assign Port ${selectedPort.port}`}</span>
               </div>
               <button
@@ -3083,11 +3133,11 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                     onChange={(e) => setIsTrunk(e.target.checked)}
                     style={{ width: "18px", height: "18px", cursor: "pointer", accentColor: "#7c3aed" }}
                   />
-                  <span>🔀 Tick to Configure as Trunk Port (802.1Q Uplink)</span>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}><Network size={14} /> Tick to Configure as Trunk Port (802.1Q Uplink)</span>
                 </label>
                 {isTrunk ? (
                   <div style={{ fontSize: "11px", color: "#6d28d9", marginTop: "6px", marginLeft: "28px", lineHeight: "1.4" }}>
-                    ✓ <strong>802.1Q Trunk Uplink Enabled:</strong> Carries multiple tagged VLANs between switches or to a firewall/router uplink.
+                    <strong>802.1Q Trunk Uplink Enabled:</strong> Carries multiple tagged VLANs between switches or to a firewall/router uplink.
                   </div>
                 ) : (
                   <div style={{ fontSize: "11px", color: "#64748b", marginTop: "4px", marginLeft: "28px" }}>
@@ -3138,7 +3188,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                   disabled={assigningPort || resettingPort}
                   title={selectedPort?.isBulk ? `Reset ${selectedPort.ports.length} ports back to factory default VLAN 1` : "Reset ONLY this port back to default Access mode and default VLAN 1"}
                 >
-                  <span>🔄</span> {resettingPort ? "Resetting..." : (selectedPort?.isBulk ? `Reset ${selectedPort.ports.length} Ports` : "Reset Port to Default (VLAN 1)")}
+                  <RefreshCw size={12} className={resettingPort ? "spin" : ""} /> {resettingPort ? "Resetting..." : (selectedPort?.isBulk ? `Reset ${selectedPort.ports.length} Ports` : "Reset Port to Default (VLAN 1)")}
                 </button>
 
                 <div style={{ display: "flex", gap: "8px" }}>
@@ -3156,7 +3206,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                     disabled={assigningPort || resettingPort}
                     style={isTrunk ? { background: "#7c3aed", borderColor: "#6d28d9" } : {}}
                   >
-                    {assigningPort ? "Applying..." : (isTrunk ? (selectedPort?.isBulk ? `🔀 Apply Trunk to ${selectedPort.ports.length} Ports` : "🔀 Apply Trunk Uplink") : (selectedPort?.isBulk ? `Apply Access VLAN to ${selectedPort.ports.length} Ports` : "Apply Access VLAN"))}
+                    {assigningPort ? "Applying..." : (isTrunk ? (selectedPort?.isBulk ? `Apply Trunk to ${selectedPort.ports.length} Ports` : "Apply Trunk Uplink") : (selectedPort?.isBulk ? `Apply Access VLAN to ${selectedPort.ports.length} Ports` : "Apply Access VLAN"))}
                   </button>
                 </div>
               </div>
@@ -3199,8 +3249,9 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
           >
             <div style={{ padding: "16px 20px", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "center", background: "#f8fafc" }}>
               <div>
-                <div style={{ fontSize: "16px", fontWeight: "800", color: "#0f172a" }}>
-                  📜 {viewingBackup.backup_name}
+                <div style={{ fontSize: "16px", fontWeight: "800", color: "#0f172a", display: "flex", alignItems: "center", gap: "6px" }}>
+                  <FileText size={18} color="#2563eb" />
+                  <span>{viewingBackup.backup_name}</span>
                 </div>
                 <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>
                   Snapshot #{viewingBackup.id} • {viewingBackup.lines_count} lines • {(viewingBackup.size_bytes / 1024).toFixed(1)} KB • Checksum: <code>{viewingBackup.checksum?.slice(0, 16)}...</code>
@@ -3211,7 +3262,7 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                 onClick={() => setViewingBackup(null)}
                 style={{ background: "transparent", border: "none", fontSize: "18px", cursor: "pointer", color: "#64748b" }}
               >
-                ✕
+                ×
               </button>
             </div>
 
@@ -3229,22 +3280,23 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                 <button
                   type="button"
                   className="secondary-button small"
+                  style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}
                   onClick={() => {
                     navigator.clipboard.writeText(viewingBackup.config_text);
                     setCopiedConfig(true);
                     setTimeout(() => setCopiedConfig(false), 2500);
                   }}
                 >
-                  {copiedConfig ? "✓ Copied!" : "📋 Copy Config"}
+                  {copiedConfig ? <><Check size={12} /> Copied!</> : <><Copy size={12} /> Copy Config</>}
                 </button>
                 <a
                   href={`${API_URL}/switches/backups/${viewingBackup.id}/download`}
                   className="primary-button small"
-                  style={{ textDecoration: "none" }}
+                  style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "4px" }}
                   target="_blank"
                   rel="noreferrer"
                 >
-                  💾 Download .cfg
+                  <Download size={12} /> Download .cfg
                 </a>
                 <button
                   type="button"
@@ -3294,13 +3346,14 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
             <div style={{ padding: "16px 20px", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "center", background: "#f8fafc" }}>
               <div>
                 <div style={{ fontSize: "16px", fontWeight: "800", color: "#0f172a", display: "flex", alignItems: "center", gap: "8px" }}>
-                  <span>🔍</span> CLI Configuration Diff Analysis
+                  <Search size={18} color="#2563eb" />
+                  <span>CLI Configuration Diff Analysis</span>
                 </div>
                 {diffResult && !diffResult.error && (
                   <div style={{ fontSize: "12px", color: "#64748b", marginTop: "3px", display: "flex", gap: "10px", alignItems: "center" }}>
                     <span style={{ color: "#16a34a", fontWeight: "700" }}>+{diffResult.additions} Additions</span>
                     <span style={{ color: "#dc2626", fontWeight: "700" }}>-{diffResult.deletions} Removals</span>
-                    <span>{diffResult.identical ? "✅ Configurations are 100% Identical" : "⚠️ Configuration Discrepancies Detected"}</span>
+                    <span>{diffResult.identical ? <span style={{ color: "#16a34a", fontWeight: "700", display: "inline-flex", alignItems: "center", gap: "4px" }}><CheckCircle2 size={13} /> Configurations are 100% Identical</span> : <span style={{ color: "#d97706", fontWeight: "700", display: "inline-flex", alignItems: "center", gap: "4px" }}><AlertTriangle size={13} /> Configuration Discrepancies Detected</span>}</span>
                   </div>
                 )}
               </div>
@@ -3309,15 +3362,16 @@ export default function SwitchVlanPage({ API_URL, currentUser, getAuthHeaders, d
                 onClick={() => setShowDiffModal(false)}
                 style={{ background: "transparent", border: "none", fontSize: "18px", cursor: "pointer", color: "#64748b" }}
               >
-                ✕
+                ×
               </button>
             </div>
 
             {/* SECURITY ALERTS IN DIFF */}
             {diffResult?.security_alerts && diffResult.security_alerts.length > 0 && (
               <div style={{ padding: "12px 20px", background: "#fffbeb", borderBottom: "1px solid #fde68a" }}>
-                <div style={{ fontSize: "12px", fontWeight: "700", color: "#92400e", marginBottom: "4px" }}>
-                  🚨 Security Discrepancies Flagged by NETOPS Inspector:
+                <div style={{ fontSize: "12px", fontWeight: "700", color: "#92400e", marginBottom: "4px", display: "flex", alignItems: "center", gap: "6px" }}>
+                  <ShieldAlert size={15} color="#b45309" />
+                  <span>Security Discrepancies Flagged by NETOPS Inspector:</span>
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
                   {diffResult.security_alerts.map((alert, i) => (

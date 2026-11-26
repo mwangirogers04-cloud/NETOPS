@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from io import BytesIO
 from unittest.mock import MagicMock
 import openpyxl
@@ -295,7 +295,7 @@ def test_future_dates_rejected_for_reports():
 
 
 def test_custom_period_ending_time_up_to_23_59_59():
-    today_str = datetime.utcnow().strftime("%Y-%m-%d")
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     # 1. Ending time at 23:59:59 of current day is allowed
     start, end = reports.get_period_range(
@@ -303,7 +303,7 @@ def test_custom_period_ending_time_up_to_23_59_59():
         start_datetime=f"{today_str}T00:00:00",
         end_datetime=f"{today_str}T23:59:59",
     )
-    assert start.date() == datetime.utcnow().date()
+    assert start.date() == datetime.now(timezone.utc).date()
     assert end.hour == 23 and end.minute == 59 and end.second == 59
 
     # 2. Ending time at 23:59 of current day is allowed

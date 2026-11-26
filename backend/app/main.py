@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -325,9 +326,9 @@ async def scheduled_switch_backup_loop():
         await asyncio.sleep(60)
 
 
-@app.on_event("startup")
-async def startup_event_broadcaster():
-    # Asynchronously initialize database tables and seed accounts without blocking worker imports
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup tasks
     def _init_db():
         try:
             Base.metadata.create_all(bind=engine)
@@ -345,25 +346,11 @@ async def startup_event_broadcaster():
 
     await asyncio.to_thread(_init_db)
 
-    asyncio.create_task(
-        event_broadcaster()
-    )
-
-    asyncio.create_task(
-        schedule_enforcement_loop()
-    )
-
-    asyncio.create_task(
-        endpoint_health_monitor_loop()
-    )
-
-    asyncio.create_task(
-        scheduled_patch_loop()
-    )
-
-    asyncio.create_task(
-        scheduled_switch_backup_loop()
-    )
+    task_event_broadcaster = asyncio.create_task(event_broadcaster())
+    task_schedule_loop = asyncio.create_task(schedule_enforcement_loop())
+    task_health_monitor = asyncio.create_task(endpoint_health_monitor_loop())
+    task_patch_loop = asyncio.create_task(scheduled_patch_loop())
+    task_switch_backup = asyncio.create_task(scheduled_switch_backup_loop())
 
     try:
         start_passive_sniffer()
@@ -380,9 +367,9 @@ async def startup_event_broadcaster():
     except Exception as exc:
         print(f"[DNS-SERVER] Startup note: {exc}")
 
+    yield
 
-@app.on_event("shutdown")
-def shutdown_background_tasks():
+    # Shutdown tasks
     try:
         stop_passive_sniffer()
     except Exception:
@@ -395,6 +382,12 @@ def shutdown_background_tasks():
         stop_dns_server()
     except Exception:
         pass
+
+    for task in (task_event_broadcaster, task_schedule_loop, task_health_monitor, task_patch_loop, task_switch_backup):
+        task.cancel()
+
+
+app.router.lifespan_context = lifespan
 
 
 # ---------------------------------------------------------

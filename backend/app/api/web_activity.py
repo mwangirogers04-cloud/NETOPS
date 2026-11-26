@@ -2,7 +2,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select, desc
 from sqlalchemy.orm import Session
 
@@ -37,8 +37,7 @@ class WebActivityLogResponse(BaseModel):
     hit_count: int
     timestamp: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class WebFilterPolicyResponse(BaseModel):
@@ -53,8 +52,7 @@ class WebFilterPolicyResponse(BaseModel):
     sniffer_enabled: bool
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class UpdateWebFilterPolicyRequest(BaseModel):

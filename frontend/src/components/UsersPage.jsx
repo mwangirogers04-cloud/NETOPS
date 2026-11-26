@@ -1,4 +1,25 @@
 import React, { useEffect, useState } from "react";
+import {
+  Users,
+  User,
+  Crown,
+  ShieldCheck,
+  RefreshCw,
+  Plus,
+  Pencil,
+  Trash2,
+  KeyRound,
+  Mail,
+  Phone,
+  Eye,
+  EyeOff,
+  AlertTriangle,
+  CheckCircle2,
+  XCircle,
+  X,
+  Clock,
+  Sparkles,
+} from "lucide-react";
 
 export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
   const [usersList, setUsersList] = useState([]);
@@ -148,7 +169,7 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
               fontWeight: r.met ? "700" : "500",
             }}
           >
-            <span>{r.met ? "✓" : "○"}</span>
+            {r.met ? <Check size={12} color="#059669" /> : <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#94a3b8", display: "inline-block" }} />}
             <span>{r.label}</span>
           </div>
         ))}
@@ -186,7 +207,7 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
       setUsersList(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error("Failed to load users:", err);
-      setActionNotice("❌ Could not load users: " + err.message);
+      setActionNotice("Could not load users: " + err.message);
     } finally {
       setLoading(false);
     }
@@ -273,7 +294,7 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Failed to resend link.");
-      setActionNotice(`✅ Activation link dispatched to ${user.email}!`);
+      setActionNotice(`Activation link dispatched to ${user.email}!`);
       await loadUsers();
       setTimeout(() => setActionNotice(""), 6000);
     } catch (err) {
@@ -308,7 +329,7 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Failed to delete user.");
-      setActionNotice(`✅ User '${user.username}' has been deleted.`);
+      setActionNotice(`User '${user.username}' has been deleted.`);
       await loadUsers();
       setTimeout(() => setActionNotice(""), 6000);
     } catch (err) {
@@ -399,7 +420,7 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
       }
       setShowEditModal(false);
       setEditingUser(null);
-      setActionNotice(`✅ User '${data.user?.username || editFormState.username}' updated successfully!`);
+      setActionNotice(`User '${data.user?.username || editFormState.username}' updated successfully!`);
       await loadUsers();
 
       if (editingUser.id === currentUser?.id) {
@@ -607,7 +628,7 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
           }}
           style={{ display: "flex", alignItems: "center", gap: "8px", padding: "10px 18px", fontWeight: "700" }}
         >
-          <span>➕</span>
+          <Plus size={16} />
           <span>Create New User</span>
         </button>
       </div>
@@ -622,7 +643,7 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
       {/* STATS SUMMARY */}
       <div className="users-stats-grid">
         <div className="user-stat-card">
-          <div className="user-stat-icon blue">👥</div>
+          <div className="user-stat-icon blue" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center" }}><Users size={22} /></div>
           <div>
             <div className="user-stat-val">{totalUsers}</div>
             <div className="user-stat-label">Total Users</div>
@@ -630,7 +651,7 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
         </div>
 
         <div className="user-stat-card">
-          <div className="user-stat-icon gold">👑</div>
+          <div className="user-stat-icon gold" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center" }}><Crown size={22} /></div>
           <div>
             <div className="user-stat-val">{superAdmins}</div>
             <div className="user-stat-label">Super Admin (Dev)</div>
@@ -638,7 +659,7 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
         </div>
 
         <div className="user-stat-card">
-          <div className="user-stat-icon green">🛡️</div>
+          <div className="user-stat-icon green" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center" }}><ShieldCheck size={22} /></div>
           <div>
             <div className="user-stat-val">{admins}</div>
             <div className="user-stat-label">Administrators</div>
@@ -646,7 +667,7 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
         </div>
 
         <div className="user-stat-card">
-          <div className="user-stat-icon slate">👤</div>
+          <div className="user-stat-icon slate" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center" }}><User size={22} /></div>
           <div>
             <div className="user-stat-val">{normalUsers}</div>
             <div className="user-stat-label">Standard Users</div>
@@ -668,8 +689,9 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
             type="button"
             onClick={loadUsers}
             disabled={loading}
+            style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
           >
-            {loading ? "Refreshing..." : "🔄 Refresh"}
+            {loading ? "Refreshing..." : <><RefreshCw size={13} /> Refresh</>}
           </button>
         </div>
 
@@ -712,19 +734,29 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                       </td>
 
                       <td>
-                        <div style={{ fontSize: "13px", color: "#0f172a", fontWeight: "600" }}>📧 {u.email}</div>
-                        <div style={{ fontSize: "12px", color: "#475569" }}>📱 {u.phone_number || "No phone"}</div>
+                        <div style={{ fontSize: "13px", color: "#0f172a", fontWeight: "600", display: "flex", alignItems: "center", gap: "6px" }}>
+                          <Mail size={13} style={{ color: "#2563eb", flexShrink: 0 }} /> {u.email}
+                        </div>
+                        <div style={{ fontSize: "12px", color: "#475569", display: "flex", alignItems: "center", gap: "6px", marginTop: "2px" }}>
+                          <Phone size={12} style={{ color: "#64748b", flexShrink: 0 }} /> {u.phone_number || "No phone"}
+                        </div>
                       </td>
 
                       <td>
                         {u.role === "super_admin" && (
-                          <span className="role-chip super_admin">👑 Developer (Super Admin)</span>
+                          <span className="role-chip super_admin" style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                            <Crown size={13} /> Developer (Super Admin)
+                          </span>
                         )}
                         {u.role === "admin" && (
-                          <span className="role-chip admin">🛡️ Administrator</span>
+                          <span className="role-chip admin" style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                            <ShieldCheck size={13} /> Administrator
+                          </span>
                         )}
                         {u.role === "user" && (
-                          <span className="role-chip user">👤 Standard User</span>
+                          <span className="role-chip user" style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                            <User size={13} /> Standard User
+                          </span>
                         )}
                       </td>
 
@@ -744,7 +776,7 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                               gap: "4px",
                             }}
                           >
-                            👑 Never Expires
+                            <Crown size={12} /> Never Expires
                           </span>
                         ) : u.password_expiry?.is_expired ? (
                           <span
@@ -761,7 +793,7 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                               gap: "4px",
                             }}
                           >
-                            ⚠️ Expired (3 Months)
+                            <AlertTriangle size={12} /> Expired (3 Months)
                           </span>
                         ) : (
                           <div>
@@ -779,7 +811,7 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                                 gap: "4px",
                               }}
                             >
-                              ⏱️ {u.password_expiry?.days_remaining ?? 90}d remaining
+                              <Clock size={12} /> {u.password_expiry?.days_remaining ?? 90}d remaining
                             </span>
                           </div>
                         )}
@@ -787,12 +819,12 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
 
                       <td>
                         {u.is_active ? (
-                          <span className="status-badge online" style={{ fontSize: "10px" }}>
-                            🟢 Active
+                          <span className="status-badge online" style={{ fontSize: "10px", display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                            <CheckCircle2 size={11} /> Active
                           </span>
                         ) : (
-                          <span className="status-badge offline" style={{ fontSize: "10px" }}>
-                            🔴 Deactivated
+                          <span className="status-badge offline" style={{ fontSize: "10px", display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                            <XCircle size={11} /> Deactivated
                           </span>
                         )}
                       </td>
@@ -821,9 +853,9 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                                 ? "Only Super Admin can edit Admin accounts"
                                 : "Edit user profile, role, status & credentials"
                             }
-                            style={{ borderColor: "#3b82f6", color: "#2563eb" }}
+                            style={{ borderColor: "#3b82f6", color: "#2563eb", display: "inline-flex", alignItems: "center", gap: "4px" }}
                           >
-                            ✏️ Edit
+                            <Pencil size={12} /> Edit
                           </button>
 
                           {/* DIRECT PASSWORD RESET (NO OTP) */}
@@ -843,9 +875,9 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                                 ? "Only Developer (Super Admin) can reset an Administrator or Developer password"
                                 : "Directly reset this user's password without sending an OTP"
                             }
-                            style={{ borderColor: "#6366f1", color: "#4f46e5", fontWeight: "700" }}
+                            style={{ borderColor: "#6366f1", color: "#4f46e5", fontWeight: "700", display: "inline-flex", alignItems: "center", gap: "4px" }}
                           >
-                            🔑 Reset Password
+                            <KeyRound size={12} /> Reset Password
                           </button>
 
                           {/* DELETE USER */}
@@ -853,12 +885,12 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                             <button
                               type="button"
                               className="secondary-button small"
-                              style={{ color: "#f87171", borderColor: "#7f1d1d" }}
+                              style={{ color: "#f87171", borderColor: "#7f1d1d", display: "inline-flex", alignItems: "center", gap: "4px" }}
                               onClick={() => handleDeleteUser(u)}
                               disabled={actionLoadingId === `delete-${u.id}`}
                               title="Delete user"
                             >
-                              {actionLoadingId === `delete-${u.id}` ? "..." : "🗑️ Delete"}
+                              {actionLoadingId === `delete-${u.id}` ? "..." : <><Trash2 size={12} /> Delete</>}
                             </button>
                           )}
                         </div>
@@ -880,7 +912,7 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
               /* SUCCESS STATE */
               <div>
                 <div style={{ textAlign: "center", marginBottom: "16px" }}>
-                  <div style={{ fontSize: "40px", marginBottom: "8px" }}>🎉</div>
+                  <div style={{ marginBottom: "8px", display: "flex", justifyContent: "center" }}><Sparkles size={40} color="#eab308" /></div>
                   <div style={{ fontSize: "18px", fontWeight: "800", color: "#0f172a" }}>
                     User Account Created!
                   </div>
@@ -899,8 +931,8 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                   <div style={{ fontSize: "13px", color: "#0f172a", marginBottom: "6px" }}>
                     <strong>Role:</strong> {createdResult.user?.role}
                   </div>
-                  <div style={{ fontSize: "12px", color: "#059669", fontWeight: "600", marginTop: "8px" }}>
-                    ✅ Direct access granted. The user can sign in immediately at the login page using the credentials you configured.
+                  <div style={{ fontSize: "12px", color: "#059669", fontWeight: "600", marginTop: "8px", display: "flex", alignItems: "center", gap: "5px" }}>
+                    <CheckCircle2 size={14} /> Direct access granted. The user can sign in immediately at the login page using the credentials you configured.
                   </div>
                 </div>
 
@@ -930,10 +962,10 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                   </div>
                   <button
                     type="button"
-                    style={{ background: "none", border: "none", color: "#64748b", fontSize: "20px", cursor: "pointer" }}
+                    style={{ background: "none", border: "none", color: "#64748b", cursor: "pointer", display: "flex", alignItems: "center" }}
                     onClick={() => setShowCreateModal(false)}
                   >
-                    ✕
+                    <X size={18} />
                   </button>
                 </div>
 
@@ -965,8 +997,8 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                     required
                   />
                   {createFieldWarnings.username && (
-                    <div style={{ color: "#f87171", fontSize: "11px", fontWeight: "600", marginTop: "4px" }}>
-                      ⚠️ {createFieldWarnings.username}
+                    <div style={{ color: "#f87171", fontSize: "11px", fontWeight: "600", marginTop: "4px", display: "flex", alignItems: "center", gap: "4px" }}>
+                      <AlertTriangle size={12} /> {createFieldWarnings.username}
                     </div>
                   )}
                 </div>
@@ -993,8 +1025,8 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                     required
                   />
                   {createFieldWarnings.email && (
-                    <div style={{ color: "#f87171", fontSize: "11px", fontWeight: "600", marginTop: "4px" }}>
-                      ⚠️ {createFieldWarnings.email}
+                    <div style={{ color: "#f87171", fontSize: "11px", fontWeight: "600", marginTop: "4px", display: "flex", alignItems: "center", gap: "4px" }}>
+                      <AlertTriangle size={12} /> {createFieldWarnings.email}
                     </div>
                   )}
                 </div>
@@ -1021,8 +1053,8 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                     required
                   />
                   {createFieldWarnings.phone_number && (
-                    <div style={{ color: "#f87171", fontSize: "11px", fontWeight: "600", marginTop: "4px" }}>
-                      ⚠️ {createFieldWarnings.phone_number}
+                    <div style={{ color: "#f87171", fontSize: "11px", fontWeight: "600", marginTop: "4px", display: "flex", alignItems: "center", gap: "4px" }}>
+                      <AlertTriangle size={12} /> {createFieldWarnings.phone_number}
                     </div>
                   )}
                 </div>
@@ -1040,7 +1072,7 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                     <option value="user">Standard User (Read-Only Monitoring)</option>
                     <option value="admin">Administrator (LAN Ops & User Management)</option>
                     {isSuperAdmin && (
-                      <option value="super_admin">👑 Developer (Super Admin)</option>
+                      <option value="super_admin">Developer (Super Admin)</option>
                     )}
                   </select>
                 </div>
@@ -1062,10 +1094,10 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                     <button
                       type="button"
                       onClick={() => setShowCreatePasswordText(!showCreatePasswordText)}
-                      style={{ position: "absolute", right: "10px", top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", fontSize: "14px" }}
+                      style={{ position: "absolute", right: "10px", top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", color: "#64748b" }}
                       title={showCreatePasswordText ? "Hide password" : "Show password"}
                     >
-                      {showCreatePasswordText ? "👁️‍🗨️" : "👁️"}
+                      {showCreatePasswordText ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
                   </div>
                   {renderPasswordChecklist(formState.password, [formState.username, formState.email])}
@@ -1110,10 +1142,10 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                 </div>
                 <button
                   type="button"
-                  style={{ background: "none", border: "none", color: "#64748b", fontSize: "20px", cursor: "pointer" }}
+                  style={{ background: "none", border: "none", color: "#64748b", cursor: "pointer", display: "flex", alignItems: "center" }}
                   onClick={() => setShowEditModal(false)}
                 >
-                  ✕
+                  <X size={18} />
                 </button>
               </div>
 
@@ -1144,8 +1176,8 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                   required
                 />
                 {editFieldWarnings.username && (
-                  <div style={{ color: "#f87171", fontSize: "11px", fontWeight: "600", marginTop: "4px" }}>
-                    ⚠️ {editFieldWarnings.username}
+                  <div style={{ color: "#f87171", fontSize: "11px", fontWeight: "600", marginTop: "4px", display: "flex", alignItems: "center", gap: "4px" }}>
+                    <AlertTriangle size={12} /> {editFieldWarnings.username}
                   </div>
                 )}
               </div>
@@ -1171,8 +1203,8 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                   required
                 />
                 {editFieldWarnings.email && (
-                  <div style={{ color: "#f87171", fontSize: "11px", fontWeight: "600", marginTop: "4px" }}>
-                    ⚠️ {editFieldWarnings.email}
+                  <div style={{ color: "#f87171", fontSize: "11px", fontWeight: "600", marginTop: "4px", display: "flex", alignItems: "center", gap: "4px" }}>
+                    <AlertTriangle size={12} /> {editFieldWarnings.email}
                   </div>
                 )}
               </div>
@@ -1198,8 +1230,8 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                   required
                 />
                 {editFieldWarnings.phone_number && (
-                  <div style={{ color: "#f87171", fontSize: "11px", fontWeight: "600", marginTop: "4px" }}>
-                    ⚠️ {editFieldWarnings.phone_number}
+                  <div style={{ color: "#f87171", fontSize: "11px", fontWeight: "600", marginTop: "4px", display: "flex", alignItems: "center", gap: "4px" }}>
+                    <AlertTriangle size={12} /> {editFieldWarnings.phone_number}
                   </div>
                 )}
               </div>
@@ -1218,7 +1250,7 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                     >
                       <option value="user">Standard User</option>
                       <option value="admin">Administrator</option>
-                      <option value="super_admin">👑 Developer (Super Admin)</option>
+                      <option value="super_admin">Developer (Super Admin)</option>
                     </select>
                   ) : (
                     <select
@@ -1315,7 +1347,7 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                   setShowResetModal(false);
                   setActionNotice(
                     data.message ||
-                      `✅ Password for '${resetTargetUser.username}' directly reset without OTP.`
+                      `Password for '${resetTargetUser.username}' directly reset without OTP.`
                   );
                   await loadUsers();
                 } catch (err) {
@@ -1327,8 +1359,9 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
             >
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
                 <div>
-                  <div style={{ fontSize: "18px", fontWeight: "800", color: "#0f172a" }}>
-                    🔑 Direct Password Reset: {resetTargetUser.username}
+                  <div style={{ fontSize: "18px", fontWeight: "800", color: "#0f172a", display: "flex", alignItems: "center", gap: "8px" }}>
+                    <KeyRound size={20} color="#2563eb" />
+                    <span>Direct Password Reset: {resetTargetUser.username}</span>
                   </div>
                   <div style={{ fontSize: "12px", color: "#475569", marginTop: "2px" }}>
                     Immediately set a new password for <strong>{resetTargetUser.username}</strong> ({resetTargetUser.email}) using your {isSuperAdmin ? "Developer (Super Admin)" : "Administrator"} privileges — no Email or SMS OTP required.
@@ -1336,10 +1369,10 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                 </div>
                 <button
                   type="button"
-                  style={{ background: "none", border: "none", color: "#64748b", fontSize: "20px", cursor: "pointer" }}
+                  style={{ background: "none", border: "none", color: "#64748b", cursor: "pointer", display: "flex", alignItems: "center" }}
                   onClick={() => setShowResetModal(false)}
                 >
-                  ✕
+                  <X size={18} />
                 </button>
               </div>
 
@@ -1367,9 +1400,9 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                   <button
                     type="button"
                     onClick={() => setShowResetPasswordText(!showResetPasswordText)}
-                    style={{ position: "absolute", right: "10px", top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", fontSize: "14px" }}
+                    style={{ position: "absolute", right: "10px", top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", color: "#64748b" }}
                   >
-                    {showResetPasswordText ? "👁️‍🗨️" : "👁️"}
+                    {showResetPasswordText ? <EyeOff size={16} /> : <Eye size={16} />}
                   </button>
                 </div>
                 {renderPasswordChecklist(resetNewPassword, [resetTargetUser.username, resetTargetUser.email])}
@@ -1403,8 +1436,9 @@ export default function UsersPage({ API_URL, currentUser, getAuthHeaders }) {
                   type="submit"
                   className="primary-button"
                   disabled={resetLoading}
+                  style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
                 >
-                  {resetLoading ? "Resetting Password..." : "🔑 Reset Password Now"}
+                  {resetLoading ? "Resetting Password..." : <><KeyRound size={14} /> Reset Password Now</>}
                 </button>
               </div>
             </form>

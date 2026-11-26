@@ -1,4 +1,23 @@
 import React, { useEffect, useState, useRef } from "react";
+import {
+  Globe,
+  Settings,
+  Trash2,
+  Radar,
+  RefreshCw,
+  Clock,
+  Shield,
+  Laptop,
+  AlertTriangle,
+  CheckCircle2,
+  X,
+  Film,
+  Gamepad2,
+  Smartphone,
+  ShieldAlert,
+  Briefcase,
+  Search,
+} from "lucide-react";
 
 export default function WebActivityPage({
   API_URL,
@@ -171,13 +190,13 @@ export default function WebActivityPage({
       if (res.ok) {
         const updated = await res.json();
         setPolicy(updated);
-        setPolicyNotice("✅ Institution Web Filtering Policy updated successfully!");
+        setPolicyNotice("Institution Web Filtering Policy updated successfully!");
         setTimeout(() => setPolicyNotice(""), 3000);
       } else {
-        setPolicyNotice("✕ Failed to save policy.");
+        setPolicyNotice("Failed to save policy.");
       }
     } catch (err) {
-      setPolicyNotice(`✕ Error: ${err.message}`);
+      setPolicyNotice(`Error: ${err.message}`);
     } finally {
       setSavingPolicy(false);
     }
@@ -362,17 +381,17 @@ export default function WebActivityPage({
   const getCategoryBadge = (cat) => {
     switch (cat) {
       case "streaming":
-        return { label: "🎬 Streaming", bg: "rgba(239, 68, 68, 0.15)", color: "#f87171", border: "rgba(239, 68, 68, 0.4)" };
+        return { label: "Streaming", Icon: Film, bg: "rgba(239, 68, 68, 0.15)", color: "#f87171", border: "rgba(239, 68, 68, 0.4)" };
       case "gaming":
-        return { label: "🎮 Gaming", bg: "rgba(168, 85, 247, 0.15)", color: "#c084fc", border: "rgba(168, 85, 247, 0.4)" };
+        return { label: "Gaming", Icon: Gamepad2, bg: "rgba(168, 85, 247, 0.15)", color: "#c084fc", border: "rgba(168, 85, 247, 0.4)" };
       case "social_media":
-        return { label: "📱 Social Media", bg: "rgba(59, 130, 246, 0.15)", color: "#60a5fa", border: "rgba(59, 130, 246, 0.4)" };
+        return { label: "Social Media", Icon: Smartphone, bg: "rgba(59, 130, 246, 0.15)", color: "#60a5fa", border: "rgba(59, 130, 246, 0.4)" };
       case "gambling_adult":
-        return { label: "🔞 High Risk / Adult", bg: "rgba(220, 38, 38, 0.25)", color: "#ef4444", border: "#dc2626" };
+        return { label: "High Risk / Adult", Icon: ShieldAlert, bg: "rgba(220, 38, 38, 0.25)", color: "#ef4444", border: "#dc2626" };
       case "productivity":
-        return { label: "💼 Productivity", bg: "rgba(16, 185, 129, 0.15)", color: "#34d399", border: "rgba(16, 185, 129, 0.4)" };
+        return { label: "Productivity", Icon: Briefcase, bg: "rgba(16, 185, 129, 0.15)", color: "#34d399", border: "rgba(16, 185, 129, 0.4)" };
       default:
-        return { label: "🌐 General Web", bg: "rgba(148, 163, 184, 0.12)", color: "#94a3b8", border: "rgba(148, 163, 184, 0.3)" };
+        return { label: "General Web", Icon: Globe, bg: "rgba(148, 163, 184, 0.12)", color: "#94a3b8", border: "rgba(148, 163, 184, 0.3)" };
     }
   };
 
@@ -400,7 +419,8 @@ export default function WebActivityPage({
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "20px", flexWrap: "wrap", gap: "12px" }}>
         <div>
           <h1 style={{ fontSize: "22px", fontWeight: "800", color: "#f1f5f9", margin: "0 0 4px 0", display: "flex", alignItems: "center", gap: "8px" }}>
-            <span>🌐</span> Web & Application Activity Monitor
+            <Globe size={22} color="#60a5fa" />
+            <span>Web & Application Activity Monitor</span>
           </h1>
           <p style={{ margin: 0, fontSize: "13px", color: "#94a3b8" }}>
             Real-time passive visibility into active websites, radio streaming, online games, and social media accessed by connected computers.
@@ -420,7 +440,7 @@ export default function WebActivityPage({
             onClick={() => setShowPolicyModal(true)}
             style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12px", padding: "7px 14px" }}
           >
-            ⚙️ Institution Policy
+            <Settings size={13} /> Institution Policy
           </button>
 
           <button
@@ -431,7 +451,7 @@ export default function WebActivityPage({
             style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12px", padding: "7px 12px", borderColor: "#475569", color: "#cbd5e1" }}
             title="Clear old logs to start with a clean real-time test"
           >
-            🗑️ Clear History
+            <Trash2 size={13} /> Clear History
           </button>
 
           {/* Scan Endpoints Browsing Activity Button */}
@@ -455,7 +475,7 @@ export default function WebActivityPage({
             title="Scan connected LAN machines for active and cached browsing activity"
           >
             <span style={{ display: "inline-block", fontSize: "14px" }} className={scanning ? "spin-active" : ""}>
-              {scanning ? "⏳" : "📡"}
+              {scanning ? <RefreshCw size={14} className="spin" /> : <Radar size={14} />}
             </span>
             {scanning ? "Scanning Machines..." : "Scan Browsing Activity"}
           </button>
@@ -480,7 +500,7 @@ export default function WebActivityPage({
             title="Reload devices active right now"
           >
             <span style={{ display: "inline-block", fontSize: "14px" }} className={refreshing ? "spin-active" : ""}>
-              🔄
+              <RefreshCw size={14} />
             </span>
             {refreshing ? "Reloading..." : "Reload Devices Now"}
           </button>
@@ -581,7 +601,7 @@ export default function WebActivityPage({
               <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
                 <span style={{ display: "inline-block", width: "10px", height: "10px", borderRadius: "50%", background: "#10b981" }} className="live-dot" />
                 <span style={{ fontSize: "14px", fontWeight: "700", color: "#f8fafc" }}>
-                  🟢 Connected Computers & Browsing Activity
+                  Connected Computers & Browsing Activity
                 </span>
                 <span style={{ background: "rgba(16, 185, 129, 0.2)", color: "#34d399", border: "1px solid rgba(16, 185, 129, 0.4)", borderRadius: "12px", padding: "2px 8px", fontSize: "11px", fontWeight: "700" }}>
                   {deviceList.length} computer{deviceList.length === 1 ? "" : "s"} • {visibleActiveSitesCount} active site{visibleActiveSitesCount === 1 ? "" : "s"}
@@ -593,7 +613,7 @@ export default function WebActivityPage({
                 {/* Search input */}
                 <input
                   type="text"
-                  placeholder="🔍 Search host, IP, site..."
+                  placeholder="Search host, IP, site..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   style={{
@@ -623,7 +643,7 @@ export default function WebActivityPage({
                       fontWeight: activeMinutes === 5 ? "700" : "500",
                     }}
                   >
-                    🟢 5m
+                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#10b981", display: "inline-block", marginRight: 4 }} /> 5m
                   </button>
                   <button
                     type="button"
@@ -639,7 +659,7 @@ export default function WebActivityPage({
                       fontWeight: activeMinutes === 15 ? "700" : "500",
                     }}
                   >
-                    ⏱️ 15m
+                    <Clock size={11} style={{ marginRight: 3, verticalAlign: "middle" }} /> 15m
                   </button>
                   <button
                     type="button"
@@ -655,7 +675,7 @@ export default function WebActivityPage({
                       fontWeight: activeMinutes === 60 ? "700" : "500",
                     }}
                   >
-                    ⏳ 1h
+                    <Clock size={11} style={{ marginRight: 3, verticalAlign: "middle" }} /> 1h
                   </button>
                 </div>
 
@@ -667,7 +687,7 @@ export default function WebActivityPage({
                     onChange={(e) => setHideNoise(e.target.checked)}
                     style={{ cursor: "pointer", accentColor: "#3b82f6" }}
                   />
-                  <span>🛡️ Hide OS Noise</span>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><Shield size={12} /> Hide OS Noise</span>
                 </label>
 
                 {/* View toggle */}
@@ -687,7 +707,7 @@ export default function WebActivityPage({
                     }}
                     title="Show one consolidated card per machine with all its browsed websites"
                   >
-                    💻 By Machine
+                    <Laptop size={12} style={{ marginRight: 4, verticalAlign: "middle" }} /> By Machine
                   </button>
                   <button
                     type="button"
@@ -704,7 +724,7 @@ export default function WebActivityPage({
                     }}
                     title="Show repeating individual site tiles"
                   >
-                    🌐 Individual Sites
+                    <Globe size={12} style={{ marginRight: 4, verticalAlign: "middle" }} /> Individual Sites
                   </button>
                 </div>
               </div>
@@ -745,7 +765,7 @@ export default function WebActivityPage({
                   fontWeight: "600",
                 }}
               >
-                🎬 Streaming
+                <Film size={11} style={{ marginRight: 4, verticalAlign: "middle" }} /> Streaming
               </button>
               <button
                 type="button"
@@ -762,7 +782,7 @@ export default function WebActivityPage({
                   fontWeight: "600",
                 }}
               >
-                🎮 Gaming
+                <Gamepad2 size={11} style={{ marginRight: 4, verticalAlign: "middle" }} /> Gaming
               </button>
               <button
                 type="button"
@@ -779,7 +799,7 @@ export default function WebActivityPage({
                   fontWeight: "600",
                 }}
               >
-                📱 Social Media
+                <Smartphone size={11} style={{ marginRight: 4, verticalAlign: "middle" }} /> Social Media
               </button>
               <button
                 type="button"
@@ -796,13 +816,13 @@ export default function WebActivityPage({
                   fontWeight: "600",
                 }}
               >
-                ⚠️ Violations Only
+                <AlertTriangle size={11} style={{ marginRight: 4, verticalAlign: "middle" }} /> Violations Only
               </button>
             </div>
 
             {displayedDevices.length === 0 ? (
               <div style={{ padding: "24px", textAlign: "center", background: "#0f172a", borderRadius: "6px", color: "#64748b", fontSize: "12px" }}>
-                <span>⚪ No web browsing activity detected in the last {activeMinutes} minutes.</span>
+                <span>No web browsing activity detected in the last {activeMinutes} minutes.</span>
                 <div style={{ marginTop: "4px", fontSize: "11px", color: "#475569" }}>
                   When any computer streams radio, visits YouTube, or browses websites, it will show up here instantly.
                 </div>
@@ -827,7 +847,7 @@ export default function WebActivityPage({
                     {/* Machine Header */}
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", borderBottom: "1px solid #1e293b", paddingBottom: "10px" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                        <span style={{ fontSize: "22px" }}>💻</span>
+                        <Laptop size={22} color="#60a5fa" />
                         <div>
                           <div style={{ fontWeight: "700", color: "#f8fafc", fontSize: "14px" }}>
                             {dev.hostname}
@@ -887,7 +907,9 @@ export default function WebActivityPage({
                     <div style={{ display: "flex", flexDirection: "column", gap: "6px", maxHeight: "240px", overflowY: "auto", paddingRight: "4px" }}>
                       {dev.sites.length === 0 ? (
                         <div style={{ padding: "12px", textAlign: "center", background: "#1e293b", borderRadius: "6px", color: "#64748b", fontSize: "11px" }}>
-                          <span style={{ color: "#34d399", fontWeight: "600" }}>🟢 Online & Monitored</span>
+                          <span style={{ color: "#34d399", fontWeight: "600", display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                            <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#10b981", display: "inline-block" }} /> Online & Monitored
+                          </span>
                           <div style={{ fontSize: "10px", color: "#475569", marginTop: "2px" }}>
                             Connected to network — No new websites visited in the last {activeMinutes}m window.
                           </div>
@@ -919,7 +941,7 @@ export default function WebActivityPage({
                                 </span>
                               )}
                               {site.is_violation && (
-                                <span style={{ fontSize: "10px", color: "#f87171", fontWeight: "700" }}>⚠️</span>
+                                <AlertTriangle size={12} color="#f87171" />
                               )}
                             </div>
 
@@ -933,8 +955,12 @@ export default function WebActivityPage({
                                   background: badge.bg,
                                   color: badge.color,
                                   border: `1px solid ${badge.border}`,
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "3px",
                                 }}
                               >
+                                {badge.Icon && <badge.Icon size={10} />}
                                 {badge.label}
                               </span>
                               <span style={{ fontSize: "10px", color: "#64748b" }}>
@@ -1000,8 +1026,12 @@ export default function WebActivityPage({
                             background: badge.bg,
                             color: badge.color,
                             border: `1px solid ${badge.border}`,
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "3px",
                           }}
                         >
+                          {badge.Icon && <badge.Icon size={10} />}
                           {badge.label}
                         </span>
                       </div>
@@ -1011,8 +1041,8 @@ export default function WebActivityPage({
                       </div>
 
                       {s.is_violation && (
-                        <div style={{ fontSize: "11px", color: "#f87171", background: "rgba(239, 68, 68, 0.1)", padding: "4px 8px", borderRadius: "4px", border: "1px solid rgba(239, 68, 68, 0.3)" }}>
-                          ⚠️ Prohibited activity during working hours
+                        <div style={{ fontSize: "11px", color: "#f87171", background: "rgba(239, 68, 68, 0.1)", padding: "4px 8px", borderRadius: "4px", border: "1px solid rgba(239, 68, 68, 0.3)", display: "flex", alignItems: "center", gap: "4px" }}>
+                          <AlertTriangle size={11} /> Prohibited activity during working hours
                         </div>
                       )}
                     </div>
@@ -1035,7 +1065,9 @@ export default function WebActivityPage({
         </div>
 
         <div style={{ background: "#1e293b", border: "1px solid rgba(239, 68, 68, 0.4)", borderRadius: "8px", padding: "16px" }}>
-          <div style={{ fontSize: "11px", color: "#f87171", textTransform: "uppercase", fontWeight: "700" }}>🎬 Audio & Video Streaming</div>
+          <div style={{ fontSize: "11px", color: "#f87171", textTransform: "uppercase", fontWeight: "700", display: "flex", alignItems: "center", gap: "6px" }}>
+            <Film size={13} /> Audio & Video Streaming
+          </div>
           <div style={{ fontSize: "26px", fontWeight: "800", color: "#f87171", marginTop: "4px" }}>
             {analytics?.category_counts?.streaming ?? 0}
           </div>
@@ -1043,7 +1075,9 @@ export default function WebActivityPage({
         </div>
 
         <div style={{ background: "#1e293b", border: "1px solid rgba(168, 85, 247, 0.4)", borderRadius: "8px", padding: "16px" }}>
-          <div style={{ fontSize: "11px", color: "#c084fc", textTransform: "uppercase", fontWeight: "700" }}>🎮 Online Gaming</div>
+          <div style={{ fontSize: "11px", color: "#c084fc", textTransform: "uppercase", fontWeight: "700", display: "flex", alignItems: "center", gap: "6px" }}>
+            <Gamepad2 size={13} /> Online Gaming
+          </div>
           <div style={{ fontSize: "26px", fontWeight: "800", color: "#c084fc", marginTop: "4px" }}>
             {analytics?.category_counts?.gaming ?? 0}
           </div>
@@ -1051,7 +1085,9 @@ export default function WebActivityPage({
         </div>
 
         <div style={{ background: "#1e293b", border: "1px solid rgba(59, 130, 246, 0.4)", borderRadius: "8px", padding: "16px" }}>
-          <div style={{ fontSize: "11px", color: "#60a5fa", textTransform: "uppercase", fontWeight: "700" }}>📱 Social Media</div>
+          <div style={{ fontSize: "11px", color: "#60a5fa", textTransform: "uppercase", fontWeight: "700", display: "flex", alignItems: "center", gap: "6px" }}>
+            <Smartphone size={13} /> Social Media
+          </div>
           <div style={{ fontSize: "26px", fontWeight: "800", color: "#60a5fa", marginTop: "4px" }}>
             {analytics?.category_counts?.social_media ?? 0}
           </div>
@@ -1059,7 +1095,9 @@ export default function WebActivityPage({
         </div>
 
         <div style={{ background: "#1e293b", border: "1px solid rgba(245, 158, 11, 0.4)", borderRadius: "8px", padding: "16px" }}>
-          <div style={{ fontSize: "11px", color: "#fbbf24", textTransform: "uppercase", fontWeight: "700" }}>⚠️ Work-Hours Violations</div>
+          <div style={{ fontSize: "11px", color: "#fbbf24", textTransform: "uppercase", fontWeight: "700", display: "flex", alignItems: "center", gap: "6px" }}>
+            <AlertTriangle size={13} /> Work-Hours Violations
+          </div>
           <div style={{ fontSize: "26px", fontWeight: "800", color: "#fbbf24", marginTop: "4px" }}>
             {analytics?.violations_count ?? 0}
           </div>
@@ -1072,7 +1110,7 @@ export default function WebActivityPage({
         {/* Top Streaming PCs */}
         <div style={{ background: "#1e293b", border: "1px solid #334155", borderRadius: "8px", padding: "16px" }}>
           <div style={{ fontSize: "13px", fontWeight: "700", color: "#f87171", display: "flex", alignItems: "center", gap: "6px", marginBottom: "12px" }}>
-            <span>🎬</span> Top Audio & Video Streaming Computers
+            <Film size={15} /> Top Audio & Video Streaming Computers
           </div>
           {analytics?.top_streaming_devices?.length > 0 ? (
             <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
@@ -1101,7 +1139,7 @@ export default function WebActivityPage({
         {/* Top Gaming PCs */}
         <div style={{ background: "#1e293b", border: "1px solid #334155", borderRadius: "8px", padding: "16px" }}>
           <div style={{ fontSize: "13px", fontWeight: "700", color: "#c084fc", display: "flex", alignItems: "center", gap: "6px", marginBottom: "12px" }}>
-            <span>🎮</span> Top Online Gaming Computers
+            <Gamepad2 size={15} /> Top Online Gaming Computers
           </div>
           {analytics?.top_gaming_devices?.length > 0 ? (
             <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
@@ -1142,20 +1180,21 @@ export default function WebActivityPage({
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", borderBottom: "1px solid #334155", paddingBottom: "10px" }}>
               <div style={{ fontSize: "16px", fontWeight: "700", color: "#f8fafc", display: "flex", alignItems: "center", gap: "8px" }}>
-                <span>⚙️</span> Institution Web Filtering & Monitoring Policy
+                <Settings size={18} color="#94a3b8" /> Institution Web Filtering & Monitoring Policy
               </div>
               <button
                 type="button"
                 onClick={() => setShowPolicyModal(false)}
-                style={{ background: "none", border: "none", color: "#94a3b8", fontSize: "18px", cursor: "pointer" }}
+                style={{ background: "none", border: "none", color: "#94a3b8", cursor: "pointer", display: "flex", alignItems: "center", padding: 0 }}
               >
-                ✕
+                <X size={18} />
               </button>
             </div>
 
             {policyNotice && (
-              <div style={{ padding: "8px 12px", borderRadius: "4px", marginBottom: "12px", background: policyNotice.startsWith("✅") ? "rgba(16, 185, 129, 0.15)" : "rgba(239, 68, 68, 0.15)", border: policyNotice.startsWith("✅") ? "1px solid #10b981" : "1px solid #ef4444", fontSize: "12px", color: policyNotice.startsWith("✅") ? "#34d399" : "#f87171" }}>
-                {policyNotice}
+              <div style={{ padding: "8px 12px", borderRadius: "4px", marginBottom: "12px", background: policyNotice.includes("fail") || policyNotice.includes("Error") ? "rgba(239, 68, 68, 0.15)" : "rgba(16, 185, 129, 0.15)", border: policyNotice.includes("fail") || policyNotice.includes("Error") ? "1px solid #ef4444" : "1px solid #10b981", fontSize: "12px", color: policyNotice.includes("fail") || policyNotice.includes("Error") ? "#f87171" : "#34d399", display: "flex", alignItems: "center", gap: "6px" }}>
+                {policyNotice.includes("fail") || policyNotice.includes("Error") ? <AlertTriangle size={14} /> : <CheckCircle2 size={14} />}
+                <span>{policyNotice.replace(/^[\u2705\u274C\u26A0\uFE0F]\s*/, "")}</span>
               </div>
             )}
 
@@ -1167,7 +1206,9 @@ export default function WebActivityPage({
                   onChange={(e) => setPolicy({ ...policy, block_streaming_work_hours: e.target.checked })}
                 />
                 <div>
-                  <strong>🎬 Prohibit Audio & Video Streaming during Work Hours (08:00–17:00)</strong>
+                  <strong style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                    <Film size={14} color="#f87171" /> Prohibit Audio & Video Streaming during Work Hours (08:00–17:00)
+                  </strong>
                   <div style={{ fontSize: "11px", color: "#94a3b8" }}>Flags online radio, YouTube, Netflix, Prime Video, TikTok</div>
                 </div>
               </label>
@@ -1179,7 +1220,9 @@ export default function WebActivityPage({
                   onChange={(e) => setPolicy({ ...policy, block_gaming_work_hours: e.target.checked })}
                 />
                 <div>
-                  <strong>🎮 Prohibit Online Gaming during Work Hours</strong>
+                  <strong style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                    <Gamepad2 size={14} color="#c084fc" /> Prohibit Online Gaming during Work Hours
+                  </strong>
                   <div style={{ fontSize: "11px", color: "#94a3b8" }}>Flags Steam, Epic Games, Roblox, Riot Games, Discord</div>
                 </div>
               </label>
@@ -1191,7 +1234,9 @@ export default function WebActivityPage({
                   onChange={(e) => setPolicy({ ...policy, block_social_media_work_hours: e.target.checked })}
                 />
                 <div>
-                  <strong>📱 Prohibit Social Media during Work Hours</strong>
+                  <strong style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                    <Smartphone size={14} color="#60a5fa" /> Prohibit Social Media during Work Hours
+                  </strong>
                   <div style={{ fontSize: "11px", color: "#94a3b8" }}>Flags Facebook, Instagram, TikTok, Twitter/X</div>
                 </div>
               </label>
@@ -1203,7 +1248,9 @@ export default function WebActivityPage({
                   onChange={(e) => setPolicy({ ...policy, block_adult_always: e.target.checked })}
                 />
                 <div>
-                  <strong>🔞 Prohibit Adult & Gambling Sites (24/7)</strong>
+                  <strong style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                    <ShieldAlert size={14} color="#ef4444" /> Prohibit Adult & Gambling Sites (24/7)
+                  </strong>
                   <div style={{ fontSize: "11px", color: "#94a3b8" }}>Flags betting sites, online casinos, and adult domains</div>
                 </div>
               </label>
@@ -1215,7 +1262,9 @@ export default function WebActivityPage({
                   onChange={(e) => setPolicy({ ...policy, sniffer_enabled: e.target.checked })}
                 />
                 <div>
-                  <strong>📡 Passive Network DNS Sniffer Active</strong>
+                  <strong style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                    <Radar size={14} color="#38bdf8" /> Passive Network DNS Sniffer Active
+                  </strong>
                   <div style={{ fontSize: "11px", color: "#94a3b8" }}>Captures live network queries across LAN & Wi-Fi</div>
                 </div>
               </label>

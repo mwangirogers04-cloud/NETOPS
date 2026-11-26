@@ -89,6 +89,7 @@ def test_audit_trail_comprehensive_attribution(test_db, auth_headers):
     test_db.commit()
 
     # 2. Populate diverse audit actions:
+    audit_time = datetime(2026, 10, 5, 12, 0, 0)
     # A) VLAN Creation (Switch & VLAN)
     create_event(
         db=test_db,
@@ -98,6 +99,7 @@ def test_audit_trail_comprehensive_attribution(test_db, auth_headers):
         user_id=42,
         role="admin",
         client_ip="192.168.0.55",
+        created_at=audit_time,
     )
     # B) Device Approval (Device Access & Enforcement)
     create_event(
@@ -108,6 +110,7 @@ def test_audit_trail_comprehensive_attribution(test_db, auth_headers):
         user_id=42,
         role="admin",
         client_ip="192.168.0.55",
+        created_at=audit_time,
     )
     # C) Switch Port Configuration (Switch & VLAN)
     create_event(
@@ -118,6 +121,7 @@ def test_audit_trail_comprehensive_attribution(test_db, auth_headers):
         user_id=42,
         role="admin",
         client_ip="192.168.0.55",
+        created_at=audit_time,
     )
     # D) Patch Deployment Triggered (Patch Remediation)
     create_event(
@@ -128,6 +132,7 @@ def test_audit_trail_comprehensive_attribution(test_db, auth_headers):
         user_id=42,
         role="admin",
         client_ip="192.168.0.55",
+        created_at=audit_time,
     )
     # E) User Account Deactivated (User Administration)
     create_event(
@@ -138,6 +143,7 @@ def test_audit_trail_comprehensive_attribution(test_db, auth_headers):
         user_id=42,
         role="admin",
         client_ip="192.168.0.55",
+        created_at=audit_time,
     )
     # F) VLAN Deletion (Switch & VLAN)
     create_event(
@@ -148,6 +154,7 @@ def test_audit_trail_comprehensive_attribution(test_db, auth_headers):
         user_id=42,
         role="admin",
         client_ip="192.168.0.55",
+        created_at=audit_time,
     )
     test_db.commit()
 

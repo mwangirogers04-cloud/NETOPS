@@ -57,13 +57,13 @@ export const NETOPS_FAQS = [
     id: "faq-services-offered",
     category: "Services & Technical Support",
     question: "What professional IT and infrastructure services do you offer?",
-    answer: "We offer 5 professional services:\n• 📹 CCTV Installation (Commercial & residential IP/analog surveillance setups)\n• 🔌 Structured Cabling (Cat6/Fiber optic trunking, rack dressing & patch panels)\n• 🌐 Websites Maintenance (Full-stack web application support, uptime monitoring & security)\n• 💻 Software Installations and Updates (OS deployment, patch rollouts & baseline maintenance)\n• ⚙️ Hardware Performance Maintenance (Diagnostics, thermal servicing & hardware tuning)"
+    answer: "We offer 5 professional services:\n• CCTV Installation: Commercial & residential IP/analog surveillance setups\n• Structured Cabling: Cat6/Fiber optic trunking, rack dressing & patch panels\n• Websites Maintenance: Full-stack web application support, uptime monitoring & security\n• Software Installations and Updates: OS deployment, patch rollouts & baseline maintenance\n• Hardware Performance Maintenance: Diagnostics, thermal servicing & hardware tuning"
   },
   {
     id: "faq-contact-support",
     category: "Services & Technical Support",
     question: "How can I contact technical support or request a service quotation?",
-    answer: "You can reach our engineering and support team directly via:\n• 📞 Phone / WhatsApp: +254704393504\n• ✉️ Email: rogersiru@gmail.com\nWe are available for technical assistance, remote management, and onsite deployments."
+    answer: "You can reach our engineering and support team directly via:\n• Phone / WhatsApp: +254704393504\n• Email: rogersiru@gmail.com\nWe are available for technical assistance, remote management, and onsite deployments."
   }
 ];
 

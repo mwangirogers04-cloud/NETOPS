@@ -1,4 +1,223 @@
 import React from "react";
+import {
+  Wifi,
+  WifiOff,
+  Cable,
+  ShieldAlert,
+  Lock,
+  AlertTriangle,
+  Clock,
+  Ban,
+  CheckCircle2,
+  Phone,
+  Laptop,
+  Camera,
+  Printer,
+  Server,
+  Radio,
+  Tag,
+} from "lucide-react";
+
+export const VLAN_STANDARDS = {
+  10: {
+    id: 10,
+    name: "VoIP & Telephony",
+    shortName: "VoIP",
+    deviceType: "ip_phone",
+    color: "#0284c7",
+    bg: "rgba(2, 132, 199, 0.12)",
+    border: "#38bdf8",
+    subnet: "192.168.10.0/24",
+    Icon: Phone,
+    description: "Voice-over-IP phones, video conferencing, SIP terminals",
+  },
+  20: {
+    id: 20,
+    name: "Workstations & Computers",
+    shortName: "Computers",
+    deviceType: "computer",
+    color: "#2563eb",
+    bg: "rgba(37, 99, 235, 0.12)",
+    border: "#60a5fa",
+    subnet: "192.168.20.0/24",
+    Icon: Laptop,
+    description: "Corporate desktop PCs, laptops, and developer workstations",
+  },
+  30: {
+    id: 30,
+    name: "Surveillance & CCTV",
+    shortName: "CCTV",
+    deviceType: "cctv",
+    color: "#d97706",
+    bg: "rgba(217, 119, 6, 0.12)",
+    border: "#fbbf24",
+    subnet: "192.168.30.0/24",
+    Icon: Camera,
+    description: "IP cameras, NVRs, and security video surveillance feeds",
+  },
+  40: {
+    id: 40,
+    name: "Network Printers & Scanners",
+    shortName: "Printers",
+    deviceType: "printer",
+    color: "#059669",
+    bg: "rgba(5, 150, 105, 0.12)",
+    border: "#34d399",
+    subnet: "192.168.40.0/24",
+    Icon: Printer,
+    description: "Shared office network printers, MFPs, and scanners",
+  },
+  50: {
+    id: 50,
+    name: "Infrastructure Servers",
+    shortName: "Servers",
+    deviceType: "server",
+    color: "#7c3aed",
+    bg: "rgba(124, 58, 237, 0.12)",
+    border: "#a78bfa",
+    subnet: "192.168.50.0/24",
+    Icon: Server,
+    description: "Domain controllers, NAS, database and application hosts",
+  },
+  60: {
+    id: 60,
+    name: "Wireless Access Points",
+    shortName: "Access Points",
+    deviceType: "access_point",
+    color: "#0891b2",
+    bg: "rgba(8, 145, 178, 0.12)",
+    border: "#22d3ee",
+    subnet: "192.168.60.0/24",
+    Icon: Radio,
+    description: "Enterprise Wi-Fi APs, mesh repeaters, and bridge links",
+  },
+  90: {
+    id: 90,
+    name: "Quarantine & Isolation",
+    shortName: "Quarantine",
+    deviceType: "unknown",
+    color: "#dc2626",
+    bg: "rgba(220, 38, 38, 0.15)",
+    border: "#f87171",
+    subnet: "192.168.90.0/24",
+    Icon: ShieldAlert,
+    description: "Zero-Trust quarantine for untrusted, rogue, or pending devices",
+  },
+};
+
+export const STATUS_STANDARDS = {
+  online: {
+    label: "Online",
+    color: "#10b981",
+    bg: "rgba(16, 185, 129, 0.12)",
+    border: "#34d399",
+    dotColor: "#10b981",
+  },
+  offline: {
+    label: "Offline",
+    color: "#64748b",
+    bg: "rgba(100, 116, 139, 0.12)",
+    border: "#94a3b8",
+    dotColor: "#94a3b8",
+  },
+  quarantined: {
+    label: "Quarantined",
+    color: "#ef4444",
+    bg: "rgba(239, 68, 68, 0.12)",
+    border: "#f87171",
+    dotColor: "#ef4444",
+  },
+  isolated: {
+    label: "Isolated",
+    color: "#a855f7",
+    bg: "rgba(168, 85, 247, 0.12)",
+    border: "#c084fc",
+    dotColor: "#a855f7",
+  },
+  pending: {
+    label: "Pending",
+    color: "#f59e0b",
+    bg: "rgba(245, 158, 11, 0.12)",
+    border: "#fbbf24",
+    dotColor: "#f59e0b",
+  },
+};
+
+export const DeviceVlanBadge = ({ vlanId, compact = false }) => {
+  const vlan = VLAN_STANDARDS[Number(vlanId)] || {
+    id: vlanId || 90,
+    name: `VLAN ${vlanId || 90}`,
+    shortName: `VLAN ${vlanId || 90}`,
+    color: "#64748b",
+    bg: "rgba(100, 116, 139, 0.12)",
+    border: "#94a3b8",
+    Icon: Tag,
+  };
+  const IconComp = vlan.Icon || Tag;
+
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: compact ? "3px" : "5px",
+        fontSize: compact ? "10px" : "11px",
+        fontWeight: "700",
+        padding: compact ? "1px 6px" : "2px 8px",
+        borderRadius: "4px",
+        background: vlan.bg,
+        color: vlan.color,
+        border: `1px solid ${vlan.border}`,
+        whiteSpace: "nowrap",
+      }}
+      title={`VLAN ${vlan.id}: ${vlan.name} (${vlan.subnet || ""})`}
+    >
+      <IconComp size={compact ? 10 : 12} />
+      <span>VLAN {vlan.id}</span>
+      {!compact && (
+        <span style={{ opacity: 0.8, fontSize: "10px", fontWeight: "600" }}>
+          ({vlan.shortName})
+        </span>
+      )}
+    </span>
+  );
+};
+
+export const DeviceStatusBadge = ({ status, compact = false }) => {
+  const normStatus = String(status || "offline").toLowerCase().trim();
+  const config = STATUS_STANDARDS[normStatus] || STATUS_STANDARDS.offline;
+
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "5px",
+        fontSize: compact ? "10px" : "11px",
+        fontWeight: "700",
+        padding: compact ? "1px 6px" : "2px 8px",
+        borderRadius: "4px",
+        background: config.bg,
+        color: config.color,
+        border: `1px solid ${config.border}`,
+        textTransform: "uppercase",
+        letterSpacing: "0.4px",
+        whiteSpace: "nowrap",
+      }}
+    >
+      <span
+        style={{
+          width: compact ? "5px" : "6px",
+          height: compact ? "5px" : "6px",
+          borderRadius: "50%",
+          background: config.dotColor,
+          boxShadow: normStatus === "online" ? "0 0 6px #10b981" : "none",
+        }}
+      />
+      <span>{config.label}</span>
+    </span>
+  );
+};
 
 export const TYPE_TO_VLAN = {
   ip_phone: 10,
@@ -138,7 +357,7 @@ export const getDeviceInternetStatus = (device) => {
       hasNoInternet: true,
       reason: "Device data unavailable",
       shortReason: "Offline",
-      statusIcon: "🔌⚪",
+      statusIcon: "",
       badgeColor: "#64748b",
       badgeBg: "rgba(100, 116, 139, 0.15)",
       badgeBorder: "#94a3b8",
@@ -178,7 +397,7 @@ export const getDeviceInternetStatus = (device) => {
 
   let reason = "Internet Access Active";
   let shortReason = "Active";
-  let statusIcon = isWireless ? "📶" : "🔌";
+  let statusIcon = "";
   let badgeColor = "#059669";
   let badgeBg = "rgba(16, 185, 129, 0.15)";
   let badgeBorder = "#10b981";
@@ -186,42 +405,42 @@ export const getDeviceInternetStatus = (device) => {
   if (isDisconnected) {
     reason = isWireless ? "Wi-Fi Disconnected / Offline" : "Wired Cable Disconnected / Offline";
     shortReason = "Offline";
-    statusIcon = isWireless ? "📶⚪" : "🔌⚪";
+    statusIcon = "";
     badgeColor = "#64748b";
     badgeBg = "rgba(100, 116, 139, 0.15)";
     badgeBorder = "#94a3b8";
   } else if (isTypeVlanMismatch) {
     reason = `Type & VLAN Mismatch: Device type '${device.device_type || "unknown"}' requires VLAN ${expectedVlan}, but assigned VLAN ${device.vlan_id || 90}. Device must match in TYPE and VLAN section to be connected.`;
     shortReason = "Type/VLAN Mismatch";
-    statusIcon = isWireless ? "📶⚠️" : "🔌⚠️";
+    statusIcon = "";
     badgeColor = "#b45309";
     badgeBg = "rgba(245, 158, 11, 0.15)";
     badgeBorder = "#f59e0b";
   } else if (isQuarantined) {
     reason = "Quarantined in VLAN 90 (Zero-Trust NAC: No Internet Access)";
     shortReason = "Quarantined (VLAN 90)";
-    statusIcon = isWireless ? "📶🚫" : "🔌🚫";
+    statusIcon = "";
     badgeColor = "#dc2626";
     badgeBg = "rgba(220, 38, 38, 0.15)";
     badgeBorder = "#ef4444";
   } else if (isIsolated) {
     reason = "Isolated by Security Policy (No Internet Access)";
     shortReason = "Isolated";
-    statusIcon = isWireless ? "📶🔒" : "🔌🔒";
+    statusIcon = "";
     badgeColor = "#9333ea";
     badgeBg = "rgba(147, 51, 234, 0.15)";
     badgeBorder = "#a855f7";
   } else if (isPending) {
     reason = "Pending Approval (Unapproved Device: No Internet Access)";
     shortReason = "Pending Approval";
-    statusIcon = isWireless ? "📶⚠️" : "🔌⚠️";
+    statusIcon = "";
     badgeColor = "#d97706";
     badgeBg = "rgba(217, 119, 6, 0.15)";
     badgeBorder = "#f59e0b";
   } else if (isUnauthorized) {
     reason = "Internet Access Not Authorized (Firewall Blocked)";
     shortReason = "Not Authorized";
-    statusIcon = isWireless ? "📶🚫" : "🔌🚫";
+    statusIcon = "";
     badgeColor = "#dc2626";
     badgeBg = "rgba(220, 38, 38, 0.15)";
     badgeBorder = "#ef4444";
@@ -251,6 +470,30 @@ export const getDeviceInternetStatus = (device) => {
 
 export const DeviceInterfaceBadge = ({ device, compact = false }) => {
   const status = getDeviceInternetStatus(device);
+  const iconSize = compact ? 12 : 14;
+
+  const renderStatusIcon = () => {
+    if (status.isDisconnected) {
+      return status.isWireless ? <WifiOff size={iconSize} /> : <Cable size={iconSize} style={{ opacity: 0.6 }} />;
+    }
+    if (status.isQuarantined) {
+      return <ShieldAlert size={iconSize} />;
+    }
+    if (status.isIsolated) {
+      return <Lock size={iconSize} />;
+    }
+    if (status.isPending) {
+      return <Clock size={iconSize} />;
+    }
+    if (status.isUnauthorized) {
+      return <Ban size={iconSize} />;
+    }
+    if (status.isTypeVlanMismatch) {
+      return <AlertTriangle size={iconSize} />;
+    }
+    return status.isWireless ? <Wifi size={iconSize} /> : <Cable size={iconSize} />;
+  };
+
   return (
     <span
       style={{
@@ -268,7 +511,7 @@ export const DeviceInterfaceBadge = ({ device, compact = false }) => {
       }}
       title={`${status.ifaceLabel} • ${status.reason}`}
     >
-      <span style={{ fontSize: compact ? "11px" : "13px" }}>{status.statusIcon}</span>
+      <span style={{ display: "inline-flex", alignItems: "center" }}>{renderStatusIcon()}</span>
       <span>{status.ifaceLabel}</span>
       {status.hasNoInternet ? (
         <span

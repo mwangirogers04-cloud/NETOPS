@@ -1,4 +1,82 @@
 import React, { useEffect, useRef, useState } from "react";
+import {
+  LayoutDashboard,
+  Laptop,
+  Radar,
+  AlertTriangle,
+  ShieldCheck,
+  ShieldAlert,
+  PackageCheck,
+  Network,
+  Map as MapIcon,
+  FileText,
+  Users,
+  Activity,
+  Globe,
+  Settings,
+  Phone,
+  Mail,
+  RefreshCw,
+  Check,
+  CheckCircle2,
+  X,
+  XCircle,
+  Lock,
+  Unlock,
+  Ban,
+  Clock,
+  Wifi,
+  WifiOff,
+  Cable,
+  Trash2,
+  Pencil,
+  RotateCcw,
+  Bell,
+  Sliders,
+  Filter,
+  Plus,
+  Eye,
+  EyeOff,
+  KeyRound,
+  Download,
+  Upload,
+  BellOff,
+  Play,
+  HelpCircle,
+  Smartphone,
+  Camera,
+  Printer,
+  Server,
+  Radio,
+  Moon,
+  LogOut,
+  CheckCheck,
+  Shield,
+  Crown as CrownIcon,
+  User,
+  MessageCircle,
+  Cpu,
+  Search,
+  Calendar,
+  Zap,
+  Package,
+  ClipboardList,
+  Stethoscope,
+  Building2,
+  Terminal,
+  Code2,
+  Sparkles,
+  Wrench,
+  Edit3,
+  TrendingUp,
+  Folder,
+  Pause,
+  Send,
+  Save,
+  FileCode,
+  FlaskConical,
+  Lightbulb,
+} from "lucide-react";
 import LoginPage from "./components/LoginPage";
 import UsersPage from "./components/UsersPage";
 import UserMonitoringPage from "./components/UserMonitoringPage";
@@ -50,6 +128,36 @@ const getDefaultWsUrl = () => {
 
 const API_URL = getDefaultApiUrl();
 const WS_URL = getDefaultWsUrl();
+
+export const getDeviceIcon = (type, size = 16) => {
+  switch (type) {
+    case "phone":
+    case "mobile":
+    case "smartphone":
+      return <Smartphone size={size} color="#10b981" />;
+    case "ip_phone":
+    case "voip":
+      return <Phone size={size} color="#0284c7" />;
+    case "computer":
+      return <Laptop size={size} color="#3b82f6" />;
+    case "cctv":
+      return <Camera size={size} color="#8b5cf6" />;
+    case "printer":
+      return <Printer size={size} color="#64748b" />;
+    case "server":
+      return <Server size={size} color="#f59e0b" />;
+    case "access_point":
+    case "ap":
+    case "wifi_ap":
+      return <Radio size={size} color="#06b6d4" />;
+    case "router":
+      return <Globe size={size} color="#2563eb" />;
+    case "firewall":
+      return <ShieldCheck size={size} color="#dc2626" />;
+    default:
+      return <Laptop size={size} color="#64748b" />;
+  }
+};
 
 function App() {
   const [currentUser, setCurrentUser] = useState(() => {
@@ -480,6 +588,7 @@ function App() {
   const [lanSearchQuery, setLanSearchQuery] = useState("");
   const [deviceSearchQuery, setDeviceSearchQuery] = useState("");
   const [lanFilterStatus, setLanFilterStatus] = useState("all");
+  const [filterTableByInterface, setFilterTableByInterface] = useState(false);
 
   const [selectedNetwork, setSelectedNetwork] = useState(() => {
     try {
@@ -2164,22 +2273,22 @@ const loadEvents = async () => {
 
     if (action === "approve") {
       const devName = result.hostname || result.ip_address || "Device";
-      alert(`✓ ${devName} approved successfully!\n\nAssigned to VLAN ${result.vlan_id || "20"}.\nNext step: Click "✓ Allow Internet" in the Action column to authorize internet access.`);
+      alert(`${devName} approved successfully!\n\nAssigned to VLAN ${result.vlan_id || "20"}.\nNext step: Click "Allow Internet" in the Action column to authorize internet access.`);
     } else if (action === "allow" || action === "unblock") {
       const devName = result.hostname || result.ip_address || "Device";
-      alert(`⚡ Internet access authorized for ${devName}!\nLayer 2 quarantine released.`);
+      alert(`Internet access authorized for ${devName}!\nLayer 2 quarantine released.`);
     } else if (action === "disallow" || action === "quarantine" || action === "block") {
       const devName = result.hostname || result.ip_address || "Device";
-      alert(`🔒 ${devName} internet access blocked.\nDevice placed in quarantine.`);
+      alert(`${devName} internet access blocked.\nDevice placed in quarantine.`);
     } else if (action === "reject") {
       const devName = result.hostname || result.ip_address || "Device";
-      alert(`🚫 ${devName} rejected.\nDevice blocked and quarantined on VLAN 90.`);
+      alert(`${devName} rejected.\nDevice blocked and quarantined on VLAN 90.`);
     } else if (action === "isolate") {
       const devName = result.hostname || result.ip_address || "Device";
-      alert(`🔒 ${devName} isolated on Quarantine VLAN 90.\nAll network access disabled.`);
+      alert(`${devName} isolated on Quarantine VLAN 90.\nAll network access disabled.`);
     } else if (action === "unisolate") {
       const devName = result.hostname || result.ip_address || "Device";
-      alert(`🔓 ${devName} released from isolation.\nRestored to operational VLAN.`);
+      alert(`${devName} released from isolation.\nRestored to operational VLAN.`);
     }
 
   } catch (error) {
@@ -2240,7 +2349,7 @@ const loadEvents = async () => {
     }
     const name = device.hostname || device.mac_address || "this machine";
     const confirmed = window.confirm(
-      `⚠️ PERMANENTLY DELETE MACHINE?\n\n` +
+      `PERMANENTLY DELETE MACHINE?\n\n` +
       `Machine: ${name}\n` +
       `MAC Address: ${device.mac_address}\n` +
       `IP Address: ${device.ip_address || "—"}\n` +
@@ -2264,7 +2373,7 @@ const loadEvents = async () => {
       return;
     }
     const confirmed = window.confirm(
-      `⚠️ PERMANENTLY DELETE ${ids.length} MACHINE(S)?\n\n` +
+      `PERMANENTLY DELETE ${ids.length} MACHINE(S)?\n\n` +
       `All selected devices, along with their schedules, patch remediation jobs, and telemetry history, will be permanently purged from the database.\n\n` +
       `Any machine that reconnects to the network later will be detected and treated as a BRAND NEW machine.\n\n` +
       `Are you sure you want to proceed with permanent deletion?`
@@ -2433,7 +2542,7 @@ const renderInlineScheduleRow = (device, colSpan = 10) => {
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <span style={{ fontSize: "16px" }}>⏱️</span>
+            <Clock size={16} color="#2563eb" />
             <strong style={{ color: "#0f172a", fontSize: "13px" }}>
               Access Schedule for {device.hostname || device.ip_address || `Device #${device.id}`}
             </strong>
@@ -2454,9 +2563,9 @@ const renderInlineScheduleRow = (device, colSpan = 10) => {
                 enabled: true,
               })
             }
-            style={{ padding: "2px 8px", fontSize: "11px" }}
+            style={{ padding: "2px 8px", fontSize: "11px", display: "inline-flex", alignItems: "center", gap: "4px" }}
           >
-            ✕ Close
+            <X size={12} /> Close
           </button>
         </div>
 
@@ -2716,12 +2825,12 @@ const renderInlineScheduleRow = (device, colSpan = 10) => {
               }}
               title="Quick test: Allow internet for the next 30 seconds"
             >
-              ⚡ +30s Test
+              <Clock size={11} /> +30s Test
             </button>
             <button
               type="button"
               className="secondary-button small"
-              style={{ fontSize: "11px", padding: "4px 8px" }}
+              style={{ fontSize: "11px", padding: "4px 8px", display: "inline-flex", alignItems: "center", gap: "4px" }}
               onClick={() => {
                 const now = new Date();
                 const sH = String(now.getHours()).padStart(2, "0");
@@ -2740,12 +2849,12 @@ const renderInlineScheduleRow = (device, colSpan = 10) => {
               }}
               title="Quick test: Allow internet for the next 1 minute"
             >
-              ⚡ +1m Test
+              <Clock size={11} /> +1m Test
             </button>
             <button
               type="button"
               className="secondary-button small"
-              style={{ fontSize: "11px", padding: "4px 8px" }}
+              style={{ fontSize: "11px", padding: "4px 8px", display: "inline-flex", alignItems: "center", gap: "4px" }}
               onClick={() => {
                 setScheduleForm({
                   ...scheduleForm,
@@ -2757,12 +2866,12 @@ const renderInlineScheduleRow = (device, colSpan = 10) => {
               }}
               title="Standard work hours 08:00 - 17:00 (Weekdays)"
             >
-              💼 Work Hours
+              <Calendar size={11} /> Work Hours
             </button>
             <button
               type="button"
               className="secondary-button small"
-              style={{ fontSize: "11px", padding: "4px 8px" }}
+              style={{ fontSize: "11px", padding: "4px 8px", display: "inline-flex", alignItems: "center", gap: "4px" }}
               onClick={() => {
                 setScheduleForm({
                   ...scheduleForm,
@@ -2774,7 +2883,7 @@ const renderInlineScheduleRow = (device, colSpan = 10) => {
               }}
               title="Off-hours internet access: 18:00 to 06:00 (Daily)"
             >
-              🌙 Off-Hours
+              <Moon size={11} /> Off-Hours
             </button>
           </div>
 
@@ -2785,16 +2894,17 @@ const renderInlineScheduleRow = (device, colSpan = 10) => {
               className="primary-button small"
               onClick={createAccessSchedule}
               disabled={scheduleLoading === scheduleForm.device_id}
-              style={{ fontWeight: "700" }}
+              style={{ fontWeight: "700", display: "inline-flex", alignItems: "center", gap: "5px" }}
             >
-              {scheduleLoading === scheduleForm.device_id ? "Saving..." : "💾 Save Schedule"}
+              <Check size={12} />
+              {scheduleLoading === scheduleForm.device_id ? "Saving..." : "Save Schedule"}
             </button>
 
             {scheduleForm.schedule_id && (
               <button
                 type="button"
                 className="secondary-button small"
-                style={{ color: "#ef4444", borderColor: "#fca5a5" }}
+                style={{ color: "#ef4444", borderColor: "#fca5a5", display: "inline-flex", alignItems: "center", gap: "4px" }}
                 onClick={async () => {
                   if (!window.confirm("Remove this access schedule and return device to unrestricted access?")) return;
                   try {
@@ -2820,7 +2930,7 @@ const renderInlineScheduleRow = (device, colSpan = 10) => {
                 }}
                 title="Delete this access schedule and restore default network access"
               >
-                🗑️ Remove
+                <Trash2 size={12} /> Remove
               </button>
             )}
 
@@ -2852,29 +2962,29 @@ const renderInlineScheduleRow = (device, colSpan = 10) => {
 // ------------------------------------------------------------
 
 const DevicesPage = () => {
-  const getDeviceIcon = (type) => {
+  const getDeviceIcon = (type, size = 16) => {
     switch (type) {
       case "phone":
       case "mobile":
       case "smartphone":
-        return "📱";
+        return <Smartphone size={size} color="#10b981" />;
       case "ip_phone":
       case "voip":
-        return "📞";
+        return <Phone size={size} color="#0284c7" />;
       case "computer":
-        return "💻";
+        return <Laptop size={size} color="#3b82f6" />;
       case "cctv":
-        return "📹";
+        return <Camera size={size} color="#8b5cf6" />;
       case "printer":
-        return "🖨️";
+        return <Printer size={size} color="#64748b" />;
       case "server":
-        return "🗄️";
+        return <Server size={size} color="#f59e0b" />;
       case "access_point":
       case "ap":
       case "wifi_ap":
-        return "📡";
+        return <Radio size={size} color="#06b6d4" />;
       default:
-        return "⚠️";
+        return <Laptop size={size} color="#64748b" />;
     }
   };
 
@@ -2900,7 +3010,8 @@ const DevicesPage = () => {
             disabled={lanScanLoading}
             style={{ display: "flex", alignItems: "center", gap: "6px" }}
           >
-            {lanScanLoading ? "⏳ Scanning LAN Machines..." : "⚡ Scan LAN for Updates (Agentless)"}
+            {lanScanLoading ? <Clock size={14} className="spin" /> : <Radar size={14} />}
+            {lanScanLoading ? "Scanning LAN Machines..." : "Scan LAN for Updates (Agentless)"}
           </button>
           <button
             className="secondary-button"
@@ -2908,22 +3019,24 @@ const DevicesPage = () => {
             onClick={() => { loadPatchJobs(); setShowJobsModal(true); }}
             style={{ display: "flex", alignItems: "center", gap: "6px" }}
           >
-            📋 Update Jobs ({patchJobs.length})
+            <FileText size={14} /> Update Jobs ({patchJobs.length})
           </button>
           <button
             className="secondary-button"
             type="button"
             onClick={refreshAll}
             disabled={lanScanLoading || refreshingAll}
+            style={{ display: "inline-flex", alignItems: "center", gap: "8px", fontWeight: "700" }}
           >
-            {refreshingAll ? "Refreshing..." : "🔄 Refresh Devices"}
+            <NetOpsLogo size={18} style={{ animation: refreshingAll ? "spin 1s linear infinite" : "none" }} />
+            {refreshingAll ? "Syncing..." : "Refresh Devices"}
           </button>
         </div>
       </div>
 
       {!isAdmin && (
         <div style={{ background: "rgba(59, 130, 246, 0.12)", border: "1px solid rgba(59, 130, 246, 0.4)", borderRadius: "8px", padding: "10px 16px", marginBottom: "16px", display: "flex", alignItems: "center", gap: "10px", fontSize: "13px", color: "#1d4ed8" }}>
-          <span>👁️</span>
+          <Eye size={18} />
           <div><strong>Standard User (Read-Only Monitoring):</strong> You have view-only access to network devices and telemetry. Administrative actions (Approve, Disconnect, VLAN reassignments, Patch Deployment) require Administrator privileges.</div>
         </div>
       )}
@@ -2956,7 +3069,7 @@ const DevicesPage = () => {
                 }}
                 title="View all connected devices across all network interfaces"
               >
-                <span>🌐</span> All Devices ({siteScopedDevices.length})
+                <Globe size={15} /> All Devices ({siteScopedDevices.length})
               </button>
 
               <button
@@ -2979,7 +3092,7 @@ const DevicesPage = () => {
                 }}
                 title="Filter to view all Wired LAN (eth0) connected devices"
               >
-                <span>🔌</span> Wired LAN (eth0) ({lanScopedCount})
+                <Cable size={15} /> Wired LAN (eth0) ({lanScopedCount})
               </button>
 
               <button
@@ -3002,7 +3115,7 @@ const DevicesPage = () => {
                 }}
                 title="Filter to view all Wi-Fi (wlan0) connected devices"
               >
-                <span>📶</span> Wi-Fi (wlan0) ({wlanScopedCount})
+                <Wifi size={15} /> Wi-Fi (wlan0) ({wlanScopedCount})
               </button>
 
               {detectedInterfaces
@@ -3031,7 +3144,7 @@ const DevicesPage = () => {
                         gap: "7px",
                       }}
                     >
-                      <span>🔌</span> {iface.label || iface.interface} ({count})
+                      <Cable size={15} /> {iface.label || iface.interface} ({count})
                     </button>
                   );
                 })}
@@ -3065,12 +3178,12 @@ const DevicesPage = () => {
                 gap: "6px",
               }}
             >
-              <span>
+              <span style={{ display: "inline-flex", alignItems: "center" }}>
                 {(selectedInterface === "eth0" || selectedInterface === "lan")
-                  ? "🔌"
+                  ? <Cable size={14} />
                   : (selectedInterface === "wlan0" || selectedInterface === "wireless")
-                  ? "📶"
-                  : "🌐"}
+                  ? <Wifi size={14} />
+                  : <Globe size={14} />}
               </span>
               <span>
                 {selectedInterface === "all"
@@ -3092,9 +3205,9 @@ const DevicesPage = () => {
                 type="button"
                 className="secondary-button"
                 onClick={() => handleSelectInterface("all")}
-                style={{ fontSize: "12px", padding: "6px 12px", fontWeight: "600" }}
+                style={{ fontSize: "12px", padding: "6px 12px", fontWeight: "600", display: "inline-flex", alignItems: "center", gap: "5px" }}
               >
-                ✕ Show All Devices
+                <X size={12} /> Show All Devices
               </button>
             )}
 
@@ -3116,8 +3229,9 @@ const DevicesPage = () => {
                   flexWrap: "wrap",
                 }}
               >
-                <span>
-                  ⚠️ <strong>Interface Fallback:</strong> 0 devices detected on <strong>{selectedInterface === "eth0" ? "Wired LAN (eth0)" : selectedInterface}</strong>. Displaying all {scopedDevices.length} network devices below so you can approve, configure VLANs, or isolate them without restriction.
+                <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                  <AlertTriangle size={15} color="#d97706" />
+                  <span><strong>Interface Fallback:</strong> 0 devices detected on <strong>{selectedInterface === "eth0" ? "Wired LAN (eth0)" : selectedInterface}</strong>. Displaying all {scopedDevices.length} network devices below so you can approve, configure VLANs, or isolate them without restriction.</span>
                 </span>
                 <div style={{ display: "flex", gap: "6px" }}>
                   {wlanScopedCount > 0 && selectedInterface !== "wlan0" && (
@@ -3125,9 +3239,9 @@ const DevicesPage = () => {
                       type="button"
                       className="secondary-button small"
                       onClick={() => handleSelectInterface("wlan0")}
-                      style={{ fontSize: "11px", fontWeight: "700", background: "#ecfdf5", borderColor: "#10b981", color: "#065f46" }}
+                      style={{ fontSize: "11px", fontWeight: "700", background: "#ecfdf5", borderColor: "#10b981", color: "#065f46", display: "inline-flex", alignItems: "center", gap: "4px" }}
                     >
-                      📶 Switch to Wi-Fi ({wlanScopedCount})
+                      <Wifi size={12} /> Switch to Wi-Fi ({wlanScopedCount})
                     </button>
                   )}
                   <button
@@ -3149,8 +3263,8 @@ const DevicesPage = () => {
         <div className="panel" style={{ background: "rgba(16, 185, 129, 0.12)", border: "1px solid #10b981", margin: "12px 0 16px", padding: "12px 16px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div>
-              <div style={{ fontWeight: "600", color: "#10b981" }}>
-                ✓ Agentless LAN Scan Complete ({lanScanResult.network})
+              <div style={{ fontWeight: "600", color: "#10b981", display: "flex", alignItems: "center", gap: "6px" }}>
+                <CheckCircle2 size={16} /> Agentless LAN Scan Complete ({lanScanResult.network})
               </div>
               <div style={{ fontSize: "13px", color: "var(--text-secondary, #9ca3af)", marginTop: "4px" }}>
                 Assessed {lanScanResult.machines_assessed} machine(s) across the LAN: <strong>{lanScanResult.updates_available_count} need updates</strong>, <strong>{lanScanResult.up_to_date_count} up to date</strong>.
@@ -3170,8 +3284,8 @@ const DevicesPage = () => {
         <div className="panel">
           <div className="panel-header">
             <div>
-              <div className="panel-title">
-                ⚠️ New Devices Require Attention
+              <div className="panel-title" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <AlertTriangle size={18} color="#f59e0b" /> New Devices Require Attention
               </div>
 
               <div className="panel-subtitle">
@@ -3188,8 +3302,8 @@ const DevicesPage = () => {
         <div className="panel">
           <div className="panel-header">
             <div>
-              <div className="panel-title">
-                🚫 Rejected Devices
+              <div className="panel-title" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <Ban size={18} color="#ef4444" /> Rejected Devices
               </div>
 
               <div className="panel-subtitle">
@@ -3299,7 +3413,7 @@ const DevicesPage = () => {
         <div className="panel-header">
           <div>
             <div className="panel-title" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <span>🔒</span> Isolated Devices
+              <Lock size={18} color="#a855f7" /> Isolated Devices
             </div>
 
             <div className="panel-subtitle">
@@ -3340,7 +3454,7 @@ const DevicesPage = () => {
                 <tr>
                   <td colSpan="6">
                     <div className="empty-state" style={{ padding: "18px", color: "#475569" }}>
-                      No devices are currently isolated on {selectedInterface === "all" ? "LAN/WLAN0" : selectedInterface.toUpperCase()}. Click <strong>🔒 Isolate</strong> on any device below to move it here.
+                      No devices are currently isolated on {selectedInterface === "all" ? "LAN/WLAN0" : selectedInterface.toUpperCase()}. Click <strong>Isolate</strong> on any device below to move it here.
                     </div>
                   </td>
                 </tr>
@@ -3372,8 +3486,9 @@ const DevicesPage = () => {
                       </td>
 
                       <td>
-                        {getDeviceIcon(device.device_type)}{" "}
-                        {device.device_type || "Unknown"}
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                          {getDeviceIcon(device.device_type)} {device.device_type || "Unknown"}
+                        </span>
                       </td>
 
                       <td>
@@ -3383,9 +3498,12 @@ const DevicesPage = () => {
                             background: "#450a0a",
                             border: "1px solid #ef4444",
                             color: "#b91c1c",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "5px",
                           }}
                         >
-                          🚨 VLAN {device.vlan_id || 90} (Quarantine)
+                          <ShieldAlert size={12} /> VLAN {device.vlan_id || 90} (Quarantine)
                         </span>
                       </td>
 
@@ -3397,9 +3515,12 @@ const DevicesPage = () => {
                             border: "1px solid #a855f7",
                             color: "#7e22ce",
                             fontWeight: "700",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "5px",
                           }}
                         >
-                          🔒 Isolated &amp; Blocked
+                          <Lock size={12} /> Isolated &amp; Blocked
                         </span>
                         <div className="device-secondary" style={{ fontSize: "11px", marginTop: "3px" }}>
                           {device.access_reason || "Isolated in VLAN 90 — Internet Disconnected"}
@@ -3415,14 +3536,18 @@ const DevicesPage = () => {
                               backgroundColor: "#7e22ce",
                               borderColor: "#a855f7",
                               fontWeight: "600",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "4px",
                             }}
                             onClick={() => deviceAction(device.id, "unisolate")}
                             disabled={actionLoading === `unisolate-${device.id}`}
                             title="Release device from isolation and restore its operational VLAN"
                           >
+                            <Unlock size={12} />
                             {actionLoading === `unisolate-${device.id}`
                               ? "Releasing..."
-                              : "🔓 Release Isolation"}
+                              : "Release Isolation"}
                           </button>
 
                           {device.approval_status === "approved" && (
@@ -3433,14 +3558,18 @@ const DevicesPage = () => {
                                 borderColor: "#10b981",
                                 color: "#059669",
                                 fontWeight: "600",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "4px",
                               }}
                               onClick={() => deviceAction(device.id, "allow")}
                               disabled={actionLoading === `allow-${device.id}`}
                               title="Release from isolation and immediately authorize Internet access"
                             >
+                              <Check size={12} />
                               {actionLoading === `allow-${device.id}`
                                 ? "Allowing..."
-                                : "✓ Allow Internet"}
+                                : "Allow Internet"}
                             </button>
                           )}
                         </div>
@@ -3495,7 +3624,7 @@ const DevicesPage = () => {
                 disabled={bulkDeleting}
                 title="Permanently delete test machines created during simulations (Developer only)"
               >
-                🧹 Clean Up Simulation Machines
+                <Sparkles size={13} style={{ marginRight: "6px" }} /> Clean Up Simulation Machines
               </button>
             )}
             <div className="settings-status">
@@ -3519,61 +3648,61 @@ const DevicesPage = () => {
             className={`secondary-button small ${deviceFilter.startsWith("scheduled") ? "active" : ""}`}
             style={
               deviceFilter.startsWith("scheduled")
-                ? { background: "#4f46e5", color: "#fff", borderColor: "#4338ca", fontWeight: "700" }
-                : { borderColor: "#6366f1", color: "#4f46e5", fontWeight: "600" }
+                ? { background: "#4f46e5", color: "#fff", borderColor: "#4338ca", fontWeight: "700", display: "inline-flex", alignItems: "center", gap: "5px" }
+                : { borderColor: "#6366f1", color: "#4f46e5", fontWeight: "600", display: "inline-flex", alignItems: "center", gap: "5px" }
             }
             onClick={() => setDeviceFilter("scheduled")}
             title="View devices with scheduled patch updates or network access schedules"
           >
-            🕒 Scheduled ({scopedDevices.filter(isDeviceScheduled).length})
+            <Clock size={12} /> Scheduled ({scopedDevices.filter(isDeviceScheduled).length})
           </button>
           <button
             type="button"
             className={`secondary-button small ${deviceFilter === "needs_updates" ? "active" : ""}`}
-            style={deviceFilter === "needs_updates" ? { background: "#d97706", color: "#fff" } : { borderColor: "#f59e0b" }}
+            style={deviceFilter === "needs_updates" ? { background: "#d97706", color: "#fff", display: "inline-flex", alignItems: "center", gap: "5px" } : { borderColor: "#f59e0b", display: "inline-flex", alignItems: "center", gap: "5px" }}
             onClick={() => setDeviceFilter("needs_updates")}
           >
-            ⚠️ Needs Updates ({devices.filter(d => (d.update_status === "updates_available" || (d.pending_updates && d.pending_updates > 0)) && d.pending_updates !== 0).length})
+            <AlertTriangle size={12} /> Needs Updates ({devices.filter(d => (d.update_status === "updates_available" || (d.pending_updates && d.pending_updates > 0)) && d.pending_updates !== 0).length})
           </button>
           <button
             type="button"
             className={`secondary-button small ${deviceFilter === "queued" ? "active" : ""}`}
-            style={deviceFilter === "queued" ? { background: "#f59e0b", color: "#000", fontWeight: "700" } : { borderColor: "#f59e0b", color: "#f59e0b" }}
+            style={deviceFilter === "queued" ? { background: "#f59e0b", color: "#000", fontWeight: "700", display: "inline-flex", alignItems: "center", gap: "5px" } : { borderColor: "#f59e0b", color: "#f59e0b", display: "inline-flex", alignItems: "center", gap: "5px" }}
             onClick={() => setDeviceFilter("queued")}
           >
-            ⚡ Queued / Updating ({devices.filter(d => Boolean(getActiveJobForDevice(d))).length})
+            <RefreshCw size={12} /> Queued / Updating ({devices.filter(d => Boolean(getActiveJobForDevice(d))).length})
           </button>
           <button
             type="button"
             className={`secondary-button small ${deviceFilter === "up_to_date" ? "active" : ""}`}
-            style={deviceFilter === "up_to_date" ? { background: "#059669", color: "#fff" } : { borderColor: "#10b981" }}
+            style={deviceFilter === "up_to_date" ? { background: "#059669", color: "#fff", display: "inline-flex", alignItems: "center", gap: "5px" } : { borderColor: "#10b981", display: "inline-flex", alignItems: "center", gap: "5px" }}
             onClick={() => setDeviceFilter("up_to_date")}
           >
-            ✓ Up to Date ({devices.filter(d => d.update_status === "up_to_date" || d.pending_updates === 0).length})
+            <CheckCircle2 size={12} /> Up to Date ({devices.filter(d => d.update_status === "up_to_date" || d.pending_updates === 0).length})
           </button>
           <button
             type="button"
             className={`secondary-button small ${deviceFilter === "unmonitored" ? "active" : ""}`}
-            style={deviceFilter === "unmonitored" ? { background: "#4b5563", color: "#fff" } : {}}
+            style={deviceFilter === "unmonitored" ? { background: "#4b5563", color: "#fff", display: "inline-flex", alignItems: "center", gap: "5px" } : { display: "inline-flex", alignItems: "center", gap: "5px" }}
             onClick={() => setDeviceFilter("unmonitored")}
           >
-            ⚪ Unmonitored ({devices.filter(d => !d.update_status || d.update_status === "unmonitored").length})
+            <HelpCircle size={12} /> Unmonitored ({devices.filter(d => !d.update_status || d.update_status === "unmonitored").length})
           </button>
           <button
             type="button"
             className={`secondary-button small ${deviceFilter === "online" ? "active" : ""}`}
-            style={deviceFilter === "online" ? { background: "var(--accent-color, #3b82f6)", color: "#fff" } : {}}
+            style={deviceFilter === "online" ? { background: "var(--accent-color, #3b82f6)", color: "#fff", display: "inline-flex", alignItems: "center", gap: "5px" } : { display: "inline-flex", alignItems: "center", gap: "5px" }}
             onClick={() => setDeviceFilter("online")}
           >
-            🟢 Online ({scopedDevices.filter(d => isDeviceActuallyOnline(d)).length})
+            <span style={{ width: "7px", height: "7px", borderRadius: "50%", background: "#10b981", display: "inline-block" }} /> Online ({scopedDevices.filter(d => isDeviceActuallyOnline(d)).length})
           </button>
           <button
             type="button"
             className={`secondary-button small ${deviceFilter === "offline" ? "active" : ""}`}
-            style={deviceFilter === "offline" ? { background: "#dc2626", color: "#fff" } : { borderColor: "#ef4444", color: "#dc2626" }}
+            style={deviceFilter === "offline" ? { background: "#dc2626", color: "#fff", display: "inline-flex", alignItems: "center", gap: "5px" } : { borderColor: "#ef4444", color: "#dc2626", display: "inline-flex", alignItems: "center", gap: "5px" }}
             onClick={() => setDeviceFilter("offline")}
           >
-            🔴 Offline ({scopedDevices.filter(isDeviceOfflineRegistered).length})
+            <span style={{ width: "7px", height: "7px", borderRadius: "50%", background: "#ef4444", display: "inline-block" }} /> Offline ({scopedDevices.filter(isDeviceOfflineRegistered).length})
           </button>
           <button
             type="button"
@@ -3596,19 +3725,19 @@ const DevicesPage = () => {
             className={`secondary-button small ${deviceFilter === "isolated" ? "active" : ""}`}
             style={
               deviceFilter === "isolated"
-                ? { background: "#9333ea", color: "#fff", borderColor: "#a855f7", fontWeight: "700" }
-                : { borderColor: "#a855f7", color: "#7e22ce" }
+                ? { background: "#9333ea", color: "#fff", borderColor: "#a855f7", fontWeight: "700", display: "inline-flex", alignItems: "center", gap: "5px" }
+                : { borderColor: "#a855f7", color: "#7e22ce", display: "inline-flex", alignItems: "center", gap: "5px" }
             }
             onClick={() => setDeviceFilter("isolated")}
           >
-            🔒 Isolated ({isolatedDevices})
+            <Lock size={12} /> Isolated ({isolatedDevices})
           </button>
 
           <div style={{ display: "flex", alignItems: "center", gap: "8px", flex: "1", minWidth: "260px", maxWidth: "360px", marginLeft: "auto" }}>
             <div style={{ position: "relative", width: "100%" }}>
               <input
                 type="text"
-                placeholder={`🔍 Search ${deviceFilter === "online" ? "Online" : deviceFilter.startsWith("scheduled") ? "Scheduled" : deviceFilter === "all" ? "All" : deviceFilter} devices (IP, MAC, hostname, vendor, VLAN)...`}
+                placeholder={`Search ${deviceFilter === "online" ? "Online" : deviceFilter.startsWith("scheduled") ? "Scheduled" : deviceFilter === "all" ? "All" : deviceFilter} devices (IP, MAC, hostname, vendor, VLAN)...`}
                 value={deviceSearchQuery}
                 onChange={(e) => setDeviceSearchQuery(e.target.value)}
                 style={{
@@ -3637,9 +3766,12 @@ const DevicesPage = () => {
                     cursor: "pointer",
                     fontSize: "13px",
                     fontWeight: "700",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
                   }}
                 >
-                  ✕
+                  <X size={14} />
                 </button>
               )}
             </div>
@@ -3663,7 +3795,7 @@ const DevicesPage = () => {
             }}
           >
             <span style={{ fontWeight: "700", color: "#3730a3", display: "flex", alignItems: "center", gap: "6px" }}>
-              <span>🕒</span> Scheduled Filters:
+              <Clock size={14} style={{ marginRight: "6px" }} /> Scheduled Filters:
             </span>
             <button
               type="button"
@@ -3688,7 +3820,7 @@ const DevicesPage = () => {
               onClick={() => setDeviceFilter("scheduled_updates")}
               title="Filter devices that have patch updates scheduled"
             >
-              📅 Scheduled Updates ({scopedDevices.filter(isDeviceScheduledForUpdates).length})
+              <Calendar size={12} style={{ marginRight: "4px" }} /> Scheduled Updates ({scopedDevices.filter(isDeviceScheduledForUpdates).length})
             </button>
             <button
               type="button"
@@ -3701,7 +3833,7 @@ const DevicesPage = () => {
               onClick={() => setDeviceFilter("scheduled_access")}
               title="Filter devices with active network access schedules"
             >
-              ⏱️ Scheduled Network Access ({scopedDevices.filter(isDeviceScheduledForAccess).length})
+              <Clock size={12} style={{ marginRight: "4px" }} /> Scheduled Network Access ({scopedDevices.filter(isDeviceScheduledForAccess).length})
             </button>
           </div>
         )}
@@ -3724,9 +3856,9 @@ const DevicesPage = () => {
             }}
           >
             <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "#991b1b" }}>
-              <span style={{ fontSize: "20px" }}>🩺</span>
+              <Stethoscope size={20} color="#b91c1c" />
               <div>
-                <strong style={{ color: "#7f1d1d" }}>Offline Machine Diagnostics:</strong> Click <strong>🩺 Diagnose</strong> in the connection column or <strong>🩺 Troubleshoot</strong> in actions on any offline device below to analyze ARP link, DHCP IP drift, ICMP firewall drops, open TCP ports, and access policy rules.
+                <strong style={{ color: "#7f1d1d" }}>Offline Machine Diagnostics:</strong> Click <strong>Diagnose</strong> in the connection column or <strong>Troubleshoot</strong> in actions on any offline device below to analyze ARP link, DHCP IP drift, ICMP firewall drops, open TCP ports, and access policy rules.
               </div>
             </div>
           </div>
@@ -3825,11 +3957,11 @@ const DevicesPage = () => {
                       onClick={() => deleteBulkDevices()}
                       title="Permanently delete all selected devices and their associated records"
                     >
-                      {bulkDeleting ? "Deleting..." : `🗑️ Delete Selected (${selectedDeviceIds.size}) Permanently`}
+                      {bulkDeleting ? "Deleting..." : <><Trash2 size={12} style={{ marginRight: "4px" }} /> Delete Selected ({selectedDeviceIds.size}) Permanently</>}
                     </button>
                   ) : (
                     <span style={{ fontSize: "12px", color: "#64748b", fontWeight: "600", display: "inline-flex", alignItems: "center", gap: "6px" }}>
-                      🔒 Permanent deletion restricted to Super Admin
+                      <Lock size={12} style={{ marginRight: "4px" }} /> Permanent deletion restricted to Super Admin
                     </span>
                   )}
                 </div>
@@ -3892,7 +4024,7 @@ const DevicesPage = () => {
                           <div className="empty-state" style={{ padding: "32px 16px", textAlign: "center" }}>
                             {deviceFilter.startsWith("scheduled") ? (
                               <>
-                                <div style={{ fontSize: "28px", marginBottom: "8px" }}>🕒</div>
+                                <div style={{ marginBottom: "8px" }}><Clock size={28} color="#94a3b8" /></div>
                                 <div style={{ fontWeight: "700", fontSize: "14px", color: "#334155" }}>
                                   No Scheduled Devices Found
                                 </div>
@@ -3901,7 +4033,7 @@ const DevicesPage = () => {
                                     ? "No LAN devices currently have scheduled update or patch remediation jobs."
                                     : deviceFilter === "scheduled_access"
                                     ? "No LAN devices currently have active network access schedules."
-                                    : "No LAN devices currently have scheduled updates or network access schedules. You can schedule updates from Endpoint Updates or configure access schedules using '⏱️ Set Schedule'."}
+                                    : "No LAN devices currently have scheduled updates or network access schedules. You can schedule updates from Endpoint Updates or configure access schedules using 'Set Schedule'."}
                                 </div>
                               </>
                             ) : (
@@ -3992,7 +4124,7 @@ const DevicesPage = () => {
                             }}
                             title="Finished viewing • Click to dismiss highlight"
                           >
-                            ✕ Done Viewing
+                            <Check size={12} style={{ marginRight: "4px" }} /> Done Viewing
                           </button>
                         )}
                       </div>
@@ -4026,7 +4158,7 @@ const DevicesPage = () => {
                               }}
                               title="Scheduled patch remediation update job"
                             >
-                              📅 Update Sched
+                              <Calendar size={11} style={{ marginRight: "4px" }} /> Update Sched
                             </span>
                           )}
                           {isDeviceScheduledForAccess(device) && (
@@ -4044,7 +4176,7 @@ const DevicesPage = () => {
                               }}
                               title="Active network access schedule configured"
                             >
-                              ⏱️ Access Sched
+                              <Clock size={11} style={{ marginRight: "4px" }} /> Access Sched
                             </span>
                           )}
                         </div>
@@ -4065,7 +4197,7 @@ const DevicesPage = () => {
                               padding: "2px 8px",
                             }}
                           >
-                            <span className="status-dot online" /> ONLINE ({getDeviceInternetStatus(device).isWireless ? "📶 Wi-Fi" : "🔌 Wired"})
+                            <span className="status-dot online" /> ONLINE ({getDeviceInternetStatus(device).isWireless ? "Wi-Fi" : "Wired"})
                           </span>
                           {!isTypeAndVlanMatching(device) && device.vlan_id !== 90 && device.enforcement_status !== "quarantined" && device.access_decision !== "quarantine" && (
                             <div style={{ display: "inline-flex", alignItems: "center", gap: "4px", marginTop: "2px" }}>
@@ -4081,7 +4213,7 @@ const DevicesPage = () => {
                                 }}
                                 title={`Device type '${device.device_type}' requires VLAN ${getExpectedVlanForType(device.device_type)}, but assigned VLAN is ${device.vlan_id || 90}.`}
                               >
-                                ⚠️ VLAN Mismatch (VLAN {device.vlan_id})
+                                <AlertTriangle size={12} style={{ marginRight: "4px" }} /> VLAN Mismatch (VLAN {device.vlan_id})
                               </span>
                               {isAdmin && (
                                 <button
@@ -4097,7 +4229,7 @@ const DevicesPage = () => {
                                   onClick={() => deviceAction(device.id, "vlan", getExpectedVlanForType(device.device_type))}
                                   title={`Synchronize device to VLAN ${getExpectedVlanForType(device.device_type)}`}
                                 >
-                                  🔄 Sync
+                                  <RefreshCw size={11} style={{ marginRight: "3px" }} /> Sync
                                 </button>
                               )}
                             </div>
@@ -4116,7 +4248,7 @@ const DevicesPage = () => {
                               padding: "2px 8px",
                             }}
                           >
-                            <span className="status-dot offline" /> OFFLINE ({getDeviceInternetStatus(device).isWireless ? "📶 Wi-Fi Disconnected" : "🔌 Cable Disconnected"})
+                            <span className="status-dot offline" /> OFFLINE ({getDeviceInternetStatus(device).isWireless ? "Wi-Fi Disconnected" : "Cable Disconnected"})
                           </span>
                           <button
                             type="button"
@@ -4136,7 +4268,7 @@ const DevicesPage = () => {
                             onClick={() => handleRunTroubleshoot(device)}
                             title="Run multi-layer root-cause diagnostics (ARP, IP drift, ICMP, firewall, ports)"
                           >
-                            🩺 Diagnose
+                            <Stethoscope size={11} style={{ marginRight: "3px" }} /> Diagnose
                           </button>
                         </div>
                       )}
@@ -4160,31 +4292,31 @@ const DevicesPage = () => {
                         }
                       >
                         <option value="unknown">
-                          🚨 Unknown (Quarantine VLAN 90)
+                          Unknown (Quarantine VLAN 90)
                         </option>
 
                         <option value="ip_phone">
-                          📞 Phone / VoIP / Mobile (VLAN 10)
+                          Phone / VoIP / Mobile (VLAN 10)
                         </option>
 
                         <option value="computer">
-                          💻 Computer (VLAN 20)
+                          Computer (VLAN 20)
                         </option>
 
                         <option value="cctv">
-                          📹 CCTV (VLAN 30)
+                          CCTV (VLAN 30)
                         </option>
 
                         <option value="printer">
-                          🖨️ Printer (VLAN 40)
+                          Printer (VLAN 40)
                         </option>
 
                         <option value="server">
-                          🗄️ Server (VLAN 50)
+                          Server (VLAN 50)
                         </option>
 
                         <option value="access_point">
-                          📡 Access Point (VLAN 60)
+                          Access Point (VLAN 60)
                         </option>
                       </select>
                     </td>
@@ -4228,14 +4360,14 @@ const DevicesPage = () => {
                           }}
                           title="Change VLAN: Select Auto VLAN to detect by MAC and vendor"
                         >
-                          <option value="auto">⚡ Auto VLAN (Detect)</option>
+                          <option value="auto">Auto VLAN (Detect)</option>
                           <option value="10">VLAN 10 - IP Phones</option>
                           <option value="20">VLAN 20 - Workstation</option>
                           <option value="30">VLAN 30 - CCTV</option>
                           <option value="40">VLAN 40 - Printers</option>
                           <option value="50">VLAN 50 - Servers</option>
                           <option value="60">VLAN 60 - Access Points</option>
-                          <option value="90">🚨 VLAN 90 - Quarantine</option>
+                          <option value="90">VLAN 90 - Quarantine</option>
                         </select>
                         <button
                           type="button"
@@ -4261,7 +4393,7 @@ const DevicesPage = () => {
                             whiteSpace: "nowrap",
                           }}
                         >
-                          <span>{actionLoading === `automate-vlan-${device.id}` ? "⏳" : "⚡"}</span>
+                          {actionLoading === `automate-vlan-${device.id}` ? <RefreshCw size={12} className="spin" /> : <Zap size={12} />}
                           {actionLoading === `automate-vlan-${device.id}` ? "Auto..." : "Auto"}
                         </button>
                       </div>
@@ -4290,7 +4422,7 @@ const DevicesPage = () => {
                                 }}
                                 title="Click to view update progress and logs"
                               >
-                                <span>{activeJob.status === "SCHEDULED" ? "📅" : "⚡"}</span>
+                                {activeJob.status === "SCHEDULED" ? <Calendar size={12} /> : <Zap size={12} />}
                                 {activeJob.status === "IN_PROGRESS"
                                   ? `UPDATING ${activeJob.progress_percent}%`
                                   : activeJob.status === "SCHEDULED"
@@ -4346,7 +4478,7 @@ const DevicesPage = () => {
                                 }}
                                 title="Mobile devices (iOS/Android) cannot receive remote network patch pushes. Updates are frozen and managed on the phone."
                               >
-                                🔒 FROZEN (PHONE OTA)
+                                <Lock size={11} style={{ marginRight: "3px" }} /> FROZEN (PHONE OTA)
                               </span>
                               {device.operating_system && (
                                 <div className="device-secondary" style={{ fontSize: "11px", marginTop: "3px" }}>
@@ -4374,7 +4506,7 @@ const DevicesPage = () => {
                                 }}
                                 title="Network appliance running embedded firmware on VLAN 60."
                               >
-                                📡 {device.device_type === "access_point" ? "AP FIRMWARE (VLAN 60)" : "ROUTER FIRMWARE"}
+                                <Radio size={12} style={{ marginRight: "4px" }} /> {device.device_type === "access_point" ? "AP FIRMWARE (VLAN 60)" : "ROUTER FIRMWARE"}
                               </span>
                               <div className="device-secondary" style={{ fontSize: "11px", marginTop: "3px" }}>
                                 {device.vendor || "Network Device"} (Up to Date)
@@ -4387,7 +4519,7 @@ const DevicesPage = () => {
                           return (
                             <div>
                               <span className="status-badge allowed" title={`Last checked: ${device.last_update_check || 'recently'}`}>
-                                ✓ UP TO DATE
+                                <CheckCircle2 size={12} style={{ marginRight: "4px" }} /> UP TO DATE
                               </span>
                               {device.operating_system && (
                                 <div className="device-secondary" style={{ fontSize: "11px", marginTop: "3px" }}>
@@ -4402,7 +4534,7 @@ const DevicesPage = () => {
                           return (
                             <div>
                               <span className="status-badge warning" title={`${device.pending_updates ?? "—"} updates pending`}>
-                                ⚠️ {device.pending_updates ?? "—"} UPDATES
+                                <AlertTriangle size={12} style={{ marginRight: "4px" }} /> {device.pending_updates ?? "—"} UPDATES
                               </span>
                               {device.operating_system && (
                                 <div className="device-secondary" style={{ fontSize: "11px", marginTop: "3px" }}>
@@ -4427,11 +4559,11 @@ const DevicesPage = () => {
                                   onClick={() => openDeployModal(device)}
                                   title="Centrally deploy pending updates to this machine"
                                 >
-                                  ⚡ Deploy Updates
+                                  <Zap size={12} style={{ marginRight: "4px" }} /> Deploy Updates
                                 </button>
                               ) : (
                                 <div style={{ marginTop: "4px", fontSize: "11px", color: "#64748b" }}>
-                                  🔒 Updates pending (Deploy: Developer only)
+                                  <Lock size={11} style={{ marginRight: "4px" }} /> Updates pending (Deploy: Developer only)
                                 </div>
                               )}
                             </div>
@@ -4441,7 +4573,7 @@ const DevicesPage = () => {
                         return (
                           <div>
                             <span className="status-badge warning" style={{ fontSize: "11px" }} title="Evaluated for updates on LAN">
-                              ⚠️ UPDATES PENDING
+                              <AlertTriangle size={12} style={{ marginRight: "4px" }} /> UPDATES PENDING
                             </span>
                             {isSuperAdmin && (
                               <button
@@ -4461,7 +4593,7 @@ const DevicesPage = () => {
                                 onClick={() => openDeployModal(device)}
                                 title="Centrally deploy updates to this machine"
                               >
-                                ⚡ Deploy Updates
+                                <Zap size={12} style={{ marginRight: "4px" }} /> Deploy Updates
                               </button>
                             )}
                           </div>
@@ -4496,7 +4628,7 @@ const DevicesPage = () => {
                               style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}
                               title="Internet access is permitted and actively routed"
                             >
-                              <span>{istat.isWireless ? "📶🌐" : "🔌🌐"}</span>
+                              {istat.isWireless ? <Wifi size={14} style={{ marginRight: "4px" }} /> : <Cable size={14} style={{ marginRight: "4px" }} />}
                               Authorized
                             </span>
                           );
@@ -4531,7 +4663,7 @@ const DevicesPage = () => {
                       {device.enforcement_status ===
                       "allowed" ? (
                         <span className="status-badge allowed">
-                          {isDeviceScheduledForAccess(device) ? "🟢 Allowed (Scheduled)" : "Allowed"}
+                          {isDeviceScheduledForAccess(device) ? "Allowed (Scheduled)" : "Allowed"}
                         </span>
                       ) : device.enforcement_status ===
                         "isolated" ? (
@@ -4544,11 +4676,11 @@ const DevicesPage = () => {
                             fontWeight: "700",
                           }}
                         >
-                          🔒 Isolated
+                          <Lock size={11} style={{ marginRight: "3px" }} /> Isolated
                         </span>
                       ) : (
                         <span className="status-badge blocked">
-                          {isDeviceScheduledForAccess(device) ? "🕒 Quarantined (Scheduled)" : "Quarantined"}
+                          {isDeviceScheduledForAccess(device) ? "Quarantined (Scheduled)" : "Quarantined"}
                         </span>
                       )}
                     </td>
@@ -4609,23 +4741,31 @@ const DevicesPage = () => {
                         <button
                           type="button"
                           className="secondary-button small"
-                          style={{ background: "#fef2f2", borderColor: "#fca5a5", color: "#b91c1c", fontWeight: "700" }}
+                          style={{ background: "#fef2f2", borderColor: "#fca5a5", color: "#b91c1c", fontWeight: "700", display: "inline-flex", alignItems: "center", gap: "4px" }}
                           onClick={() => handleOpenCveModal(device)}
                           title="Scan firmware, OS & open services against CVE vulnerability database"
                         >
-                          🛡️ CVE Scan
+                          <ShieldAlert size={13} /> CVE Scan
                         </button>
                         <button
                           type="button"
                           className="secondary-button small"
                           style={
                             scheduleForm.device_id === device.id
-                              ? { background: "rgba(59, 130, 246, 0.25)", borderColor: "#3b82f6", color: "#2563eb", fontWeight: "700" }
-                              : {}
+                              ? { background: "rgba(59, 130, 246, 0.25)", borderColor: "#3b82f6", color: "#2563eb", fontWeight: "700", display: "inline-flex", alignItems: "center", gap: "4px" }
+                              : { display: "inline-flex", alignItems: "center", gap: "4px" }
                           }
                           onClick={() => openScheduleModal(device)}
                         >
-                          {scheduleForm.device_id === device.id ? "✕ Close Schedule" : "⏱️ Set Schedule"}
+                          {scheduleForm.device_id === device.id ? (
+                            <>
+                              <X size={13} /> Close Schedule
+                            </>
+                          ) : (
+                            <>
+                              <Clock size={13} /> Set Schedule
+                            </>
+                          )}
                         </button>
                         {device.approval_status !==
                           "approved" && (
@@ -4642,11 +4782,16 @@ const DevicesPage = () => {
                                 "approve"
                               )
                             }
+                            style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}
                           >
                             {actionLoading ===
-                            `approve-${device.id}`
-                              ? "..."
-                              : "Approve"}
+                            `approve-${device.id}` ? (
+                              "..."
+                            ) : (
+                              <>
+                                <Check size={13} /> Approve
+                              </>
+                            )}
                           </button>
                         )}
 
@@ -4665,11 +4810,16 @@ const DevicesPage = () => {
                                 "reject"
                               )
                             }
+                            style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}
                           >
                             {actionLoading ===
-                            `reject-${device.id}`
-                              ? "..."
-                              : "Reject"}
+                            `reject-${device.id}` ? (
+                              "..."
+                            ) : (
+                              <>
+                                <XCircle size={13} /> Reject
+                              </>
+                            )}
                           </button>
                         )}
 
@@ -4690,11 +4840,16 @@ const DevicesPage = () => {
                                 "allow"
                               )
                             }
+                            style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}
                           >
                             {actionLoading ===
-                            `allow-${device.id}`
-                              ? "..."
-                              : "Allow Internet"}
+                            `allow-${device.id}` ? (
+                              "..."
+                            ) : (
+                              <>
+                                <CheckCircle2 size={13} /> Allow Internet
+                              </>
+                            )}
                           </button>
                         )}
 
@@ -4717,14 +4872,19 @@ const DevicesPage = () => {
                                 "block"
                               )
                             }
+                            style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}
                             title="Block internet access"
                           >
                             {actionLoading ===
                             `disallow-${device.id}` ||
                             actionLoading ===
-                            `block-${device.id}`
-                              ? "..."
-                              : "🚫 Block Internet"}
+                            `block-${device.id}` ? (
+                              "..."
+                            ) : (
+                              <>
+                                <Ban size={13} /> Block Internet
+                              </>
+                            )}
                           </button>
                         )}
 
@@ -4736,6 +4896,9 @@ const DevicesPage = () => {
                               backgroundColor: "#7e22ce",
                               borderColor: "#a855f7",
                               fontWeight: "600",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "4px",
                             }}
                             disabled={
                               actionLoading === `unisolate-${device.id}`
@@ -4745,9 +4908,13 @@ const DevicesPage = () => {
                             }
                             title="Release device from isolation and restore its operational VLAN"
                           >
-                            {actionLoading === `unisolate-${device.id}`
-                              ? "..."
-                              : "🔓 Release"}
+                            {actionLoading === `unisolate-${device.id}` ? (
+                              "..."
+                            ) : (
+                              <>
+                                <Unlock size={13} /> Release
+                              </>
+                            )}
                           </button>
                         ) : (
                           <button
@@ -4758,6 +4925,9 @@ const DevicesPage = () => {
                               color: "#7e22ce",
                               background: "rgba(147, 51, 234, 0.15)",
                               fontWeight: "600",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "4px",
                             }}
                             disabled={
                               actionLoading === `isolate-${device.id}`
@@ -4767,9 +4937,13 @@ const DevicesPage = () => {
                             }
                             title="Isolate device into Quarantine VLAN 90 and block network/Internet access"
                           >
-                            {actionLoading === `isolate-${device.id}`
-                              ? "..."
-                              : "🔒 Isolate"}
+                            {actionLoading === `isolate-${device.id}` ? (
+                              "..."
+                            ) : (
+                              <>
+                                <Lock size={13} /> Isolate
+                              </>
+                            )}
                           </button>
                         )}
 
@@ -4789,7 +4963,7 @@ const DevicesPage = () => {
                             onClick={() => handleRunTroubleshoot(device)}
                             title="Diagnose why this device is offline (ARP, IP drift, ICMP ping, Firewall drop, port scan)"
                           >
-                            🩺 Troubleshoot
+                            <Activity size={13} /> Troubleshoot
                           </button>
                         )}
 
@@ -4802,12 +4976,21 @@ const DevicesPage = () => {
                               color: "#dc2626",
                               background: "rgba(239, 68, 68, 0.1)",
                               fontWeight: "700",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "4px",
                             }}
                             disabled={actionLoading === `delete-${device.id}`}
                             onClick={() => deleteDevicePermanently(device)}
                             title="Permanently delete device, purging all history. If it connects again, it is treated as a brand new machine. (Developer only)"
                           >
-                            {actionLoading === `delete-${device.id}` ? "..." : "🗑️ Delete"}
+                            {actionLoading === `delete-${device.id}` ? (
+                              "..."
+                            ) : (
+                              <>
+                                <Trash2 size={13} /> Delete
+                              </>
+                            )}
                           </button>
                         )}
                       </div>
@@ -4833,7 +5016,6 @@ const DevicesPage = () => {
 // ------------------------------------------------------------
 
 const LanScannerPage = () => {
-  const [filterTableByInterface, setFilterTableByInterface] = useState(false);
   const interfaceDevices = devices.filter(matchesSelectedNetwork);
   const isAllInterfaces = !selectedInterface || selectedInterface === "all";
   const rawInterfaceDevices = (!filterTableByInterface || isAllInterfaces)
@@ -4901,23 +5083,23 @@ const LanScannerPage = () => {
     return deviceMatchesSearch(device, lanSearchQuery);
   }).slice().sort((a, b) => compareIpAddresses(a.ip_address, b.ip_address));
 
-  const getDeviceIcon = (type) => {
+  const getDeviceIcon = (type, size = 16) => {
     switch (type) {
       case "phone":
       case "mobile":
-      case "smartphone": return "📱";
+      case "smartphone": return <Smartphone size={size} color="#10b981" />;
       case "ip_phone":
-      case "voip": return "📞";
-      case "computer": return "💻";
-      case "cctv": return "📹";
-      case "printer": return "🖨️";
-      case "server": return "🗄️";
+      case "voip": return <Phone size={size} color="#0284c7" />;
+      case "computer": return <Laptop size={size} color="#3b82f6" />;
+      case "cctv": return <Camera size={size} color="#8b5cf6" />;
+      case "printer": return <Printer size={size} color="#64748b" />;
+      case "server": return <Server size={size} color="#f59e0b" />;
       case "access_point":
       case "ap":
-      case "wifi_ap": return "📡";
-      case "router": return "🌐";
-      case "firewall": return "🛡️";
-      default: return "🖥️";
+      case "wifi_ap": return <Radio size={size} color="#06b6d4" />;
+      case "router": return <Globe size={size} color="#2563eb" />;
+      case "firewall": return <ShieldCheck size={size} color="#dc2626" />;
+      default: return <Laptop size={size} color="#64748b" />;
     }
   };
 
@@ -4930,7 +5112,7 @@ const LanScannerPage = () => {
       <div className="page-header">
         <div>
           <div className="page-title" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <span>📡</span> LAN Device Scanner & Dynamic Discovery
+            <Radio size={18} style={{ marginRight: "8px" }} /> LAN Device Scanner & Dynamic Discovery
           </div>
           <div className="page-description">
             Scan your physical local network, discover all connected machines, automatically reconcile dynamic DHCP IP changes, and enforce firewall rules on the fly.
@@ -4956,7 +5138,7 @@ const LanScannerPage = () => {
             }}
             title="Target all interfaces (Wired LAN and Wi-Fi) for discovery scan and monitoring"
           >
-            <span>🌐</span>
+            <Globe size={14} />
             All Interfaces ({interfaceDevices.length})
           </button>
 
@@ -4978,7 +5160,7 @@ const LanScannerPage = () => {
             }}
             title="Target Wired LAN (eth0) for discovery scan"
           >
-            <span>🔌</span>
+            <Cable size={14} />
             Wired LAN (eth0) ({ethDevicesCount})
           </button>
 
@@ -5000,7 +5182,7 @@ const LanScannerPage = () => {
             }}
             title="Target Wi-Fi (wlan0) for discovery scan"
           >
-            <span>📶</span>
+            <Wifi size={14} />
             Wi-Fi (wlan0) ({wlanDevicesCount})
           </button>
 
@@ -5008,8 +5190,10 @@ const LanScannerPage = () => {
             className="secondary-button"
             onClick={refreshAll}
             disabled={lanDevicesScanning || refreshingAll}
+            style={{ display: "inline-flex", alignItems: "center", gap: "8px", fontWeight: "700" }}
           >
-            {refreshingAll ? "Refreshing..." : "🔄 Refresh"}
+            <NetOpsLogo size={18} style={{ animation: refreshingAll ? "spin 1s linear infinite" : "none" }} />
+            {refreshingAll ? "Syncing..." : "Refresh"}
           </button>
         </div>
       </div>
@@ -5045,7 +5229,7 @@ const LanScannerPage = () => {
             justifyContent: "center",
             fontSize: "22px",
           }}>
-            {selectedInterface === "wlan0" ? "📶" : selectedInterface === "eth0" ? "🔌" : "🌐"}
+            {selectedInterface === "wlan0" ? <Wifi size={14} /> : selectedInterface === "eth0" ? <Cable size={14} /> : <Globe size={14} />}
           </div>
           <div>
             <div style={{
@@ -5100,7 +5284,7 @@ const LanScannerPage = () => {
             }}
             title="Scan a remote branch or office network using the lightweight NetOps client probe"
           >
-            <span>📡</span> Remote Probe
+            <Radio size={14} style={{ marginRight: "4px" }} /> Remote Probe
           </button>
           <button
             type="button"
@@ -5119,7 +5303,7 @@ const LanScannerPage = () => {
               cursor: lanDevicesScanning ? "not-allowed" : "pointer",
             }}
           >
-            <span>{lanDevicesScanning ? "⏳" : "🚀"}</span>
+            {lanDevicesScanning ? <RefreshCw size={16} style={{ animation: "spin 1s linear infinite" }} /> : <Radar size={16} />}
             {lanDevicesScanning
               ? `Scanning ${selectedInterface === "all" ? "All Interfaces" : selectedInterface}...`
               : `Scan ${selectedInterface === "wlan0" ? "Wi-Fi (wlan0)" : selectedInterface === "eth0" ? "Wired (eth0)" : "All Devices"} Now`}
@@ -5154,7 +5338,7 @@ const LanScannerPage = () => {
                 }}
                 title="Select All Interfaces to scan both Wired LAN and Wi-Fi"
               >
-                <span>🌐</span>
+                <Globe size={15} />
                 All Interfaces ({interfaceDevices.length})
               </button>
 
@@ -5177,7 +5361,7 @@ const LanScannerPage = () => {
                 }}
                 title="Select Wi-Fi (wlan0) to scan wireless connected devices"
               >
-                <span>📶</span>
+                <Wifi size={15} />
                 Wi-Fi WLAN (wlan0) ({wlanDevicesCount})
               </button>
 
@@ -5200,7 +5384,7 @@ const LanScannerPage = () => {
                 }}
                 title="Select Wired LAN (eth0) to scan ethernet connected devices"
               >
-                <span>🔌</span>
+                <Cable size={15} />
                 Wired LAN (eth0) ({ethDevicesCount})
               </button>
 
@@ -5238,7 +5422,7 @@ const LanScannerPage = () => {
                     }}
                     title="Click if you want to manually type a different subnet"
                   >
-                    {showCustomSubnetOverride ? "Hide Override" : "⚙️ Change Subnet"}
+                    {showCustomSubnetOverride ? "Hide Override" : <><Settings size={13} style={{ marginRight: "4px" }} /> Change Subnet</>}
                   </button>
                 </div>
 
@@ -5311,12 +5495,12 @@ const LanScannerPage = () => {
             >
               {lanDevicesScanning && selectedInterface === "all" ? (
                 <>
-                  <span style={{ display: "inline-block", animation: "spin 1s linear infinite" }}>🔄</span>
+                  <RefreshCw size={14} className="spin" />
                   Scanning All Interfaces...
                 </>
               ) : (
                 <>
-                  <span>🌐</span>
+                  <Globe size={14} />
                   Scan All Interfaces
                 </>
               )}
@@ -5342,12 +5526,12 @@ const LanScannerPage = () => {
             >
               {lanDevicesScanning && selectedInterface === "wlan0" ? (
                 <>
-                  <span style={{ display: "inline-block", animation: "spin 1s linear infinite" }}>🔄</span>
+                  <RefreshCw size={14} className="spin" />
                   Scanning Wi-Fi (wlan0)...
                 </>
               ) : (
                 <>
-                  <span>📶</span>
+                  <Wifi size={14} />
                   Scan Wi-Fi (wlan0)
                 </>
               )}
@@ -5370,12 +5554,12 @@ const LanScannerPage = () => {
             >
               {lanDevicesScanning && selectedInterface === "eth0" ? (
                 <>
-                  <span style={{ display: "inline-block", animation: "spin 1s linear infinite" }}>🔄</span>
+                  <RefreshCw size={14} className="spin" />
                   Scanning eth0...
                 </>
               ) : (
                 <>
-                  <span>🔌</span>
+                  <Cable size={14} />
                   Scan Wired LAN (eth0)
                 </>
               )}
@@ -5404,10 +5588,10 @@ const LanScannerPage = () => {
             }}
           >
             <div style={{ fontSize: "13px", color: (lanDevicesResult.duplicate_ips && lanDevicesResult.duplicate_ips.length > 0) || duplicateIpsList.length > 0 ? "#991b1b" : "#10b981" }}>
-              ✓ <strong>Network Scan Completed ({lanDevicesResult.interface && lanDevicesResult.interface !== "all" ? lanDevicesResult.interface : "All LAN + WLAN Interfaces"}):</strong> Discovered <strong>{lanDevicesResult.devices_discovered}</strong> active device(s) on network <code>{lanDevicesResult.network}</code>. Reconciled and synced with NETOPS database.
+              <CheckCircle2 size={16} color="#16a34a" style={{ marginRight: "6px" }} /> <strong>Network Scan Completed ({lanDevicesResult.interface && lanDevicesResult.interface !== "all" ? lanDevicesResult.interface : "All LAN + WLAN Interfaces"}):</strong> Discovered <strong>{lanDevicesResult.devices_discovered}</strong> active device(s) on network <code>{lanDevicesResult.network}</code>. Reconciled and synced with NETOPS database.
               {((lanDevicesResult.duplicate_ips && lanDevicesResult.duplicate_ips.length > 0) || duplicateIpsList.length > 0) && (
                 <div style={{ marginTop: "6px", fontWeight: "700", color: "#b91c1c", display: "flex", alignItems: "center", gap: "6px" }}>
-                  <span>⚠️</span>
+                  <AlertTriangle size={14} color="#d97706" />
                   <span><strong>IP Conflict Alert:</strong> {lanDevicesResult.duplicate_ips?.length || duplicateIpsList.length} duplicate IP address(es) detected ({(lanDevicesResult.duplicate_ips?.map(d => d.ip_address) || duplicateIpsList).join(", ")}). See highlighted duplicate machines below to avoid network collision.</span>
                 </div>
               )}
@@ -5438,7 +5622,7 @@ const LanScannerPage = () => {
             }}
           >
             <div style={{ fontSize: "13px", color: hasInterfaceMismatch ? "#92400e" : (selectedInterface === "wlan0" ? "#065f46" : "#1e293b"), display: "flex", alignItems: "center", gap: "8px" }}>
-              <span>{hasInterfaceMismatch ? "⚠️" : "ℹ️"}</span>
+              {hasInterfaceMismatch ? <AlertTriangle size={14} color="#d97706" /> : <HelpCircle size={14} color="#3b82f6" />}
               <span>
                 {hasInterfaceMismatch ? (
                   <>
@@ -5462,7 +5646,7 @@ const LanScannerPage = () => {
                   }}
                   style={{ fontWeight: "700", background: "#ecfdf5", borderColor: "#10b981", color: "#065f46" }}
                 >
-                  📶 Switch to Wi-Fi ({wlanDevicesCount})
+                  <Wifi size={13} style={{ marginRight: "4px" }} /> Switch to Wi-Fi ({wlanDevicesCount})
                 </button>
               )}
               <button
@@ -5474,7 +5658,7 @@ const LanScannerPage = () => {
                 }}
                 style={{ fontWeight: "700", background: "#ffffff", borderColor: "#cbd5e1" }}
               >
-                🌐 Show All ({interfaceDevices.length})
+                <Globe size={13} style={{ marginRight: "4px" }} /> Show All ({interfaceDevices.length})
               </button>
             </div>
           </div>
@@ -5503,8 +5687,8 @@ const LanScannerPage = () => {
           value={conflictedDeviceIds.size}
           description={
             conflictedDeviceIds.size > 0
-              ? `⚠️ ${duplicateIpsList.length} duplicate IP(s) detected across ${conflictedDeviceIds.size} machines. Action required to avoid IP conflicting.`
-              : "✓ No duplicate IPs detected. Network addressing is healthy."
+              ? `${duplicateIpsList.length} duplicate IP(s) detected across ${conflictedDeviceIds.size} machines. Action required to avoid IP conflicting.`
+              : "No duplicate IPs detected. Network addressing is healthy."
           }
           badge={conflictedDeviceIds.size > 0 ? "CONFLICT DETECTED" : "HEALTHY"}
           badgeColor={conflictedDeviceIds.size > 0 ? "#ef4444" : "#10b981"}
@@ -5546,11 +5730,10 @@ const LanScannerPage = () => {
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  fontSize: "22px",
                   flexShrink: 0,
                 }}
               >
-                ⚠️
+                <AlertTriangle size={22} color="#dc2626" />
               </div>
               <div style={{ flex: 1 }}>
                 <div style={{ fontWeight: "800", fontSize: "15px", color: "#991b1b", display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
@@ -5592,7 +5775,7 @@ const LanScannerPage = () => {
                           <span style={{ fontSize: "11px", color: "#64748b", fontWeight: "600" }}>is shared by:</span>
                           {conflictingDevices.map((cDev, cIdx) => (
                             <span key={cDev.id} style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "12px" }}>
-                              {cIdx > 0 && <span style={{ color: "#ef4444", fontWeight: "800" }}>⚡</span>}
+                              {cIdx > 0 && <Zap size={12} color="#ef4444" />}
                               <strong style={{ color: "#0f172a" }}>{cDev.hostname || `Device #${cDev.id}`}</strong>
                               <span style={{ fontFamily: "monospace", fontSize: "11px", color: "#475569" }}>({cDev.mac_address})</span>
                               {cDev.network_interface && (
@@ -5627,7 +5810,7 @@ const LanScannerPage = () => {
                   cursor: "pointer",
                 }}
               >
-                <span>🔍</span>
+                <Search size={14} />
                 {lanFilterStatus === "ip-conflict" ? "Showing Conflicted Devices" : `View Conflicted Devices (${conflictedDeviceIds.size})`}
               </button>
               {lanFilterStatus === "ip-conflict" && (
@@ -5654,14 +5837,14 @@ const LanScannerPage = () => {
               className={lanFilterStatus === "all" ? "primary-button small" : "secondary-button small"}
               onClick={() => setLanFilterStatus("all")}
             >
-              🌐 All Devices ({displayedInterfaceDevices.length})
+              <Globe size={13} style={{ marginRight: "4px" }} /> All Devices ({displayedInterfaceDevices.length})
             </button>
             <button
               type="button"
               className={lanFilterStatus === "online" ? "primary-button small" : "secondary-button small"}
               onClick={() => setLanFilterStatus("online")}
             >
-              🟢 Online ({onlineDevices.length})
+              <><span className="status-dot online" /> Online ({onlineDevices.length})</>
             </button>
             <button
               type="button"
@@ -5669,7 +5852,7 @@ const LanScannerPage = () => {
               onClick={() => setLanFilterStatus("offline")}
               style={lanFilterStatus !== "offline" && offlineDevices.length > 0 ? { borderColor: "#ef4444", color: "#dc2626" } : {}}
             >
-              🔴 Offline ({offlineDevices.length})
+              <><span className="status-dot offline" /> Offline ({offlineDevices.length})</>
             </button>
             <button
               type="button"
@@ -5687,7 +5870,7 @@ const LanScannerPage = () => {
               }
               title="Show devices sharing duplicate IP addresses to avoid IP conflicting"
             >
-              ⚠️ IP Conflicts ({conflictedDeviceIds.size})
+              <><AlertTriangle size={13} style={{ marginRight: "4px" }} /> IP Conflicts ({conflictedDeviceIds.size})</>
             </button>
             <button
               type="button"
@@ -5695,21 +5878,21 @@ const LanScannerPage = () => {
               onClick={() => setLanFilterStatus("ip-changed")}
               style={lanFilterStatus !== "ip-changed" && ipChangedDeviceIds.size > 0 ? { borderColor: "#f59e0b", color: "#d97706" } : {}}
             >
-              🔄 IP Changed ({ipChangedDeviceIds.size})
+              <><RefreshCw size={13} style={{ marginRight: "4px" }} /> IP Changed ({ipChangedDeviceIds.size})</>
             </button>
             <button
               type="button"
               className={lanFilterStatus === "allowed" ? "primary-button small" : "secondary-button small"}
               onClick={() => setLanFilterStatus("allowed")}
             >
-              🟢 Allowed ({allowedCount})
+              Allowed ({allowedCount})
             </button>
             <button
               type="button"
               className={lanFilterStatus === "quarantined" ? "primary-button small" : "secondary-button small"}
               onClick={() => setLanFilterStatus("quarantined")}
             >
-              🔴 Quarantined ({quarantinedCount})
+              Quarantined ({quarantinedCount})
             </button>
             <button
               type="button"
@@ -5722,7 +5905,7 @@ const LanScannerPage = () => {
               onClick={() => setLanFilterStatus("scheduled")}
               title="Filter online LAN devices with active schedules"
             >
-              🕒 Scheduled ({displayedInterfaceDevices.filter(isDeviceScheduled).length})
+              <Clock size={13} style={{ marginRight: "4px" }} /> Scheduled ({displayedInterfaceDevices.filter(isDeviceScheduled).length})
             </button>
           </div>
 
@@ -5765,7 +5948,7 @@ const LanScannerPage = () => {
                 onClick={() => setFilterTableByInterface(false)}
                 style={{ fontSize: "11.5px", padding: "4px 10px" }}
               >
-                🌐 All Devices ({interfaceDevices.length})
+                <Globe size={13} style={{ marginRight: "4px" }} /> All Devices ({interfaceDevices.length})
               </button>
               <button
                 type="button"
@@ -5773,7 +5956,7 @@ const LanScannerPage = () => {
                 onClick={() => setFilterTableByInterface(true)}
                 style={{ fontSize: "11.5px", padding: "4px 10px" }}
               >
-                {selectedInterface === "wlan0" ? "📶" : "🔌"} {selectedInterface.toUpperCase()} Only ({interfaceDevices.filter(selectedInterface === "wlan0" ? isDeviceOnWlan : isDeviceOnEth0).length})
+                {selectedInterface === "wlan0" ? <Wifi size={12} style={{ marginRight: "4px" }} /> : <Cable size={12} style={{ marginRight: "4px" }} />} {selectedInterface.toUpperCase()} Only ({interfaceDevices.filter(selectedInterface === "wlan0" ? isDeviceOnWlan : isDeviceOnEth0).length})
               </button>
             </div>
           )}
@@ -5793,7 +5976,7 @@ const LanScannerPage = () => {
               fontWeight: "600",
             }}
           >
-            <span style={{ display: "inline-block", animation: "spin 1s linear infinite", fontSize: "15px" }}>🔄</span>
+            <RefreshCw size={15} className="spin" />
             <span>
               Network discovery sweep in progress on <strong>{selectedInterface === "all" ? "All Physical Interfaces" : selectedInterface.toUpperCase()}</strong> ({detectedSubnet}). Discovered machines will refresh automatically when scan finishes...
             </span>
@@ -5818,7 +6001,7 @@ const LanScannerPage = () => {
                 <tr>
                   <td colSpan={7} style={{ textAlign: "center", padding: "40px 20px", color: "#475569" }}>
                     <div style={{ fontSize: "28px", marginBottom: "8px" }}>
-                      {selectedInterface === "wlan0" ? "📶" : selectedInterface === "eth0" ? "🔌" : "🌐"}
+                      {selectedInterface === "wlan0" ? <Wifi size={14} /> : selectedInterface === "eth0" ? <Cable size={14} /> : <Globe size={14} />}
                     </div>
                     <div style={{ fontWeight: "700", color: "#1e293b", fontSize: "14px" }}>
                       {filterTableByInterface && !isAllInterfaces
@@ -5837,7 +6020,7 @@ const LanScannerPage = () => {
                         onClick={() => scanAllLanDevices(detectedSubnet, selectedInterface || "all")}
                         disabled={lanDevicesScanning}
                       >
-                        {lanDevicesScanning ? "⏳ Scanning..." : `🚀 Scan ${selectedInterface === "all" ? "All Interfaces" : selectedInterface.toUpperCase()} Now`}
+                        {lanDevicesScanning ? "Scanning..." : `Scan ${selectedInterface === "all" ? "All Interfaces" : selectedInterface.toUpperCase()} Now`}
                       </button>
                       {(filterTableByInterface || !isAllInterfaces) && (
                         <button
@@ -5848,7 +6031,7 @@ const LanScannerPage = () => {
                             handleSelectInterface("all");
                           }}
                         >
-                          🌐 Show All {interfaceDevices.length} Discovered Devices
+                          <Globe size={13} style={{ marginRight: "4px" }} /> Show All {interfaceDevices.length} Discovered Devices
                         </button>
                       )}
                     </div>
@@ -5933,7 +6116,7 @@ const LanScannerPage = () => {
                                   }}
                                   title={`IP Collision: Duplicated with ${otherConflictedDevs.map(d => `${d.hostname || 'Device'} (${d.mac_address})`).join(', ')}`}
                                 >
-                                  ⚠️ IP CONFLICT
+                                  <AlertTriangle size={12} style={{ marginRight: "4px" }} /> IP CONFLICT
                                 </span>
                               )}
                             </div>
@@ -5956,7 +6139,7 @@ const LanScannerPage = () => {
                                 padding: "2px 8px",
                               }}
                             >
-                              <span className="status-dot online" /> ONLINE ({getDeviceInternetStatus(device).isWireless ? "📶 Wi-Fi" : "🔌 Wired"})
+                              <span className="status-dot online" /> ONLINE ({getDeviceInternetStatus(device).isWireless ? "Wi-Fi" : "Wired"})
                             </span>
                             {!isTypeAndVlanMatching(device) && device.vlan_id !== 90 && device.enforcement_status !== "quarantined" && device.access_decision !== "quarantine" && (
                               <div style={{ display: "inline-flex", alignItems: "center", gap: "4px", marginTop: "2px" }}>
@@ -5972,7 +6155,7 @@ const LanScannerPage = () => {
                                   }}
                                   title={`Device type '${device.device_type}' requires VLAN ${getExpectedVlanForType(device.device_type)}, but assigned VLAN is ${device.vlan_id || 90}.`}
                                 >
-                                  ⚠️ VLAN Mismatch (VLAN {device.vlan_id})
+                                  <AlertTriangle size={12} style={{ marginRight: "4px" }} /> VLAN Mismatch (VLAN {device.vlan_id})
                                 </span>
                                 {isAdmin && (
                                   <button
@@ -5988,7 +6171,7 @@ const LanScannerPage = () => {
                                     onClick={() => deviceAction(device.id, "vlan", getExpectedVlanForType(device.device_type))}
                                     title={`Synchronize device to VLAN ${getExpectedVlanForType(device.device_type)}`}
                                   >
-                                    🔄 Sync
+                                    <RefreshCw size={11} style={{ marginRight: "3px" }} /> Sync
                                   </button>
                                 )}
                               </div>
@@ -6007,7 +6190,7 @@ const LanScannerPage = () => {
                                 padding: "2px 8px",
                               }}
                             >
-                              <span className="status-dot offline" /> OFFLINE ({getDeviceInternetStatus(device).isWireless ? "📶 Wi-Fi Disconnected" : "🔌 Cable Disconnected"})
+                              <span className="status-dot offline" /> OFFLINE ({getDeviceInternetStatus(device).isWireless ? "Wi-Fi Disconnected" : "Cable Disconnected"})
                             </span>
                             <button
                               type="button"
@@ -6027,7 +6210,7 @@ const LanScannerPage = () => {
                               onClick={() => handleRunTroubleshoot(device)}
                               title="Run multi-layer root-cause diagnostics"
                             >
-                              🩺 Diagnose
+                              <Stethoscope size={11} style={{ marginRight: "3px" }} /> Diagnose
                             </button>
                           </div>
                         )}
@@ -6063,7 +6246,7 @@ const LanScannerPage = () => {
                                 }}
                                 title={`IP Conflict! Duplicated with ${otherConflictedDevs.map(d => `${d.hostname || 'Device'} (${d.mac_address})`).join(', ')}`}
                               >
-                                ⚠️ DUPLICATE IP
+                                <AlertTriangle size={12} style={{ marginRight: "4px" }} /> DUPLICATE IP
                               </span>
                             )}
                             <select
@@ -6100,7 +6283,7 @@ const LanScannerPage = () => {
                                 gap: "4px",
                               }}
                             >
-                              <span>⚡</span>
+                              <Zap size={13} color="#f59e0b" />
                               <span>
                                 In conflict with:{" "}
                                 {otherConflictedDevs
@@ -6121,7 +6304,7 @@ const LanScannerPage = () => {
                                 gap: "4px",
                               }}
                             >
-                              <span>🔄</span> IP Reassigned (Auto-Synced)
+                              <RefreshCw size={12} style={{ marginRight: "4px" }} /> IP Reassigned (Auto-Synced)
                             </div>
                           )}
                         </div>
@@ -6168,7 +6351,7 @@ const LanScannerPage = () => {
                             }}
                             title="Select Auto VLAN or specific VLAN segment"
                           >
-                            <option value="auto">⚡ Auto VLAN (Detect)</option>
+                            <option value="auto">Auto VLAN (Detect)</option>
                             <option value={10}>VLAN 10 (IP Phones)</option>
                             <option value={20}>VLAN 20 (Workstations)</option>
                             <option value={30}>VLAN 30 (CCTV)</option>
@@ -6195,7 +6378,7 @@ const LanScannerPage = () => {
                               whiteSpace: "nowrap",
                             }}
                           >
-                            <span>{actionLoading === `automate-vlan-${device.id}` ? "⏳" : "⚡"}</span>
+                            {actionLoading === `automate-vlan-${device.id}` ? <RefreshCw size={12} className="spin" /> : <Zap size={12} />}
                             {actionLoading === `automate-vlan-${device.id}` ? "Auto..." : "Auto"}
                           </button>
                         </div>
@@ -6218,7 +6401,7 @@ const LanScannerPage = () => {
                                     fontSize: "12px",
                                   }}
                                 >
-                                  <span className="status-dot online" /> {istat.statusIcon} {isDeviceScheduledForAccess(device) ? "🟢 Allowed (Scheduled)" : "Allowed"}
+                                  <span className="status-dot online" /> {istat.statusIcon} {isDeviceScheduledForAccess(device) ? "Allowed (Scheduled)" : "Allowed"}
                                 </span>
                                 <div
                                   style={{
@@ -6245,7 +6428,7 @@ const LanScannerPage = () => {
                                 }}
                                 title={istat.reason}
                               >
-                                <span className="status-dot offline" /> {istat.statusIcon} {isDeviceScheduledForAccess(device) ? "🕒 Quarantined (Scheduled)" : `No Internet (${istat.shortReason})`}
+                                <span className="status-dot offline" /> {istat.statusIcon} {isDeviceScheduledForAccess(device) ? "Quarantined (Scheduled)" : `No Internet (${istat.shortReason})`}
                               </span>
                               <div
                                 style={{
@@ -6267,9 +6450,12 @@ const LanScannerPage = () => {
                                 color: "#a855f7",
                                 marginTop: "1px",
                                 fontWeight: "600",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "3px",
                               }}
                             >
-                              ⏱️ {schedule.start_time} - {schedule.end_time}
+                              <Clock size={11} /> {schedule.start_time} - {schedule.end_time}
                             </div>
                           )}
                       </td>
@@ -6301,12 +6487,19 @@ const LanScannerPage = () => {
                                   background: "#2563eb",
                                   borderColor: "#1d4ed8",
                                   fontWeight: "700",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "4px",
                                 }}
                                 title="Approve device into its functional VLAN (Internet remains blocked until explicitly allowed)"
                               >
-                                {actionLoading === `approve-${device.id}`
-                                  ? "Approving..."
-                                  : "✓ Approve"}
+                                {actionLoading === `approve-${device.id}` ? (
+                                  "Approving..."
+                                ) : (
+                                  <>
+                                    <Check size={13} /> Approve
+                                  </>
+                                )}
                               </button>
 
                               <button
@@ -6314,13 +6507,21 @@ const LanScannerPage = () => {
                                 type="button"
                                 style={
                                   scheduleForm.device_id === device.id
-                                    ? { background: "rgba(59, 130, 246, 0.25)", borderColor: "#3b82f6", color: "#2563eb", fontWeight: "700" }
-                                    : {}
+                                    ? { background: "rgba(59, 130, 246, 0.25)", borderColor: "#3b82f6", color: "#2563eb", fontWeight: "700", display: "inline-flex", alignItems: "center", gap: "4px" }
+                                    : { display: "inline-flex", alignItems: "center", gap: "4px" }
                                 }
                                 onClick={() => openScheduleModal(device)}
                                 title="Schedule access instead of approving immediately"
                               >
-                                {scheduleForm.device_id === device.id ? "✕ Close Schedule" : "⏱️ Schedule"}
+                                {scheduleForm.device_id === device.id ? (
+                                  <>
+                                    <X size={13} /> Close Schedule
+                                  </>
+                                ) : (
+                                  <>
+                                    <Clock size={13} /> Schedule
+                                  </>
+                                )}
                               </button>
 
                               <button
@@ -6335,12 +6536,19 @@ const LanScannerPage = () => {
                                 style={{
                                   color: "#dc2626",
                                   borderColor: "rgba(239, 68, 68, 0.4)",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "4px",
                                 }}
                                 title="Reject this device"
                               >
-                                {actionLoading === `reject-${device.id}`
-                                  ? "Rejecting..."
-                                  : "✕ Reject"}
+                                {actionLoading === `reject-${device.id}` ? (
+                                  "Rejecting..."
+                                ) : (
+                                  <>
+                                    <XCircle size={13} /> Reject
+                                  </>
+                                )}
                               </button>
                             </>
                           ) : (
@@ -6354,6 +6562,9 @@ const LanScannerPage = () => {
                                     backgroundColor: "#7e22ce",
                                     borderColor: "#a855f7",
                                     fontWeight: "600",
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: "4px",
                                   }}
                                   onClick={() =>
                                     deviceAction(device.id, "unisolate")
@@ -6363,9 +6574,13 @@ const LanScannerPage = () => {
                                   }
                                   title="Release device from isolation and restore operational VLAN"
                                 >
-                                  {actionLoading === `unisolate-${device.id}`
-                                    ? "Releasing..."
-                                    : "🔓 Release"}
+                                  {actionLoading === `unisolate-${device.id}` ? (
+                                    "Releasing..."
+                                  ) : (
+                                    <>
+                                      <Unlock size={13} /> Release
+                                    </>
+                                  )}
                                 </button>
                               ) : isAllowed ? (
                                 <>
@@ -6379,12 +6594,17 @@ const LanScannerPage = () => {
                                       actionLoading === `block-${device.id}` ||
                                       actionLoading === `disallow-${device.id}`
                                     }
+                                    style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}
                                     title="Block Internet access on Firewall"
                                   >
                                     {actionLoading === `block-${device.id}` ||
-                                    actionLoading === `disallow-${device.id}`
-                                      ? "Blocking..."
-                                      : "🚫 Block Internet"}
+                                    actionLoading === `disallow-${device.id}` ? (
+                                      "Blocking..."
+                                    ) : (
+                                      <>
+                                        <Ban size={13} /> Block Internet
+                                      </>
+                                    )}
                                   </button>
 
                                   <button
@@ -6395,6 +6615,9 @@ const LanScannerPage = () => {
                                       color: "#7e22ce",
                                       background: "rgba(147, 51, 234, 0.15)",
                                       fontWeight: "600",
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: "4px",
                                     }}
                                     onClick={() =>
                                       deviceAction(device.id, "isolate")
@@ -6404,9 +6627,13 @@ const LanScannerPage = () => {
                                     }
                                     title="Isolate device to Quarantine VLAN 90 and block network/Internet"
                                   >
-                                    {actionLoading === `isolate-${device.id}`
-                                      ? "Isolating..."
-                                      : "🔒 Isolate"}
+                                    {actionLoading === `isolate-${device.id}` ? (
+                                      "Isolating..."
+                                    ) : (
+                                      <>
+                                        <Lock size={13} /> Isolate
+                                      </>
+                                    )}
                                   </button>
                                 </>
                               ) : (
@@ -6424,12 +6651,19 @@ const LanScannerPage = () => {
                                       background: "#10b981",
                                       borderColor: "#10b981",
                                       fontWeight: "700",
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: "4px",
                                     }}
                                     title="Device is approved. Click to authorize Internet access on Firewall"
                                   >
-                                    {actionLoading === `allow-${device.id}`
-                                      ? "Allowing..."
-                                      : "✓ Allow Internet"}
+                                    {actionLoading === `allow-${device.id}` ? (
+                                      "Allowing..."
+                                    ) : (
+                                      <>
+                                        <CheckCircle2 size={13} /> Allow Internet
+                                      </>
+                                    )}
                                   </button>
 
                                   <button
@@ -6440,6 +6674,9 @@ const LanScannerPage = () => {
                                       color: "#7e22ce",
                                       background: "rgba(147, 51, 234, 0.15)",
                                       fontWeight: "600",
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: "4px",
                                     }}
                                     onClick={() =>
                                       deviceAction(device.id, "isolate")
@@ -6449,9 +6686,13 @@ const LanScannerPage = () => {
                                     }
                                     title="Isolate device to Quarantine VLAN 90 and block network/Internet"
                                   >
-                                    {actionLoading === `isolate-${device.id}`
-                                      ? "Isolating..."
-                                      : "🔒 Isolate"}
+                                    {actionLoading === `isolate-${device.id}` ? (
+                                      "Isolating..."
+                                    ) : (
+                                      <>
+                                        <Lock size={13} /> Isolate
+                                      </>
+                                    )}
                                   </button>
                                 </>
                               )}
@@ -6462,13 +6703,21 @@ const LanScannerPage = () => {
                                 type="button"
                                 style={
                                   scheduleForm.device_id === device.id
-                                    ? { background: "rgba(59, 130, 246, 0.25)", borderColor: "#3b82f6", color: "#2563eb", fontWeight: "700" }
-                                    : {}
+                                    ? { background: "rgba(59, 130, 246, 0.25)", borderColor: "#3b82f6", color: "#2563eb", fontWeight: "700", display: "inline-flex", alignItems: "center", gap: "4px" }
+                                    : { display: "inline-flex", alignItems: "center", gap: "4px" }
                                 }
                                 onClick={() => openScheduleModal(device)}
                                 title="Set access schedule inline right below this device"
                               >
-                                {scheduleForm.device_id === device.id ? "✕ Close Schedule" : "⏱️ Schedule"}
+                                {scheduleForm.device_id === device.id ? (
+                                  <>
+                                    <X size={13} /> Close Schedule
+                                  </>
+                                ) : (
+                                  <>
+                                    <Clock size={13} /> Schedule
+                                  </>
+                                )}
                               </button>
                             </>
                           )}
@@ -6483,11 +6732,16 @@ const LanScannerPage = () => {
                             disabled={
                               actionLoading === `reset-experiment-${device.id}`
                             }
+                            style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}
                             title="Reset this machine to unapproved Quarantine state and trigger the LAN Connection Notification to start the experiment from Step 1"
                           >
-                            {actionLoading === `reset-experiment-${device.id}`
-                              ? "..."
-                              : "🧪 Reset"}
+                            {actionLoading === `reset-experiment-${device.id}` ? (
+                              "..."
+                            ) : (
+                              <>
+                                <RotateCcw size={13} /> Reset
+                              </>
+                            )}
                           </button>
                         </div>
                       </td>
@@ -6564,15 +6818,17 @@ const AccessPage = () => {
             }}
             title="Automatically detect MAC address & vendor for all devices and assign the recommended VLAN segment"
           >
-            <span>{automatingAllVlans ? "⏳" : "⚡"}</span>
+            {automatingAllVlans ? <RefreshCw size={12} className="spin" /> : <Zap size={12} />}
             {automatingAllVlans ? "Auto-Assigning VLANs..." : "Auto VLAN All Devices"}
           </button>
           <button
             className="secondary-button"
             onClick={refreshAll}
             disabled={refreshingAll}
+            style={{ display: "inline-flex", alignItems: "center", gap: "8px", fontWeight: "700" }}
           >
-            {refreshingAll ? "Refreshing..." : "🔄 Refresh"}
+            <NetOpsLogo size={18} style={{ animation: refreshingAll ? "spin 1s linear infinite" : "none" }} />
+            {refreshingAll ? "Syncing..." : "Refresh"}
           </button>
         </div>
 
@@ -6580,7 +6836,7 @@ const AccessPage = () => {
 
       {!isAdmin && (
         <div style={{ background: "rgba(59, 130, 246, 0.12)", border: "1px solid rgba(59, 130, 246, 0.4)", borderRadius: "8px", padding: "10px 16px", marginBottom: "16px", display: "flex", alignItems: "center", gap: "10px", fontSize: "13px", color: "#1d4ed8" }}>
-          <span>👁️</span>
+          <Eye size={14} />
           <div><strong>Standard User (Read-Only Access Monitoring):</strong> You have read-only visibility into device access rules and enforcement. Access control changes and schedules require Administrator privileges.</div>
         </div>
       )}
@@ -6661,8 +6917,8 @@ const AccessPage = () => {
             }}
             title="Auto-detect vendor & MAC for all devices to assign correct VLANs"
           >
-            <span>{automatingAllVlans ? "⏳" : "⚡"}</span>
-            {automatingAllVlans ? "Auto-Assigning..." : "⚡ Auto VLAN (All Devices)"}
+            {automatingAllVlans ? <RefreshCw size={12} className="spin" /> : <Zap size={12} />}
+            {automatingAllVlans ? "Auto-Assigning..." : <><Zap size={13} style={{ marginRight: "4px" }} /> Auto VLAN (All Devices)</>}
           </button>
 
         </div>
@@ -6713,19 +6969,7 @@ const AccessPage = () => {
 
                       <div className="device-primary">
 
-                        {device.device_type === "computer"
-                          ? "💻"
-                          : device.device_type === "cctv"
-                          ? "📹"
-                          : device.device_type === "printer"
-                          ? "🖨️"
-                          : device.device_type === "ip_phone" || device.device_type === "phone"
-                          ? "📞"
-                          : device.device_type === "server"
-                          ? "🖥️"
-                          : device.device_type === "access_point"
-                          ? "📡"
-                          : "⚠️"}{" "}
+                        {getDeviceIcon(device.device_type, 15)}{" "}
 
                         {device.hostname || "Unknown Device"}
 
@@ -6737,7 +6981,7 @@ const AccessPage = () => {
 
                       {device.vendor && (
                         <div style={{ fontSize: "11px", color: "#64748b", marginTop: "2px" }}>
-                          🏢 Vendor: <strong>{device.vendor}</strong>
+                          <Building2 size={12} style={{ marginRight: "4px" }} /> Vendor: <strong>{device.vendor}</strong>
                         </div>
                       )}
 
@@ -6795,14 +7039,14 @@ const AccessPage = () => {
                           }}
                           title="Change VLAN: Select Auto VLAN to detect by MAC and vendor"
                         >
-                          <option value="auto">⚡ Auto VLAN (by Vendor/MAC)</option>
+                          <option value="auto">Auto VLAN (by Vendor/MAC)</option>
                           <option value="10">VLAN 10 (VoIP / Phone)</option>
                           <option value="20">VLAN 20 (Workstation / PC)</option>
                           <option value="30">VLAN 30 (CCTV Camera)</option>
                           <option value="40">VLAN 40 (Printer)</option>
                           <option value="50">VLAN 50 (Server / Infra)</option>
                           <option value="60">VLAN 60 (Access Point)</option>
-                          <option value="90">🚨 VLAN 90 (Quarantine)</option>
+                          <option value="90">VLAN 90 (Quarantine)</option>
                         </select>
 
                         <button
@@ -6829,7 +7073,7 @@ const AccessPage = () => {
                             whiteSpace: "nowrap",
                           }}
                         >
-                          <span>{actionLoading === `automate-vlan-${device.id}` ? "⏳" : "⚡"}</span>
+                          {actionLoading === `automate-vlan-${device.id}` ? <RefreshCw size={12} className="spin" /> : <Zap size={12} />}
                           {actionLoading === `automate-vlan-${device.id}` ? "Assigning..." : "Auto VLAN"}
                         </button>
                       </div>
@@ -6869,13 +7113,13 @@ const AccessPage = () => {
                       "allowed" ? (
 
                         <span className="status-badge allowed">
-                          {isDeviceScheduledForAccess(device) ? "🟢 Internet Allowed (Scheduled)" : "Internet Allowed"}
+                          {isDeviceScheduledForAccess(device) ? "Internet Allowed (Scheduled)" : "Internet Allowed"}
                         </span>
 
                       ) : (
 
                         <span className="status-badge blocked">
-                          {isDeviceScheduledForAccess(device) ? "🕒 Quarantined (Scheduled)" : "⚠️ Quarantined"}
+                          {isDeviceScheduledForAccess(device) ? "Quarantined (Scheduled)" : "Quarantined"}
                         </span>
 
                       )}
@@ -6945,7 +7189,7 @@ const AccessPage = () => {
                               )
                             }
                           >
-                            🚫 Block Internet
+                            <Ban size={12} style={{ marginRight: "4px" }} /> Block Internet
                           </button>
 
                         )}
@@ -7220,7 +7464,7 @@ const AccessPage = () => {
                           {!isTypeAndVlanMatching(device) && (
                             <div style={{ marginTop: "4px" }}>
                               <span style={{ fontSize: "10px", color: "#b45309", background: "rgba(245, 158, 11, 0.15)", border: "1px solid #f59e0b", padding: "1px 6px", borderRadius: "4px", fontWeight: "700", display: "inline-block" }}>
-                                ⚠️ Requires VLAN {getExpectedVlanForType(device.device_type)} to connect
+                                <AlertTriangle size={12} style={{ marginRight: "4px" }} /> Requires VLAN {getExpectedVlanForType(device.device_type)} to connect
                               </span>
                             </div>
                           )}
@@ -7264,14 +7508,14 @@ const AccessPage = () => {
                             }}
                             title="Change VLAN. Selecting VLAN 90 immediately disconnects internet access."
                           >
-                            <option value="auto">⚡ Auto VLAN (Detect by Vendor/MAC)</option>
+                            <option value="auto">Auto VLAN (Detect by Vendor/MAC)</option>
                             <option value="10">VLAN 10 (IP Phones)</option>
                             <option value="20">VLAN 20 (Computers)</option>
                             <option value="30">VLAN 30 (CCTV)</option>
                             <option value="40">VLAN 40 (Printers)</option>
                             <option value="50">VLAN 50 (Servers)</option>
                             <option value="60">VLAN 60 (Access Points)</option>
-                            <option value="90">🚨 VLAN 90 (Quarantine)</option>
+                            <option value="90">VLAN 90 (Quarantine)</option>
                           </select>
                         </td>
 
@@ -7327,7 +7571,7 @@ const AccessPage = () => {
                                 }
                                 title="Instantly isolate into Quarantine VLAN 90 & disconnect internet"
                               >
-                                🚨 Quarantine
+                                <ShieldAlert size={12} style={{ marginRight: "4px" }} /> Quarantine
                               </button>
                             )}
                           </div>
@@ -7420,7 +7664,7 @@ const AccessPage = () => {
           <div className="page-title" style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
             <span>Network Events</span>
             <span style={{ fontSize: "11px", background: "#f0fdf4", color: "#166534", border: "1px solid #bbf7d0", padding: "3px 8px", borderRadius: "12px", fontWeight: "700" }}>
-              🛡️ Audit Trail Protected (Immutable to Admins)
+              <ShieldCheck size={14} style={{ marginRight: "6px" }} /> Audit Trail Protected (Immutable to Admins)
             </span>
             <span
               onClick={() => { setActivePage("settings"); setActiveTab("notifications"); }}
@@ -7436,7 +7680,7 @@ const AccessPage = () => {
               }}
               title="Click to manage real-time alert webhooks"
             >
-              🔔 {notifForm.webhook_enabled ? `Alerts Active (${(notifForm.webhook_platform || "slack").toUpperCase()})` : "Webhooks: Inactive"}
+              <Bell size={13} style={{ marginRight: "4px" }} /> {notifForm.webhook_enabled ? `Alerts Active (${(notifForm.webhook_platform || "slack").toUpperCase()})` : "Webhooks: Inactive"}
             </span>
           </div>
 
@@ -7452,7 +7696,7 @@ const AccessPage = () => {
               className="secondary-button"
               style={{ borderColor: "#ef4444", color: "#dc2626", background: "#fef2f2", fontWeight: "700" }}
               onClick={async () => {
-                if (!window.confirm("⚠️ PERMANENTLY CLEAR AUDIT LOGS?\n\nThis will purge all historical network events and audit logs from the database. This action is irreversible.\n\nAre you sure you want to proceed?")) return;
+                if (!window.confirm("PERMANENTLY CLEAR AUDIT LOGS?\n\nThis will purge all historical network events and audit logs from the database. This action is irreversible.\n\nAre you sure you want to proceed?")) return;
                 try {
                   const res = await fetch(`${API_URL}/events/clear`, {
                     method: "DELETE",
@@ -7470,7 +7714,7 @@ const AccessPage = () => {
                 }
               }}
             >
-              🗑️ Purge Audit Logs
+              <Trash2 size={12} style={{ marginRight: "4px" }} /> Purge Audit Logs
             </button>
           )}
 
@@ -7478,8 +7722,10 @@ const AccessPage = () => {
             className="secondary-button"
             onClick={refreshAll}
             disabled={refreshingAll}
+            style={{ display: "inline-flex", alignItems: "center", gap: "8px", fontWeight: "700" }}
           >
-            {refreshingAll ? "Refreshing..." : "🔄 Refresh Events"}
+            <NetOpsLogo size={18} style={{ animation: refreshingAll ? "spin 1s linear infinite" : "none" }} />
+            {refreshingAll ? "Syncing..." : "Refresh Events"}
           </button>
         </div>
       </div>
@@ -7773,7 +8019,7 @@ return (
               onChange={(event) => setReportType(event.target.value)}
             >
               <option value="isp_internet_usage">
-                🌐 ISP Internet Usage & Firewall Bandwidth
+                <Globe size={18} style={{ marginRight: "8px" }} /> ISP Internet Usage & Firewall Bandwidth
               </option>
               {isSuperAdmin && (
                 <option value="user_activity">
@@ -7842,12 +8088,12 @@ return (
                   background: "#eff6ff",
                 }}
               >
-                <option value="all">🌐 All Connected ISPs (Aggregated Multi-WAN)</option>
-                <option value="safaricom">🚀 Safaricom Business Fiber (WAN1 - 1 Gbps DIA)</option>
-                <option value="liquid">⚡ Liquid Intelligent Technologies (WAN2 - 500 Mbps Metro-E)</option>
-                <option value="airtel">📶 Airtel Business Enterprise (WAN3 - 200 Mbps)</option>
-                <option value="starlink">🛰️ Starlink Business Satellite (WAN4 - Failover)</option>
-                <option value="custom">✏️ Enter Custom Company ISP...</option>
+                <option value="all">All Connected ISPs (Aggregated Multi-WAN)</option>
+                <option value="safaricom">Safaricom Business Fiber (WAN1 - 1 Gbps DIA)</option>
+                <option value="liquid">Liquid Intelligent Technologies (WAN2 - 500 Mbps Metro-E)</option>
+                <option value="airtel">Airtel Business Enterprise (WAN3 - 200 Mbps)</option>
+                <option value="starlink">Starlink Business Satellite (WAN4 - Failover)</option>
+                <option value="custom">Enter Custom Company ISP...</option>
               </select>
             </div>
           )}
@@ -8147,7 +8393,7 @@ return (
                   );
                 }}
               >
-                📥 Download CSV
+                <Download size={12} style={{ marginRight: "4px" }} /> Download CSV
               </button>
             </div>
             )}
@@ -8181,9 +8427,8 @@ return (
                         justifyContent: "center",
                         fontSize: "24px",
                         boxShadow: "0 4px 12px rgba(37, 99, 235, 0.25)",
-                      }}
-                    >
-                      🌐
+                      }}>
+                      <Globe size={24} color="#ffffff" />
                     </div>
                     <div>
                       <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
@@ -8397,7 +8642,7 @@ return (
                 <div style={{ marginBottom: "28px" }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px" }}>
                     <div className="panel-title" style={{ fontSize: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
-                      <span>🏢</span> Department & VLAN Internet Consumption
+                      <Building2 size={15} style={{ marginRight: "6px" }} /> Department & VLAN Internet Consumption
                     </div>
                     <span style={{ fontSize: "12px", color: "#64748b" }}>
                       Aggregated across {reportData.departments?.length || 0} network segments
@@ -8488,7 +8733,7 @@ return (
                 <div style={{ marginBottom: "28px" }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px" }}>
                     <div className="panel-title" style={{ fontSize: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
-                      <span>💻</span> User Device Internet Usage (Active Firewall Counters)
+                      <Laptop size={15} style={{ marginRight: "6px" }} /> User Device Internet Usage (Active Firewall Counters)
                     </div>
                     <span style={{ fontSize: "12px", color: "#64748b" }}>
                       {reportData.devices?.length || 0} monitored host{reportData.devices?.length === 1 ? "" : "s"}
@@ -8587,7 +8832,7 @@ return (
                   <div>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px" }}>
                       <div className="panel-title" style={{ fontSize: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
-                        <span>📈</span> Daily Bandwidth & Speed Trend
+                        <TrendingUp size={15} style={{ marginRight: "6px" }} /> Daily Bandwidth & Speed Trend
                       </div>
                       <span style={{ fontSize: "12px", color: "#64748b" }}>
                         {reportData.daily_trends.length} recorded day{reportData.daily_trends.length === 1 ? "" : "s"}
@@ -8772,7 +9017,7 @@ return (
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px" }}>
                     <div>
                       <div className="panel-title" style={{ fontSize: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
-                        <span>👤</span> Users Created in Period
+                        <Users size={15} style={{ marginRight: "6px" }} /> Users Created in Period
                       </div>
                       <div className="panel-subtitle">
                         Accounts provisioned between {reportData.start.replace("T", " ").slice(0, 19)} and {reportData.end.replace("T", " ").slice(0, 19)}
@@ -8871,7 +9116,7 @@ return (
                                     fontSize: "12px",
                                   }}
                                 >
-                                  {u.is_verified ? "✓ Verified" : "⏳ Pending"}
+                                  {u.is_verified ? "Verified" : "Pending"}
                                 </span>
                               </td>
                               <td>
@@ -8912,7 +9157,7 @@ return (
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px" }}>
                     <div>
                       <div className="panel-title" style={{ fontSize: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
-                        <span>⏱️</span> User Access & Session Duration History
+                        <Clock size={15} style={{ marginRight: "6px" }} /> User Access & Session Duration History
                       </div>
                       <div className="panel-subtitle">
                         When each user accessed the system, IP address, and for how long each session lasted
@@ -9079,7 +9324,7 @@ return (
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "14px", flexWrap: "wrap", gap: "10px" }}>
                     <div>
                       <div className="panel-title" style={{ fontSize: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
-                        <span>🛡️</span> Administrative & Security Audit Trail
+                        <Shield size={15} style={{ marginRight: "6px" }} /> Administrative & Security Audit Trail
                       </div>
                       <div className="panel-subtitle">
                         Comprehensive audit log of who triggered, deleted, added, or modified devices, switches, VLANs, user accounts, and patch updates
@@ -9088,7 +9333,7 @@ return (
                     <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                       <input
                         type="text"
-                        placeholder="🔍 Filter User ID, Actor, IP, Action, or Details..."
+                        placeholder="Filter User ID, Actor, IP, Action, or Details..."
                         value={auditSearchTerm}
                         onChange={(e) => setAuditSearchTerm(e.target.value)}
                         style={{
@@ -9188,7 +9433,7 @@ return (
                                 <td>
                                   <div style={{ display: "flex", alignItems: "center", gap: "7px" }}>
                                     <span style={{ fontSize: "14px" }}>
-                                      {(ev.role === "system" || (!ev.user_id && (ev.actor || "").toLowerCase().includes("system"))) ? "⚙️" : "👤"}
+                                      {(ev.role === "system" || (!ev.user_id && (ev.actor || "").toLowerCase().includes("system"))) ? <Settings size={14} /> : <User size={14} />}
                                     </span>
                                     <strong style={{
                                       color: (ev.role === "super_admin" || ev.role === "admin") ? "#2563eb" : "#0f172a",
@@ -9286,7 +9531,7 @@ return (
                                     </span>
                                     {ev.category && (
                                       <span style={{ fontSize: "10px", color: "#64748b", fontWeight: 500 }}>
-                                        📁 {ev.category}
+                                        <Folder size={11} style={{ marginRight: "3px" }} /> {ev.category}
                                       </span>
                                     )}
                                   </div>
@@ -9368,7 +9613,7 @@ return (
                   <div style={{ marginTop: "24px" }}>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px" }}>
                       <div className="panel-title" style={{ fontSize: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
-                        <span>📋</span> Activity & Event Log ({reportData.events.length} event{reportData.events.length === 1 ? "" : "s"})
+                        <FileText size={15} style={{ marginRight: "6px" }} /> Activity & Event Log ({reportData.events.length} event{reportData.events.length === 1 ? "" : "s"})
                       </div>
                     </div>
                     <div className="table-container">
@@ -9410,7 +9655,7 @@ return (
                               <td>
                                 <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
                                   <span style={{ fontSize: "14px" }}>
-                                    {(ev.role === "system" || (!ev.user_id && (ev.actor || "").toLowerCase().includes("system"))) ? "⚙️" : "👤"}
+                                    {(ev.role === "system" || (!ev.user_id && (ev.actor || "").toLowerCase().includes("system"))) ? <Settings size={14} /> : <User size={14} />}
                                   </span>
                                   <strong style={{
                                     color: (ev.role === "super_admin" || ev.role === "admin") ? "#2563eb" : "#0f172a",
@@ -9507,7 +9752,7 @@ return (
                                   </span>
                                   {ev.category && (
                                     <span style={{ fontSize: "10px", color: "#64748b" }}>
-                                      📁 {ev.category}
+                                      <Folder size={11} style={{ marginRight: "3px" }} /> {ev.category}
                                     </span>
                                   )}
                                 </div>
@@ -9799,7 +10044,7 @@ return (
     const curVendorMeta = firewallVendors.find((v) => v.id === selectedVendor) || {
       id: selectedVendor,
       name: selectedVendor,
-      icon: "🛡️",
+      icon: "Shield",
       requires_username: true,
       requires_password: true,
       requires_api_key: false,
@@ -9810,7 +10055,7 @@ return (
         <div className="page-header">
           <div>
             <div className="page-title">
-              ⚙️ Settings &amp; Multi-Vendor Firewall Center
+              <Settings size={18} style={{ marginRight: "8px" }} /> Settings & Multi-Vendor Firewall Center
             </div>
             <div className="page-description">
               Universal firewall integration hub supporting {firewallVendors.length || 15} platforms including Sophos, Fortinet FortiGate, Palo Alto PAN-OS, Check Point Quantum, MikroTik, pfSense/OPNsense, Cisco ASA/Firepower, Juniper SRX, SonicWall, WatchGuard, Ubiquiti, Aruba, Huawei USG, and Linux Gateways.
@@ -9826,7 +10071,7 @@ return (
             onClick={() => setActiveTab("active")}
             style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
           >
-            <span>🛡️</span> Active Firewall &amp; Status
+            <Shield size={14} style={{ marginRight: "6px" }} /> Active Firewall & Status
           </button>
           <button
             type="button"
@@ -9834,7 +10079,7 @@ return (
             onClick={() => setActiveTab("configure")}
             style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
           >
-            <span>➕</span> Configure / Change Firewall {!isSuperAdmin && "(Locked)"}
+            <Plus size={14} style={{ marginRight: "6px" }} /> Configure / Change Firewall {!isSuperAdmin && "(Locked)"}
           </button>
           <button
             type="button"
@@ -9842,7 +10087,7 @@ return (
             onClick={() => setActiveTab("profiles")}
             style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
           >
-            <span>📋</span> Saved Firewall Profiles ({savedConfigs.length}) {!isSuperAdmin && "(Locked)"}
+            <FileText size={14} style={{ marginRight: "6px" }} /> Saved Firewall Profiles ({savedConfigs.length}) {!isSuperAdmin && "(Locked)"}
           </button>
           <button
             type="button"
@@ -9850,7 +10095,7 @@ return (
             onClick={() => setActiveTab("notifications")}
             style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
           >
-            <span>🔔</span> Webhooks &amp; Alert Gateways
+            <Bell size={14} style={{ marginRight: "6px" }} /> Webhooks & Alert Gateways
           </button>
           <button
             type="button"
@@ -9861,7 +10106,7 @@ return (
             }}
             style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
           >
-            <span>🔐</span> 802.1X / RADIUS Dynamic VLANs
+            <Lock size={14} style={{ marginRight: "6px" }} /> 802.1X / RADIUS Dynamic VLANs
           </button>
           <button
             type="button"
@@ -9869,7 +10114,7 @@ return (
             onClick={() => setActiveTab("faqs")}
             style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
           >
-            <span>❓</span> FAQs &amp; Knowledge Base
+            <HelpCircle size={14} style={{ marginRight: "6px" }} /> FAQs & Knowledge Base
           </button>
         </div>
 
@@ -9880,7 +10125,7 @@ return (
               <div className="panel-header">
                 <div>
                   <div className="panel-title" style={{ display: "flex", alignItems: "center", gap: "10px", fontSize: "16px" }}>
-                    <span>{liveStatus?.vendor === "fortinet" ? "🏰" : liveStatus?.vendor === "mikrotik" ? "🌐" : liveStatus?.vendor === "pfsense" ? "🧱" : liveStatus?.vendor === "cisco_asa" ? "🦅" : liveStatus?.vendor === "linux_iptables" ? "🐧" : "🛡️"}</span>
+                    <Shield size={16} />
                     Active Firewall: {liveStatus?.vendor_title || activeDriver?.vendor_title || "Sophos XG/XGS (SFOS)"}
                   </div>
                   <div className="panel-subtitle">
@@ -9896,7 +10141,7 @@ return (
                   }}
                   disabled={loadingLiveStatus || refreshingAll}
                 >
-                  {loadingLiveStatus || refreshingAll ? "Checking..." : "🔄 Refresh Status"}
+                  {loadingLiveStatus || refreshingAll ? "Checking..." : <><RefreshCw size={13} style={{ marginRight: "4px" }} /> Refresh Status</>}
                 </button>
               </div>
 
@@ -9940,7 +10185,7 @@ return (
               </div>
 
               <div style={{ padding: "12px 16px", marginTop: "12px", background: "rgba(59, 130, 246, 0.08)", borderRadius: "6px", fontSize: "12px", color: "#1d4ed8" }}>
-                💡 <strong>Multi-Vendor Flexibility:</strong> Click any firewall platform below (Fortinet FortiGate, Palo Alto, Check Point, MikroTik, pfSense, Cisco, Juniper, SonicWall, WatchGuard, Ubiquiti, Aruba, Huawei, etc.) to configure and activate it.
+                <Lightbulb size={14} color="#d97706" style={{ marginRight: "4px" }} /> <strong>Multi-Vendor Flexibility:</strong> Click any firewall platform below (Fortinet FortiGate, Palo Alto, Check Point, MikroTik, pfSense, Cisco, Juniper, SonicWall, WatchGuard, Ubiquiti, Aruba, Huawei, etc.) to configure and activate it.
               </div>
             </div>
 
@@ -9949,7 +10194,7 @@ return (
               <div className="panel-header">
                 <div>
                   <div className="panel-title">
-                    🌐 Supported Firewall Platforms ({firewallVendors.length}) — Click Any Vendor to Configure
+                    <Globe size={15} style={{ marginRight: "6px" }} /> Supported Firewall Platforms ({firewallVendors.length}) — Click Any Vendor to Configure
                   </div>
                   <div className="panel-subtitle">
                     Select any enterprise or open-source firewall below to open its configuration profile
@@ -10035,7 +10280,7 @@ return (
               <div className="panel-header">
                 <div>
                   <div className="panel-title" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                    <span>📞</span> Technical Support &amp; Developer Inquiries
+                    <Phone size={15} style={{ marginRight: "6px" }} /> Technical Support & Developer Inquiries
                   </div>
                   <div className="panel-subtitle">
                     Direct developer assistance, incident escalations, and administrator onboarding
@@ -10051,7 +10296,7 @@ return (
                     href="tel:+254704393504"
                     style={{ fontSize: "16px", fontWeight: "800", color: "#1d4ed8", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "6px" }}
                   >
-                    📞 +254704393504
+                    <Phone size={13} style={{ marginRight: "4px" }} /> +254704393504
                   </a>
                   <div style={{ fontSize: "11px", color: "#64748b", marginTop: "4px" }}>
                     Available 24/7 for urgent network operations, enforcement, and quarantine support
@@ -10066,7 +10311,7 @@ return (
                     href="mailto:rogersiru@gmail.com?subject=NETOPS%20Version%202%20Support"
                     style={{ fontSize: "16px", fontWeight: "800", color: "#15803d", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "6px" }}
                   >
-                    ✉️ rogersiru@gmail.com
+                    <Mail size={13} style={{ marginRight: "4px" }} /> rogersiru@gmail.com
                   </a>
                   <div style={{ fontSize: "11px", color: "#64748b", marginTop: "4px" }}>
                     Official developer email for technical feedback, bug reports &amp; system integrations
@@ -10077,39 +10322,39 @@ return (
               {/* SERVICES WE OFFER IN SETTINGS */}
               <div style={{ marginTop: "20px", paddingTop: "18px", borderTop: "1px solid #e2e8f0" }}>
                 <div style={{ fontSize: "12px", fontWeight: "700", color: "#0f172a", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "12px", display: "flex", alignItems: "center", gap: "6px" }}>
-                  <span>🛠️</span> Services We Offer
+                  <Wrench size={15} style={{ marginRight: "6px" }} /> Services We Offer
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "12px" }}>
                   <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "12px 14px", display: "flex", gap: "12px", alignItems: "flex-start" }}>
-                    <span style={{ fontSize: "20px", background: "#e0f2fe", padding: "6px", borderRadius: "6px", lineHeight: 1 }}>📹</span>
+                    <span style={{ fontSize: "20px", background: "#e0f2fe", padding: "6px", borderRadius: "6px", display: "inline-flex", alignItems: "center" }}><Camera size={20} color="#0284c7" /></span>
                     <div>
                       <div style={{ fontWeight: "700", fontSize: "13px", color: "#0f172a" }}>CCTV Installation</div>
                       <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>Commercial &amp; residential IP/analog surveillance setups, NVR configuration, and remote live feeds</div>
                     </div>
                   </div>
                   <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "12px 14px", display: "flex", gap: "12px", alignItems: "flex-start" }}>
-                    <span style={{ fontSize: "20px", background: "#ecfdf5", padding: "6px", borderRadius: "6px", lineHeight: 1 }}>🔌</span>
+                    <span style={{ fontSize: "20px", background: "#ecfdf5", padding: "6px", borderRadius: "6px", display: "inline-flex", alignItems: "center" }}><Cable size={20} color="#059669" /></span>
                     <div>
                       <div style={{ fontWeight: "700", fontSize: "13px", color: "#0f172a" }}>Structured Cabling</div>
                       <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>Cat6/Fiber optic trunking, network rack dressing, patch panel termination &amp; cable testing</div>
                     </div>
                   </div>
                   <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "12px 14px", display: "flex", gap: "12px", alignItems: "flex-start" }}>
-                    <span style={{ fontSize: "20px", background: "#f5f3ff", padding: "6px", borderRadius: "6px", lineHeight: 1 }}>🌐</span>
+                    <span style={{ fontSize: "20px", background: "#f5f3ff", padding: "6px", borderRadius: "6px", display: "inline-flex", alignItems: "center" }}><Globe size={20} color="#7c3aed" /></span>
                     <div>
                       <div style={{ fontWeight: "700", fontSize: "13px", color: "#0f172a" }}>Websites Maintenance</div>
                       <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>Full-stack site maintenance, uptime monitoring, security hardening, SSL management &amp; backups</div>
                     </div>
                   </div>
                   <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "12px 14px", display: "flex", gap: "12px", alignItems: "flex-start" }}>
-                    <span style={{ fontSize: "20px", background: "#eff6ff", padding: "6px", borderRadius: "6px", lineHeight: 1 }}>💻</span>
+                    <span style={{ fontSize: "20px", background: "#eff6ff", padding: "6px", borderRadius: "6px", display: "inline-flex", alignItems: "center" }}><Laptop size={20} color="#2563eb" /></span>
                     <div>
                       <div style={{ fontWeight: "700", fontSize: "13px", color: "#0f172a" }}>Software Installations and Updates</div>
                       <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>OS deployment, patch baseline rollouts, enterprise software packaging &amp; license setup</div>
                     </div>
                   </div>
                   <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "12px 14px", display: "flex", gap: "12px", alignItems: "flex-start" }}>
-                    <span style={{ fontSize: "20px", background: "#fff7ed", padding: "6px", borderRadius: "6px", lineHeight: 1 }}>⚙️</span>
+                    <span style={{ fontSize: "20px", background: "#fff7ed", padding: "6px", borderRadius: "6px", display: "inline-flex", alignItems: "center" }}><Settings size={20} color="#d97706" /></span>
                     <div>
                       <div style={{ fontWeight: "700", fontSize: "13px", color: "#0f172a" }}>Hardware Performance Maintenance</div>
                       <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>Component diagnostic testing, thermal servicing, dust cleaning &amp; hardware tuning</div>
@@ -10127,7 +10372,7 @@ return (
             {!isAdmin && !isSuperAdmin && (
               <div className="panel" style={{ background: "#fff1f2", border: "1px solid #fecdd3", padding: "18px 20px", borderRadius: "10px", marginBottom: "20px" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "10px", color: "#9f1239", fontWeight: "800", fontSize: "16px" }}>
-                  <span>🔒</span> Firewall Secrets &amp; Credentials Locked (Admin Access Required)
+                  <Lock size={14} style={{ marginRight: "6px" }} /> Firewall Secrets & Credentials Locked (Admin Access Required)
                 </div>
                 <div style={{ fontSize: "13px", color: "#881337", marginTop: "8px", lineHeight: "1.5" }}>
                   Modifying firewall credentials, API tokens, and management URLs requires <strong>Administrator or Super Administrator</strong> privileges. Standard users can monitor active firewall status and enforce device quarantine, but cannot alter core firewall connection secrets.
@@ -10252,7 +10497,7 @@ return (
                         style={{ position: "absolute", right: "10px", background: "none", border: "none", cursor: "pointer", fontSize: "16px", padding: "4px" }}
                         title={showFirewallApiKey ? "Hide API Key" : "Show API Key"}
                       >
-                        {showFirewallApiKey ? "👁️" : "🙈"}
+                        {showFirewallApiKey ? <Eye size={14} /> : <EyeOff size={14} />}
                       </button>
                     </div>
                   </div>
@@ -10293,7 +10538,7 @@ return (
                             style={{ position: "absolute", right: "10px", background: "none", border: "none", cursor: "pointer", fontSize: "16px", padding: "4px" }}
                             title={showFirewallPassword ? "Hide password" : "Show password"}
                           >
-                            {showFirewallPassword ? "👁️" : "🙈"}
+                            {showFirewallPassword ? <Eye size={14} /> : <EyeOff size={14} />}
                           </button>
                         </div>
                       </div>
@@ -10358,7 +10603,7 @@ return (
                     }}
                   >
                     <div style={{ fontWeight: "700", fontSize: "14px", color: testResult.connected ? "#34d399" : "#dc2626", display: "flex", alignItems: "center", gap: "6px" }}>
-                      <span>{testResult.connected ? "✓" : "✗"}</span>
+                      {testResult.connected ? <Check size={14} color="#16a34a" /> : <X size={14} color="#dc2626" />}
                       {testResult.connected ? "Connection Test Successful!" : "Connection Test Failed"}
                     </div>
                     <div style={{ fontSize: "12px", marginTop: "4px", color: "#334155" }}>
@@ -10384,7 +10629,7 @@ return (
                     title={(!isAdmin && !isSuperAdmin) ? "Administrator privileges required to test firewall credentials" : "Test connection"}
                     style={{ fontWeight: "600", display: "inline-flex", alignItems: "center", gap: "6px" }}
                   >
-                    <span>⚡</span> {testingConnection ? "Testing Connection..." : "Test Connection"}
+                    {testingConnection ? "Testing Connection..." : <><Zap size={13} style={{ marginRight: "4px" }} /> Test Connection</>}
                   </button>
 
                   <button
@@ -10394,7 +10639,7 @@ return (
                     title={(!isAdmin && !isSuperAdmin) ? "Administrator privileges required to save firewall credentials" : "Save & Activate Firewall"}
                     style={{ fontWeight: "700", display: "inline-flex", alignItems: "center", gap: "6px", opacity: (!isAdmin && !isSuperAdmin) ? 0.6 : 1 }}
                   >
-                    <span>{(isAdmin || isSuperAdmin) ? "💾" : "🔒"}</span> {savingConfig ? "Saving & Enforcing..." : (isAdmin || isSuperAdmin) ? "Save & Activate Firewall" : "Firewall Secrets Locked (Admin Only)"}
+                    {(isAdmin || isSuperAdmin) ? <Save size={13} style={{ marginRight: "4px" }} /> : <Lock size={13} style={{ marginRight: "4px" }} />} {savingConfig ? "Saving & Enforcing..." : (isAdmin || isSuperAdmin) ? "Save & Activate Firewall" : "Firewall Secrets Locked (Admin Only)"}
                   </button>
                 </div>
               </form>
@@ -10477,7 +10722,7 @@ return (
                                 setActiveTab("configure");
                               }}
                             >
-                              ✏️ Edit
+                              <Pencil size={11} style={{ marginRight: "3px" }} /> Edit
                             </button>
                           )}
                           {!cfg.is_active && isSuperAdmin && (
@@ -10486,11 +10731,11 @@ return (
                               className="primary-button small"
                               onClick={() => handleActivateProfile(cfg.id)}
                             >
-                              ⚡ Activate
+                              <Zap size={11} style={{ marginRight: "3px" }} /> Activate
                             </button>
                           )}
                           {!isSuperAdmin && (
-                            <span style={{ fontSize: "11px", color: "#94a3b8" }}>🔒 Read-Only</span>
+                            <span style={{ fontSize: "11px", color: "#94a3b8", display: "inline-flex", alignItems: "center", gap: "3px" }}><Lock size={10} /> Read-Only</span>
                           )}
                         </td>
                       </tr>
@@ -10508,7 +10753,7 @@ return (
             <div className="panel-header">
               <div>
                 <div className="panel-title" style={{ fontSize: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
-                  <span>🔔</span> Real-Time Webhooks &amp; Alert Delivery Gateways
+                  <Bell size={16} style={{ marginRight: "6px" }} /> Real-Time Webhooks & Alert Delivery Gateways
                 </div>
                 <div className="panel-subtitle">
                   Configure instant Slack, Discord, and Custom Webhook notifications for security breaches, rogue devices, switch CLI drift, and brute-force lockouts, alongside SMTP Email &amp; SMS OTP gateways.
@@ -10538,7 +10783,7 @@ return (
               <div style={{ background: "#f8fafc", border: "1px solid #cbd5e1", borderRadius: "10px", padding: "18px" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
                   <div style={{ fontWeight: "700", fontSize: "14px", color: "#6366f1", display: "flex", alignItems: "center", gap: "6px" }}>
-                    <span>⚡</span> Real-Time Webhooks (Slack / Discord / JSON)
+                    <Zap size={14} style={{ marginRight: "6px" }} /> Real-Time Webhooks (Slack / Discord / JSON)
                   </div>
                   <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", cursor: "pointer", fontWeight: "600", color: notifForm.webhook_enabled ? "#10b981" : "#64748b" }}>
                     <input
@@ -10559,9 +10804,9 @@ return (
                     onChange={(e) => setNotifForm({ ...notifForm, webhook_platform: e.target.value })}
                     style={{ width: "100%", padding: "8px 10px", background: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "6px", color: "#0f172a", fontSize: "12px" }}
                   >
-                    <option value="slack">🟣 Slack (Incoming Webhook Block Kit &amp; Attachments)</option>
-                    <option value="discord">🎮 Discord (Rich Embed Cards with Severity Colors)</option>
-                    <option value="generic">🌐 Generic JSON (REST API / SIEM / NOC Integration)</option>
+                    <option value="slack">Slack (Incoming Webhook Block Kit & Attachments)</option>
+                    <option value="discord">Discord (Rich Embed Cards with Severity Colors)</option>
+                    <option value="generic">Generic JSON (REST API / SIEM / NOC Integration)</option>
                   </select>
                 </div>
 
@@ -10609,7 +10854,7 @@ return (
                 <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "8px 12px", fontSize: "11px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <span style={{ color: "#64748b" }}>Last Dispatch:</span>
                   <span style={{ fontWeight: "600", color: notifForm.last_webhook_status === "success" ? "#10b981" : notifForm.last_webhook_status === "failed" ? "#ef4444" : "#94a3b8" }}>
-                    {notifForm.last_webhook_status === "success" ? "✅ Sent successfully" : notifForm.last_webhook_status === "failed" ? `❌ Error: ${notifForm.last_webhook_error || "Failed"}` : "⚪ No dispatches yet"}
+                    {notifForm.last_webhook_status === "success" ? "Sent successfully" : notifForm.last_webhook_status === "failed" ? `Error: ${notifForm.last_webhook_error || "Failed"}` : "No dispatches yet"}
                   </span>
                 </div>
               </div>
@@ -10617,34 +10862,34 @@ return (
               {/* CARD 2: SECURITY ALERT TRIGGER RULES */}
               <div style={{ background: "#f8fafc", border: "1px solid #cbd5e1", borderRadius: "10px", padding: "18px" }}>
                 <div style={{ fontWeight: "700", fontSize: "14px", color: "#b91c1c", marginBottom: "12px", display: "flex", alignItems: "center", gap: "6px" }}>
-                  <span>🎯</span> Active Security Alert Triggers
+                  <ShieldAlert size={14} style={{ marginRight: "6px" }} /> Active Security Alert Triggers
                 </div>
 
                 <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                   {[
                     {
                       key: "device_quarantined",
-                      title: "🚨 Device Quarantined / Isolated",
+                      title: "Device Quarantined / Isolated",
                       desc: "Triggered when endpoint is moved to VLAN 90 quarantine or isolated by admin",
                     },
                     {
                       key: "rogue_device_detected",
-                      title: "⚠️ Rogue / Unknown LAN Device",
+                      title: "Rogue / Unknown LAN Device",
                       desc: "Triggered when ARP/DHCP discovery finds unregistered MAC or static conflict",
                     },
                     {
                       key: "auth_lockout",
-                      title: "🔒 Brute-Force Account Lockout",
+                      title: "Brute-Force Account Lockout",
                       desc: "Triggered after 3 consecutive failed login attempts on any admin/user account",
                     },
                     {
                       key: "switch_unreachable",
-                      title: "🔌 Network Switch Unreachable",
+                      title: "Network Switch Unreachable",
                       desc: "Triggered when switch drops offline, fails ping, or rejects SSH credentials",
                     },
                     {
                       key: "unauthorized_cli_change",
-                      title: "📜 Switch CLI Drift / Sensitive Discrepancy",
+                      title: "Switch CLI Drift / Sensitive Discrepancy",
                       desc: "Triggered when backup diff discovers unauthorized secrets, VLANs, or trunk changes",
                     },
                   ].map((trig) => {
@@ -10690,7 +10935,7 @@ return (
               {/* CARD 3: EMAIL SMTP CARD */}
               <div style={{ background: "#f8fafc", border: "1px solid #cbd5e1", borderRadius: "10px", padding: "18px" }}>
                 <div style={{ fontWeight: "700", fontSize: "14px", color: "#2563eb", marginBottom: "12px" }}>
-                  📧 Email Gateway (SMTP / Gmail / Office 365)
+                  <Mail size={14} style={{ marginRight: "6px" }} /> Email Gateway (SMTP / Gmail / Office 365)
                 </div>
 
                 <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "10px", marginBottom: "10px" }}>
@@ -10752,7 +10997,7 @@ return (
               {/* CARD 4: SMS GATEWAY CARD */}
               <div style={{ background: "#f8fafc", border: "1px solid #cbd5e1", borderRadius: "10px", padding: "18px" }}>
                 <div style={{ fontWeight: "700", fontSize: "14px", color: "#059669", marginBottom: "12px" }}>
-                  📱 SMS Gateway (Africa&apos;s Talking / Twilio / Webhook)
+                  <Phone size={14} style={{ marginRight: "6px" }} /> SMS Gateway (Africa&apos;s Talking / Twilio / Webhook)
                 </div>
 
                 <div style={{ marginBottom: "10px" }}>
@@ -10841,7 +11086,7 @@ return (
                     });
                     const data = await res.json();
                     if (res.ok) {
-                      setNotifFeedback({ type: "success", text: `✅ ${data.message}` });
+                      setNotifFeedback({ type: "success", text: data.message });
                       loadNotificationSettings();
                     } else {
                       setNotifFeedback({ type: "error", text: data.detail || "Failed to save notification settings." });
@@ -10853,7 +11098,7 @@ return (
                   }
                 }}
               >
-                {notifSaving ? "Saving..." : "💾 Save Webhook & Gateway Settings"}
+                {notifSaving ? "Saving..." : <><Save size={13} style={{ marginRight: "4px" }} /> Save Webhook & Gateway Settings</>}
               </button>
 
               <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
@@ -10862,9 +11107,9 @@ return (
                   onChange={(e) => setNotifTestChannel(e.target.value)}
                   style={{ padding: "8px 10px", background: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "6px", color: "#0f172a", fontSize: "12px" }}
                 >
-                  <option value="webhook">🔔 Test Webhook ({notifForm.webhook_platform || "slack"})</option>
-                  <option value="email">📧 Test Email (SMTP)</option>
-                  <option value="sms">📱 Test SMS Gateway</option>
+                  <option value="webhook">Test Webhook ({notifForm.webhook_platform || "slack"})</option>
+                  <option value="email">Test Email (SMTP)</option>
+                  <option value="sms">Test SMS Gateway</option>
                 </select>
 
                 <input
@@ -10903,8 +11148,8 @@ return (
                         setNotifFeedback({
                           type: data.delivered ? "success" : "error",
                           text: data.delivered
-                            ? `✅ Live ${data.channel.toUpperCase()} test delivered successfully!`
-                            : `❌ Delivery failed: ${data.detail || "Check endpoint credentials."}`,
+                            ? `Live ${data.channel.toUpperCase()} test delivered successfully!`
+                            : `Delivery failed: ${data.detail || "Check endpoint credentials."}`,
                         });
                         loadNotificationSettings();
                       } else {
@@ -10917,7 +11162,7 @@ return (
                     }
                   }}
                 >
-                  {notifTestLoading ? "Sending..." : "🚀 Send Live Test"}
+                  {notifTestLoading ? "Sending..." : <><Send size={13} style={{ marginRight: "4px" }} /> Send Live Test</>}
                 </button>
               </div>
             </div>
@@ -10930,7 +11175,7 @@ return (
             <div className="panel-header">
               <div>
                 <div className="panel-title" style={{ fontSize: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
-                  <span>🔐</span> 802.1X / FreeRADIUS AAA &amp; MAC Authentication Bypass (MAB)
+                  <Lock size={16} style={{ marginRight: "6px" }} /> 802.1X / FreeRADIUS AAA & MAC Authentication Bypass (MAB)
                 </div>
                 <div className="panel-subtitle">
                   Dynamic switch port steering using RFC 2868 / RFC 3580 RADIUS attributes. Steers authorized workstations, VoIP phones, and cameras to their dedicated departmental VLANs while isolating rogue or quarantined devices to VLAN 90.
@@ -10959,7 +11204,7 @@ return (
               {/* CARD 1: SERVER & MAB SETTINGS */}
               <div style={{ background: "#f8fafc", border: "1px solid #cbd5e1", borderRadius: "10px", padding: "18px" }}>
                 <div style={{ fontWeight: "700", fontSize: "14px", color: "#2563eb", marginBottom: "12px", display: "flex", alignItems: "center", gap: "6px" }}>
-                  <span>⚙️</span> FreeRADIUS Server &amp; MAB Format
+                  <Settings size={14} style={{ marginRight: "6px" }} /> FreeRADIUS Server & MAB Format
                 </div>
 
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "10px" }}>
@@ -11016,8 +11261,8 @@ return (
                     onChange={(e) => setRadiusForm({ ...radiusForm, default_unregistered_policy: e.target.value })}
                     style={{ width: "100%", padding: "8px 10px", background: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "6px", color: "#0f172a", fontSize: "12px" }}
                   >
-                    <option value="quarantine">🛡️ Auto-Quarantine to Isolation VLAN 90 (Recommended)</option>
-                    <option value="reject">⛔ Strict Access-Reject (Drop switch port link)</option>
+                    <option value="quarantine">Auto-Quarantine to Isolation VLAN 90 (Recommended)</option>
+                    <option value="reject">Strict Access-Reject (Drop switch port link)</option>
                   </select>
                 </div>
 
@@ -11036,7 +11281,7 @@ return (
                       });
                       const data = await res.json();
                       if (res.ok) {
-                        setRadiusFeedback({ type: "success", text: `✅ ${data.message}` });
+                        setRadiusFeedback({ type: "success", text: data.message });
                         loadRadiusSettings();
                       } else {
                         setRadiusFeedback({ type: "error", text: data.detail || "Failed to save RADIUS settings." });
@@ -11048,14 +11293,14 @@ return (
                     }
                   }}
                 >
-                  {radiusSaving ? "Saving..." : "💾 Save FreeRADIUS Settings"}
+                  {radiusSaving ? "Saving..." : <><Save size={13} style={{ marginRight: "4px" }} /> Save FreeRADIUS Settings</>}
                 </button>
               </div>
 
               {/* CARD 2: LIVE MAB SIMULATOR */}
               <div style={{ background: "#f8fafc", border: "1px solid #cbd5e1", borderRadius: "10px", padding: "18px" }}>
                 <div style={{ fontWeight: "700", fontSize: "14px", color: "#059669", marginBottom: "12px", display: "flex", alignItems: "center", gap: "6px" }}>
-                  <span>🧪</span> Live 802.1X / MAB Authentication Simulator
+                  <FlaskConical size={14} style={{ marginRight: "6px" }} /> Live 802.1X / MAB Authentication Simulator
                 </div>
 
                 <div style={{ fontSize: "12px", color: "#64748b", marginBottom: "12px" }}>
@@ -11115,7 +11360,7 @@ return (
                   }}
                   style={{ marginBottom: "12px" }}
                 >
-                  {radiusSimLoading ? "Simulating..." : "🚀 Simulate 802.1X MAB Auth Request"}
+                  {radiusSimLoading ? "Simulating..." : <><Zap size={13} style={{ marginRight: "4px" }} /> Simulate 802.1X MAB Auth Request</>}
                 </button>
 
                 {radiusSimResult && (
@@ -11144,7 +11389,7 @@ return (
               {/* CARD 3: FREERADIUS CONFIG EXPORTS */}
               <div style={{ background: "#f8fafc", border: "1px solid #cbd5e1", borderRadius: "10px", padding: "18px" }}>
                 <div style={{ fontWeight: "700", fontSize: "14px", color: "#8b5cf6", marginBottom: "12px", display: "flex", alignItems: "center", gap: "6px" }}>
-                  <span>📜</span> FreeRADIUS Policy Files &amp; Synchronization
+                  <FileText size={14} style={{ marginRight: "6px" }} /> FreeRADIUS Policy Files & Synchronization
                 </div>
 
                 <div style={{ fontSize: "12px", color: "#64748b", marginBottom: "14px" }}>
@@ -11169,7 +11414,7 @@ return (
                       }
                     }}
                   >
-                    📄 View &apos;users&apos; Dictionary
+                    <FileText size={12} style={{ marginRight: "4px" }} /> View 'users' Dictionary
                   </button>
                   <button
                     type="button"
@@ -11188,7 +11433,7 @@ return (
                       }
                     }}
                   >
-                    📄 View &apos;clients.conf&apos;
+                    <FileText size={12} style={{ marginRight: "4px" }} /> View 'clients.conf'
                   </button>
                   <button
                     type="button"
@@ -11197,14 +11442,14 @@ return (
                       try {
                         const res = await fetch(`${API_URL}/radius/sync`, { method: "POST", headers: getAuthHeaders() });
                         const data = await res.json();
-                        setRadiusFeedback({ type: "success", text: `✅ ${data.message}` });
+                        setRadiusFeedback({ type: "success", text: data.message });
                         loadRadiusSettings();
                       } catch (err) {
                         alert(err.message);
                       }
                     }}
                   >
-                    🔄 Sync Policy
+                    <RefreshCw size={11} style={{ marginRight: "3px" }} /> Sync Policy
                   </button>
                 </div>
 
@@ -11220,7 +11465,7 @@ return (
                           alert("Copied to clipboard!");
                         }}
                       >
-                        📋 Copy Config
+                        <ClipboardList size={12} style={{ marginRight: "4px" }} /> Copy Config
                       </button>
                     </div>
                     <pre style={{ background: "#0f172a", color: "#e2e8f0", padding: "10px", borderRadius: "6px", fontSize: "11px", maxHeight: "200px", overflowY: "auto", fontFamily: "monospace" }}>
@@ -11238,7 +11483,7 @@ return (
             <div className="panel-header">
               <div>
                 <div className="panel-title" style={{ fontSize: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
-                  <span>❓</span> Frequently Asked Questions (FAQ) &amp; Operational Knowledge Base
+                  <HelpCircle size={16} style={{ marginRight: "6px" }} /> Frequently Asked Questions (FAQ) & Operational Knowledge Base
                 </div>
                 <div className="panel-subtitle">
                   Operational guidance on zero-trust device admission, quarantine enforcement, schedule cycles, endpoint updates &amp; IT services
@@ -11521,7 +11766,7 @@ const Dashboard = () => {
             color: "#1d4ed8",
           }}
         >
-          <span>🔒</span>
+          <Lock size={14} />
           <div>
             <strong>Standard User (Dashboard-Only Mode):</strong> Your account has read-only access to the Network Operations Dashboard. LAN scanning, endpoint updates, report downloads, and administrative settings are restricted to Administrators.
           </div>
@@ -11618,7 +11863,7 @@ const Dashboard = () => {
         >
           <div>
             <div className="panel-title" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <span>🖥️</span>{" "}
+              <Server size={14} />{" "}
               {dashboardDeviceFilter === "offline"
                 ? "Offline Devices"
                 : dashboardDeviceFilter === "online"
@@ -11745,7 +11990,7 @@ const Dashboard = () => {
                 onClick={() => deleteBulkDevices(filteredDashboardDevices.map((d) => d.id))}
                 title={`Permanently delete all ${filteredDashboardDevices.length} ${dashboardDeviceFilter} devices from database`}
               >
-                <span>🗑️</span> {bulkDeleting ? "Deleting..." : `Delete All ${dashboardDeviceFilter.charAt(0).toUpperCase() + dashboardDeviceFilter.slice(1)} (${filteredDashboardDevices.length})`}
+                <Trash2 size={13} /> {bulkDeleting ? "Deleting..." : `Delete All ${dashboardDeviceFilter.charAt(0).toUpperCase() + dashboardDeviceFilter.slice(1)} (${filteredDashboardDevices.length})`}
               </button>
             )}
 
@@ -11759,7 +12004,7 @@ const Dashboard = () => {
               style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontWeight: "600" }}
               title="Open full Inventory management page"
             >
-              <span>▣</span> Full Devices Inventory →
+              <Laptop size={14} /> Full Devices Inventory →
             </button>
 
             {isAdmin && (
@@ -11780,7 +12025,7 @@ const Dashboard = () => {
                   }}
                   title={`Scan all devices connected to ${getConnectedNetworkLabel()}`}
                 >
-                  <span>{lanDevicesScanning ? "⏳" : "📡"}</span>
+                  {lanDevicesScanning ? <RefreshCw size={14} style={{ animation: "spin 1s linear infinite" }} /> : <Radar size={14} />}
                   {lanDevicesScanning ? "Scanning Network..." : `Scan Network (${detectedSubnet || "Auto"})`}
                 </button>
               </div>
@@ -11833,7 +12078,7 @@ const Dashboard = () => {
                 onClick={() => deleteBulkDevices()}
                 title="Permanently delete all selected devices and their associated records (Developer only)"
               >
-                {bulkDeleting ? "Deleting..." : `🗑️ Delete Selected (${selectedDeviceIds.size}) Permanently`}
+                {bulkDeleting ? "Deleting..." : <><Trash2 size={12} style={{ marginRight: "4px" }} /> Delete Selected ({selectedDeviceIds.size}) Permanently</>}
               </button>
             )}
           </div>
@@ -11882,7 +12127,7 @@ const Dashboard = () => {
                 <tr>
                   <td colSpan={isAdmin ? 9 : 8}>
                     <div className="empty-state" style={{ padding: "28px", textAlign: "center" }}>
-                      <div style={{ fontSize: "28px", marginBottom: "6px" }}>🔍</div>
+                      <div style={{ marginBottom: "6px" }}><Search size={28} color="#94a3b8" /></div>
                       <strong style={{ fontSize: "14px", color: "#0f172a" }}>
                         {devices.length === 0
                           ? "No devices detected on this network yet."
@@ -12001,7 +12246,7 @@ const Dashboard = () => {
                                     onClick={() => deviceAction(device.id, "approve")}
                                     disabled={actionLoading === `approve-${device.id}`}
                                   >
-                                    {actionLoading === `approve-${device.id}` ? "..." : "✓ Approve"}
+                                    {actionLoading === `approve-${device.id}` ? "..." : <><Check size={11} style={{ marginRight: "3px" }} /> Approve</>}
                                   </button>
                                   <button
                                     type="button"
@@ -12011,7 +12256,7 @@ const Dashboard = () => {
                                     disabled={actionLoading === `reject-${device.id}`}
                                     title="Reject and block device"
                                   >
-                                    {actionLoading === `reject-${device.id}` ? "..." : "🚫 Block"}
+                                    {actionLoading === `reject-${device.id}` ? "..." : <><Ban size={11} style={{ marginRight: "3px" }} /> Block</>}
                                   </button>
                                 </>
                               )}
@@ -12025,7 +12270,7 @@ const Dashboard = () => {
                                   disabled={actionLoading === `allow-${device.id}`}
                                   title="Authorize Internet Access"
                                 >
-                                  {actionLoading === `allow-${device.id}` ? "..." : "✓ Allow Internet"}
+                                  {actionLoading === `allow-${device.id}` ? "..." : <><Check size={11} style={{ marginRight: "3px" }} /> Allow Internet</>}
                                 </button>
                               )}
 
@@ -12038,7 +12283,7 @@ const Dashboard = () => {
                                   disabled={actionLoading === `block-${device.id}` || actionLoading === `quarantine-${device.id}` || actionLoading === `disallow-${device.id}`}
                                   title="Block Internet Access"
                                 >
-                                  {actionLoading === `block-${device.id}` || actionLoading === `quarantine-${device.id}` || actionLoading === `disallow-${device.id}` ? "..." : "🚫 Block"}
+                                  {actionLoading === `block-${device.id}` || actionLoading === `quarantine-${device.id}` || actionLoading === `disallow-${device.id}` ? "..." : <><Ban size={11} style={{ marginRight: "3px" }} /> Block</>}
                                 </button>
                               )}
 
@@ -12068,7 +12313,7 @@ const Dashboard = () => {
                                   onClick={() => deleteDevicePermanently(device)}
                                   title="Permanently delete device, purging all history. If it connects again, it is treated as a brand new machine. (Developer only)"
                                 >
-                                  {actionLoading === `delete-${device.id}` ? "..." : "🗑️ Delete"}
+                                  {actionLoading === `delete-${device.id}` ? "..." : <><Trash2 size={11} style={{ marginRight: "3px" }} /> Delete</>}
                                 </button>
                               )}
                             </>
@@ -12077,7 +12322,7 @@ const Dashboard = () => {
                               className="status-badge"
                               style={{ background: "#f8fafc", color: "#64748b", fontSize: "11px", border: "1px solid #cbd5e1" }}
                             >
-                              👁️ Monitored
+                              Monitored
                             </span>
                           )}
                         </div>
@@ -12113,7 +12358,7 @@ const Dashboard = () => {
               disabled={lanScanLoading}
               style={{ display: "flex", alignItems: "center", gap: "4px" }}
             >
-              {lanScanLoading ? "⏳ Scanning..." : "⚡ Scan LAN Updates"}
+              {lanScanLoading ? "Scanning..." : <><Zap size={12} style={{ marginRight: "4px" }} /> Scan LAN Updates</>}
             </button>
             <button
               className="secondary-button small"
@@ -12225,7 +12470,7 @@ const Dashboard = () => {
               onClick={() => { loadPatchJobs(); setShowJobsModal(true); }}
               style={{ display: "flex", alignItems: "center", gap: "6px" }}
             >
-              📋 Remediation Jobs ({patchJobs.length})
+              <ClipboardList size={13} style={{ marginRight: "4px" }} /> Remediation Jobs ({patchJobs.length})
             </button>
             <button
               type="button"
@@ -12234,7 +12479,7 @@ const Dashboard = () => {
               disabled={lanScanLoading}
               style={{ display: "flex", alignItems: "center", gap: "6px" }}
             >
-              {lanScanLoading ? "⏳ Scanning..." : "⚡ Scan LAN Updates"}
+              {lanScanLoading ? "Scanning..." : <><Zap size={12} style={{ marginRight: "4px" }} /> Scan LAN Updates</>}
             </button>
           </div>
         </div>
@@ -12354,10 +12599,10 @@ const Dashboard = () => {
                               }}
                             >
                               {activeJob.status === "SCHEDULED"
-                                ? "📅 Scheduled"
+                                ? "Scheduled"
                                 : activeJob.status === "IN_PROGRESS"
-                                ? `⚡ ${activeJob.progress_percent}%`
-                                : "⚡ Queued"}
+                                ? `${activeJob.progress_percent}%`
+                                : "Queued"}
                             </button>
                             {(activeJob.status === "PENDING" || activeJob.status === "SCHEDULED") && isSuperAdmin && (
                               <button
@@ -12395,7 +12640,7 @@ const Dashboard = () => {
                             }}
                             title="Mobile phones (iOS/Android) cannot receive remote network patch pushes. Updates are frozen and managed directly on the phone."
                           >
-                            🔒 Frozen (Phone OTA)
+                            <><Lock size={11} style={{ marginRight: "3px" }} /> Frozen (Phone OTA)</>
                           </span>
                         ) : (endpoint.device_type === "access_point" || endpoint.device_type === "router" || endpoint.device_type === "switch") ? (
                           <span
@@ -12411,7 +12656,7 @@ const Dashboard = () => {
                             }}
                             title="Access Point running firmware on VLAN 60. Firmware is managed on the AP web console."
                           >
-                            📡 AP Firmware (VLAN 60)
+                            <><Radio size={11} style={{ marginRight: "3px" }} /> AP Firmware (VLAN 60)</>
                           </span>
                         ) : isSuperAdmin ? (
                           <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
@@ -12428,7 +12673,7 @@ const Dashboard = () => {
                               onClick={() => openDeployModal(endpoint)}
                               title="Centrally deploy updates to this machine"
                             >
-                              ⚡ Deploy Updates
+                              <Zap size={12} style={{ marginRight: "4px" }} /> Deploy Updates
                             </button>
                           </div>
                         ) : (
@@ -12442,7 +12687,7 @@ const Dashboard = () => {
                             }}
                             title="Admins can monitor updates; deployment is restricted to Developer"
                           >
-                            👁️ View Only
+                            View Only
                           </span>
                         )}
                       </td>
@@ -12485,7 +12730,7 @@ const Dashboard = () => {
             style={{ cursor: isAdmin ? "pointer" : "default" }}
           >
             <div className="summary-card-title">
-              📞 IP Phones
+              <><Phone size={13} style={{ marginRight: "4px" }} /> IP Phones</>
             </div>
 
             <div className="summary-card-value">
@@ -12506,7 +12751,7 @@ const Dashboard = () => {
             style={{ cursor: isAdmin ? "pointer" : "default" }}
           >
             <div className="summary-card-title">
-              💻 Computers
+              <><Laptop size={13} style={{ marginRight: "4px" }} /> Computers</>
             </div>
 
             <div className="summary-card-value">
@@ -12527,7 +12772,7 @@ const Dashboard = () => {
             style={{ cursor: isAdmin ? "pointer" : "default" }}
           >
             <div className="summary-card-title">
-              📹 CCTV
+              <><Camera size={13} style={{ marginRight: "4px" }} /> CCTV</>
             </div>
 
             <div className="summary-card-value">
@@ -12548,7 +12793,7 @@ const Dashboard = () => {
             style={{ cursor: isAdmin ? "pointer" : "default" }}
           >
             <div className="summary-card-title">
-              🖨️ Printers
+              <><Printer size={13} style={{ marginRight: "4px" }} /> Printers</>
             </div>
 
             <div className="summary-card-value">
@@ -12569,7 +12814,7 @@ const Dashboard = () => {
             style={{ cursor: isAdmin ? "pointer" : "default" }}
           >
             <div className="summary-card-title">
-              🗄️ Servers
+              <><Server size={13} style={{ marginRight: "4px" }} /> Servers</>
             </div>
 
             <div className="summary-card-value">
@@ -12590,7 +12835,7 @@ const Dashboard = () => {
             style={{ cursor: isAdmin ? "pointer" : "default" }}
           >
             <div className="summary-card-title">
-              📡 Access Points
+              <><Radio size={13} style={{ marginRight: "4px" }} /> Access Points</>
             </div>
 
             <div className="summary-card-value">
@@ -12611,7 +12856,7 @@ const Dashboard = () => {
             style={{ cursor: isAdmin ? "pointer" : "default" }}
           >
             <div className="summary-card-title">
-              ⚠️ Quarantine
+              <><AlertTriangle size={13} style={{ marginRight: "4px" }} /> Quarantine</>
             </div>
 
             <div className="summary-card-value">
@@ -12938,8 +13183,8 @@ const EndpointUpdatesPage = () => {
               title="Schedule all machines needing updates for their next non-working-hours window"
             >
               {bulkOffHoursLoading
-                ? "⏳ Scheduling Off-Hours..."
-                : `🌙 Schedule All Outside Working Hours (${endpointsWithUpdates})`}
+                ? "Scheduling Off-Hours..."
+                : `Schedule All Outside Working Hours (${endpointsWithUpdates})`}
             </button>
           ) : (
             <span
@@ -12954,7 +13199,7 @@ const EndpointUpdatesPage = () => {
               }}
               title="Deployment is restricted to Developers (Super Admins). Administrators have view-only monitoring rights."
             >
-              🛡️ Remote Deployment: Developer Only
+              <Lock size={12} style={{ marginRight: "4px" }} /> Remote Deployment: Developer Only
             </span>
           )}
           <button
@@ -12966,7 +13211,7 @@ const EndpointUpdatesPage = () => {
             }}
             style={{ display: "flex", alignItems: "center", gap: "6px" }}
           >
-            📋 Update Jobs ({patchJobs.length})
+            <ClipboardList size={13} style={{ marginRight: "4px" }} /> Update Jobs ({patchJobs.length})
           </button>
           <button
             type="button"
@@ -12978,7 +13223,7 @@ const EndpointUpdatesPage = () => {
             disabled={lanScanLoading || endpointUpdatesLoading}
             style={{ display: "flex", alignItems: "center", gap: "6px" }}
           >
-            {lanScanLoading ? "⏳ Scanning LAN..." : "⚡ Scan LAN for Updates (Agentless)"}
+            {lanScanLoading ? "Scanning LAN..." : <><Zap size={13} style={{ marginRight: "4px" }} /> Scan LAN for Updates (Agentless)</>}
           </button>
           <button
             type="button"
@@ -12987,7 +13232,7 @@ const EndpointUpdatesPage = () => {
             style={{ display: "flex", alignItems: "center", gap: "6px", background: "rgba(16, 185, 129, 0.12)", borderColor: "#10b981", color: "#065f46", fontWeight: "700" }}
             title="Download native 1-click update deployment script to physically download and install patches on remote machines"
           >
-            ⚡ 1-Click Client Updater
+            <Zap size={13} style={{ marginRight: "4px" }} /> 1-Click Client Updater
           </button>
           <button
             type="button"
@@ -13020,7 +13265,7 @@ const EndpointUpdatesPage = () => {
             title="Download CSV audit report of all managed endpoints and pending software updates"
             style={{ display: "flex", alignItems: "center", gap: "6px" }}
           >
-            📥 Export Patch CSV
+            <Download size={13} style={{ marginRight: "4px" }} /> Export Patch CSV
           </button>
           <button
             type="button"
@@ -13031,7 +13276,7 @@ const EndpointUpdatesPage = () => {
             }}
             disabled={endpointUpdatesLoading || lanScanLoading || refreshingAll}
           >
-            {endpointUpdatesLoading || refreshingAll ? "Refreshing..." : "🔄 Refresh"}
+            {endpointUpdatesLoading || refreshingAll ? "Refreshing..." : <><RefreshCw size={13} style={{ marginRight: "4px" }} /> Refresh</>}
           </button>
         </div>
       </div>
@@ -13061,12 +13306,12 @@ const EndpointUpdatesPage = () => {
           <div style={{ fontSize: "13px", color: "#0f172a" }}>
             {inProgressJobs.length > 0 ? (
               <span>
-                ⚡ <strong>Actively Installing Updates Now:</strong>{" "}
+                <Zap size={14} color="#f59e0b" style={{ marginRight: "4px" }} /> <strong>Actively Installing Updates Now:</strong>{" "}
                 {inProgressJobs.map((j) => `${j.hostname} (${j.progress_percent}%)`).join(", ")}
               </span>
             ) : scheduledJobs.length > 0 ? (
               <span>
-                ⏸ <strong>No updates are installing right now (Working Hours Active):</strong>{" "}
+                <Pause size={14} color="#94a3b8" style={{ marginRight: "4px" }} /> <strong>No updates are installing right now (Working Hours Active):</strong>{" "}
                 <strong>{scheduledJobs.length}</strong> machine update job{scheduledJobs.length === 1 ? " is" : "s are"}{" "}
                 <strong>SCHEDULED</strong> and waiting for off-working hours (
                 {scheduledJobs[0]?.scheduled_at
@@ -13080,7 +13325,7 @@ const EndpointUpdatesPage = () => {
               </span>
             ) : (
               <span>
-                ⏳ <strong>{pendingQueuedJobs.length}</strong> update job{pendingQueuedJobs.length === 1 ? " is" : "s are"} queued waiting for agent check-in.
+                <Clock size={14} color="#6366f1" style={{ marginRight: "4px" }} /> <strong>{pendingQueuedJobs.length}</strong> update job{pendingQueuedJobs.length === 1 ? " is" : "s are"} queued waiting for agent check-in.
               </span>
             )}
           </div>
@@ -13095,7 +13340,7 @@ const EndpointUpdatesPage = () => {
               setShowJobsModal(true);
             }}
           >
-            📋 View Job Details & Logs
+            <ClipboardList size={13} style={{ marginRight: "4px" }} /> View Job Details & Logs
           </button>
         </div>
       )}
@@ -13113,7 +13358,7 @@ const EndpointUpdatesPage = () => {
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
               <span style={{ fontSize: "15px", fontWeight: "700", color: "#0f172a" }}>
-                🌙 Off-Working Hours Update Scheduling Policy
+                <Moon size={15} style={{ marginRight: "6px" }} /> Off-Working Hours Update Scheduling Policy
               </span>
               <span
                 className={`status-badge ${updatePolicy.auto_off_hours_enabled ? "allowed" : "offline"}`}
@@ -13127,7 +13372,7 @@ const EndpointUpdatesPage = () => {
               </span>
               {updatePolicy.block_working_hours_schedule && (
                 <span className="status-badge warning" style={{ fontSize: "10px" }}>
-                  🛡️ Working-Hours Conflict Guard ON
+                  <ShieldCheck size={13} color="#16a34a" style={{ marginRight: "4px" }} /> Working-Hours Conflict Guard ON
                 </span>
               )}
             </div>
@@ -13163,15 +13408,15 @@ const EndpointUpdatesPage = () => {
               {policySaving
                 ? "Saving..."
                 : updatePolicy.auto_off_hours_enabled
-                ? "⏸ Disable Auto Off-Hours Policy"
-                : "⚡ Enable Auto Off-Hours Updates"}
+                ? "Disable Auto Off-Hours Policy"
+                : "Enable Auto Off-Hours Updates"}
             </button>
             <button
               type="button"
               className="secondary-button small"
               onClick={() => setShowPolicySettings((prev) => !prev)}
             >
-              {showPolicySettings ? "Hide Policy Settings" : "⚙️ Configure Working Hours"}
+              {showPolicySettings ? "Hide Policy Settings" : <><Settings size={13} style={{ marginRight: "4px" }} /> Configure Working Hours</>}
             </button>
           </div>
         </div>
@@ -13486,13 +13731,13 @@ const EndpointUpdatesPage = () => {
                                   : {}
                               }
                             >
-                              {wh.is_working_hours_now ? "🏢 IN WORKING HOURS" : "🌙 OFF-WORKING HOURS"}
+                              {wh.is_working_hours_now ? "IN WORKING HOURS" : "OFF-WORKING HOURS"}
                             </span>
                             <div style={{ fontSize: "11px", color: "#334155", marginTop: "3px" }}>
                               Work: <strong>{wh.start_time}–{wh.end_time}</strong> ({wh.days})
                             </div>
                             <div style={{ fontSize: "10px", color: "#475569" }}>
-                              {wh.source === "device_access_schedule" ? "📋 Device Access Schedule" : "🌐 Default Policy"} • Next Off-Hours: <strong style={{ color: "#4338ca" }}>{wh.next_off_hours_display}</strong>
+                              {wh.source === "device_access_schedule" ? "Device Access Schedule" : "Default Policy"} • Next Off-Hours: <strong style={{ color: "#4338ca" }}>{wh.next_off_hours_display}</strong>
                             </div>
                           </div>
                         ) : (
@@ -13564,10 +13809,10 @@ const EndpointUpdatesPage = () => {
                               }}
                             >
                               {activeJob.status === "SCHEDULED"
-                                ? `📅 Scheduled (${activeJob.scheduled_at ? new Date(activeJob.scheduled_at.endsWith("Z") ? activeJob.scheduled_at : activeJob.scheduled_at + "Z").toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "Off-Hours"})`
+                                ? `Scheduled (${activeJob.scheduled_at ? new Date(activeJob.scheduled_at.endsWith("Z") ? activeJob.scheduled_at : activeJob.scheduled_at + "Z").toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "Off-Hours"})`
                                 : activeJob.status === "IN_PROGRESS"
-                                ? `⚡ Updating ${activeJob.progress_percent}%`
-                                : "⚡ Queued"}
+                                ? `Updating ${activeJob.progress_percent}%`
+                                : "Queued"}
                             </button>
                             {(activeJob.status === "PENDING" || activeJob.status === "SCHEDULED") && isSuperAdmin && (
                               <div style={{ display: "flex", gap: "4px" }}>
@@ -13598,7 +13843,7 @@ const EndpointUpdatesPage = () => {
                                   onClick={() => openDeployModal(endpoint, "off_hours")}
                                   title="Change scheduled time"
                                 >
-                                  🕒 Reschedule
+                                  <Clock size={11} style={{ marginRight: "3px" }} /> Reschedule
                                 </button>
                               </div>
                             )}
@@ -13618,7 +13863,7 @@ const EndpointUpdatesPage = () => {
                             }}
                             title="Mobile phones (iOS/Android) cannot receive remote network patch pushes. Updates are frozen and managed directly on the phone."
                           >
-                            🔒 Frozen (Phone OTA)
+                            <><Lock size={11} style={{ marginRight: "3px" }} /> Frozen (Phone OTA)</>
                           </span>
                         ) : (endpoint.device_type === "access_point" || endpoint.device_type === "router" || endpoint.device_type === "switch") ? (
                           <span
@@ -13634,7 +13879,7 @@ const EndpointUpdatesPage = () => {
                             }}
                             title="Access Point running firmware on VLAN 60. Firmware is managed on the AP web console."
                           >
-                            📡 AP Firmware (VLAN 60)
+                            <><Radio size={11} style={{ marginRight: "3px" }} /> AP Firmware (VLAN 60)</>
                           </span>
                         ) : isSuperAdmin ? (
                           <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
@@ -13651,7 +13896,7 @@ const EndpointUpdatesPage = () => {
                               onClick={() => openDeployModal(endpoint, "off_hours")}
                               title="Schedule updates when this machine is outside working hours"
                             >
-                              🌙 Schedule Off-Hours
+                              <Moon size={11} style={{ marginRight: "3px" }} /> Schedule Off-Hours
                             </button>
                             <button
                               type="button"
@@ -13666,7 +13911,7 @@ const EndpointUpdatesPage = () => {
                               onClick={() => openDeployModal(endpoint, "now")}
                               title="Open deployment options"
                             >
-                              ⚡ Deploy
+                              <Zap size={11} style={{ marginRight: "3px" }} /> Deploy
                             </button>
                             {completedJob && completedJob.installed_updates && completedJob.installed_updates.length > 0 && (
                               <button
@@ -13686,7 +13931,7 @@ const EndpointUpdatesPage = () => {
                                 }}
                                 title="View updates and patches applied to this computer"
                               >
-                                📦 Applied Updates ({completedJob.installed_updates.length})
+                                <Package size={11} style={{ marginRight: "3px" }} /> Applied Updates ({completedJob.installed_updates.length})
                               </button>
                             )}
                           </div>
@@ -13702,7 +13947,7 @@ const EndpointUpdatesPage = () => {
                             }}
                             title="Admins have view-only monitoring access. Remote deployment is restricted to Developer (Super Admin)."
                           >
-                            👁️ View Only (Deploy Restricted)
+                            View Only (Deploy Restricted)
                           </span>
                         )}
                       </td>
@@ -13823,7 +14068,7 @@ const EndpointUpdatesPage = () => {
                     setDeployingStatus(null);
                   }}
                 >
-                  ✕
+                  <X size={18} />
                 </button>
               </div>
 
@@ -13860,7 +14105,7 @@ const EndpointUpdatesPage = () => {
                   <div>
                     <span style={{ fontSize: "11px", color: "#64748b", textTransform: "uppercase" }}>Pending Patches</span>
                     <div style={{ color: "#f59e0b", fontWeight: "700", fontSize: "13px", marginTop: "2px" }}>
-                      ⚠️ {deployModalDevice.pending_updates ?? "Available"} Updates Pending
+                      <AlertTriangle size={15} color="#d97706" style={{ marginRight: "6px" }} /> {deployModalDevice.pending_updates ?? "Available"} Updates Pending
                     </div>
                   </div>
                 </div>
@@ -13887,8 +14132,8 @@ const EndpointUpdatesPage = () => {
                     <div>
                       <div style={{ fontSize: "12px", fontWeight: "700", color: modalWorkingHours.is_working_hours_now ? "#fbbf24" : "#a5b4fc" }}>
                         {modalWorkingHours.is_working_hours_now
-                          ? "🏢 Machine is Currently in Working Hours"
-                          : "🌙 Machine is Currently Outside Working Hours"}
+                          ? "Machine is Currently in Working Hours"
+                          : "Machine is Currently Outside Working Hours"}
                       </div>
                       <div style={{ fontSize: "11px", color: "#334155", marginTop: "2px" }}>
                         Working Hours: <strong>{modalWorkingHours.start_time}–{modalWorkingHours.end_time}</strong> ({modalWorkingHours.days}) •{" "}
@@ -13943,7 +14188,7 @@ const EndpointUpdatesPage = () => {
                       />
                       <div>
                         <div style={{ fontSize: "12px", fontWeight: "700", color: scheduleMode === "off_hours" ? "#c7d2fe" : "#f1f5f9" }}>
-                          🌙 Outside Work Hours
+                          <Moon size={12} style={{ marginRight: "4px" }} /> Outside Work Hours
                         </div>
                         <div style={{ fontSize: "10px", color: "#475569" }}>
                           Auto after-work window
@@ -13987,7 +14232,7 @@ const EndpointUpdatesPage = () => {
                       />
                       <div>
                         <div style={{ fontSize: "12px", fontWeight: "700", color: scheduleMode === "scheduled" ? "#93c5fd" : "#f1f5f9" }}>
-                          📅 Custom Time
+                          <Calendar size={12} style={{ marginRight: "4px" }} /> Custom Time
                         </div>
                         <div style={{ fontSize: "10px", color: "#475569" }}>
                           Pick date & time
@@ -14020,7 +14265,7 @@ const EndpointUpdatesPage = () => {
                       />
                       <div>
                         <div style={{ fontSize: "12px", fontWeight: "700", color: scheduleMode === "now" ? "#34d399" : "#f1f5f9" }}>
-                          ⚡ Deploy Now
+                          <Zap size={11} style={{ marginRight: "3px" }} /> Deploy Now
                         </div>
                         <div style={{ fontSize: "10px", color: "#475569" }}>
                           Run immediately
@@ -14032,7 +14277,7 @@ const EndpointUpdatesPage = () => {
                   {scheduleMode === "off_hours" && (
                     <div style={{ marginTop: "12px", background: "#f8fafc", border: "1px solid #c7d2fe", borderRadius: "6px", padding: "12px" }}>
                       <div style={{ fontSize: "11px", color: "#4338ca", marginBottom: "6px", fontWeight: "700", textTransform: "uppercase" }}>
-                        🌙 Scheduled Non-Working Hours Maintenance Window
+                        <Moon size={14} style={{ marginRight: "6px" }} /> Scheduled Non-Working Hours Maintenance Window
                       </div>
                       <div style={{ fontSize: "12px", color: "#334155", marginBottom: "10px" }}>
                         Updates will be automatically held during working hours (
@@ -14169,7 +14414,7 @@ const EndpointUpdatesPage = () => {
                           }}
                         >
                           <div style={{ fontWeight: "700", marginBottom: "4px" }}>
-                            ⚠️ Working Hours Conflict Detected
+                            <AlertTriangle size={15} color="#d97706" style={{ marginRight: "6px" }} /> Working Hours Conflict Detected
                           </div>
                           <div>
                             The selected time falls within this machine&apos;s working hours (
@@ -14191,7 +14436,7 @@ const EndpointUpdatesPage = () => {
                                 }
                               }}
                             >
-                              🌙 Shift to Next Off-Hours Slot ({modalScheduleCheck.suggested_off_hours_display})
+                              <Moon size={12} style={{ marginRight: "4px" }} /> Shift to Next Off-Hours Slot ({modalScheduleCheck.suggested_off_hours_display})
                             </button>
                             <label style={{ fontSize: "11px", color: "#334155", display: "flex", alignItems: "center", gap: "5px", cursor: "pointer" }}>
                               <input
@@ -14290,7 +14535,7 @@ const EndpointUpdatesPage = () => {
                       }}
                     >
                       <div>
-                        ⚠️ This machine is currently in active working hours ({modalWorkingHours.start_time}–{modalWorkingHours.end_time}).
+                        This machine is currently in active working hours ({modalWorkingHours.start_time}–{modalWorkingHours.end_time}).
                       </div>
                       <button
                         type="button"
@@ -14303,7 +14548,7 @@ const EndpointUpdatesPage = () => {
                           }
                         }}
                       >
-                        🌙 Switch to Off-Hours
+                        <Moon size={12} style={{ marginRight: "4px" }} /> Switch to Off-Hours
                       </button>
                     </div>
                   )}
@@ -14324,7 +14569,7 @@ const EndpointUpdatesPage = () => {
                   >
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                        <span style={{ fontSize: "16px" }}>🔐</span>
+                        <Lock size={16} />
                         <div>
                           <div style={{ fontWeight: "600", fontSize: "13px", color: "#e2e8f0" }}>
                             Direct Network Push Credentials
@@ -14421,8 +14666,8 @@ const EndpointUpdatesPage = () => {
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "4px" }}>
                           <div style={{ fontSize: "11px", color: "#64748b" }}>
                             {remotePushProtocol === "winrm"
-                              ? "💡 Windows PC requires WinRM enabled ('winrm quickconfig')."
-                              : "💡 Linux machine requires SSH service running."}
+                              ? "Windows PC requires WinRM enabled ('winrm quickconfig')."
+                              : "Linux machine requires SSH service running."}
                           </div>
                           <button
                             type="button"
@@ -14431,7 +14676,7 @@ const EndpointUpdatesPage = () => {
                             onClick={handleTestRemoteConnection}
                             disabled={remotePushTesting || !remotePushUsername}
                           >
-                            {remotePushTesting ? "⏳ Testing..." : "🔌 Test Connection"}
+                            {remotePushTesting ? "Testing..." : <><Cable size={12} style={{ marginRight: "4px" }} /> Test Connection</>}
                           </button>
                         </div>
 
@@ -14447,7 +14692,7 @@ const EndpointUpdatesPage = () => {
                               color: remotePushTestResult.connected ? "#34d399" : "#f87171",
                             }}
                           >
-                            {remotePushTestResult.connected ? "✓ " : "✕ "}
+                            {remotePushTestResult.connected ? "Connected " : "Failed "}
                             {remotePushTestResult.message}
                             {remotePushTestResult.os_info && ` (${remotePushTestResult.os_info})`}
                           </div>
@@ -14474,11 +14719,11 @@ const EndpointUpdatesPage = () => {
                     deployModalDevice.ip_address === "127.0.0.1" ||
                     ["192.168.0.111", "192.168.0.107", "192.168.0.101"].includes(deployModalDevice.ip_address)) ? (
                     <div>
-                      🖥️ <strong>Local Machine Remediation:</strong> {scheduleMode !== "now" ? "Updates will be queued and automatically triggered using the native package manager (apt-get upgrade -y) during the non-working hours maintenance window." : "Updates will be applied immediately using the native package manager (apt-get upgrade -y)."}
+                      <Laptop size={14} style={{ marginRight: "4px" }} /> <strong>Local Machine Remediation:</strong> {scheduleMode !== "now" ? "Updates will be queued and automatically triggered using the native package manager (apt-get upgrade -y) during the non-working hours maintenance window." : "Updates will be applied immediately using the native package manager (apt-get upgrade -y)."}
                     </div>
                   ) : (
                     <div>
-                      📡 <strong>LAN Remote Remediation:</strong> {remotePushEnabled ? "NetOps will connect directly over the network via " + (remotePushProtocol === "winrm" ? "WinRM (Windows Update engine)" : remotePushProtocol === "ssh" ? "SSH (native package manager)" : "WinRM/SSH") + " to download and install updates directly on the target machine." : (scheduleMode !== "now" ? "An update job will be queued in SCHEDULED state for the non-working hours window. Once the off-hours window arrives, it will activate for the endpoint." : "An update installation job will be dispatched. You can also run the 1-click NetOps Update Agent on the target machine to install updates natively.")}
+                      <Radio size={14} style={{ marginRight: "4px" }} /> <strong>LAN Remote Remediation:</strong> {remotePushEnabled ? "NetOps will connect directly over the network via " + (remotePushProtocol === "winrm" ? "WinRM (Windows Update engine)" : remotePushProtocol === "ssh" ? "SSH (native package manager)" : "WinRM/SSH") + " to download and install updates directly on the target machine." : (scheduleMode !== "now" ? "An update job will be queued in SCHEDULED state for the non-working hours window. Once the off-hours window arrives, it will activate for the endpoint." : "An update installation job will be dispatched. You can also run the 1-click NetOps Update Agent on the target machine to install updates natively.")}
                     </div>
                   )}
                 </div>
@@ -14500,7 +14745,7 @@ const EndpointUpdatesPage = () => {
                 >
                   <div>
                     <div style={{ fontSize: "12px", fontWeight: "600", color: "#34d399", marginBottom: "2px" }}>
-                      ⚡ Alternative: 1-Click Client Updater (No WinRM / Firewall Setup)
+                      <Zap size={14} style={{ marginRight: "4px" }} /> Alternative: 1-Click Client Updater (No WinRM / Firewall Setup)
                     </div>
                     <div style={{ fontSize: "11px", color: "#94a3b8" }}>
                       Works across the cloud or local LAN by running directly on the machine.
@@ -14525,7 +14770,7 @@ const EndpointUpdatesPage = () => {
                       }}
                       download={(deployModalDevice?.os_type || "").toLowerCase().includes("win") ? "install_windows_updates.bat" : "install_linux_updates.sh"}
                     >
-                      📥 Download {(deployModalDevice?.os_type || "").toLowerCase().includes("win") ? "install_windows_updates.bat" : "install_linux_updates.sh"}
+                      <Download size={13} style={{ marginRight: "4px" }} /> Download {(deployModalDevice?.os_type || "").toLowerCase().includes("win") ? "install_windows_updates.bat" : "install_linux_updates.sh"}
                     </a>
                     <button
                       type="button"
@@ -14540,7 +14785,7 @@ const EndpointUpdatesPage = () => {
                       }}
                       onClick={() => setShowClientUpdaterModal(true)}
                     >
-                      📋 PowerShell / Bash Commands
+                      <ClipboardList size={13} style={{ marginRight: "4px" }} /> PowerShell / Bash Commands
                     </button>
                   </div>
                 </div>
@@ -14597,14 +14842,14 @@ const EndpointUpdatesPage = () => {
                     }}
                   >
                     {isPhoneDevice(deployModalDevice)
-                      ? "🔒 Updates Frozen for Phones (Mobile OTA Only)"
+                      ? "Updates Frozen for Phones (Mobile OTA Only)"
                       : deployingStatus === "dispatching"
-                      ? (scheduleMode !== "now" ? "⏳ Scheduling Off-Hours Job..." : "⏳ Queueing Update Job...")
+                      ? (scheduleMode !== "now" ? "Scheduling Off-Hours Job..." : "Queueing Update Job...")
                       : scheduleMode === "off_hours"
-                      ? "🌙 Confirm & Schedule Outside Working Hours"
+                      ? "Confirm & Schedule Outside Working Hours"
                       : scheduleMode === "scheduled"
-                      ? "📅 Confirm & Schedule Updates"
-                      : "⚡ Confirm & Deploy Updates"}
+                      ? "Confirm & Schedule Updates"
+                      : "Confirm & Deploy Updates"}
                   </button>
                 </div>
               </div>
@@ -14638,7 +14883,7 @@ const EndpointUpdatesPage = () => {
                   }}
                   onClick={() => setShowJobsModal(false)}
                 >
-                  ✕
+                  <X size={18} />
                 </button>
               </div>
 
@@ -14669,15 +14914,15 @@ const EndpointUpdatesPage = () => {
                             Job #{job.id} — {job.hostname} ({job.ip_address || "LAN"})
                           </div>
                           <div style={{ fontSize: "12px", color: "#475569", marginTop: "2px" }}>
-                            {job.is_local ? "🖥️ Local Host Execution" : "📡 Remote Agent Queue"} • {job.created_at ? new Date(job.created_at.endsWith("Z") ? job.created_at : job.created_at + "Z").toLocaleTimeString() : ""}
+                            {job.is_local ? "Local Host Execution" : "Remote Agent Queue"} • {job.created_at ? new Date(job.created_at.endsWith("Z") ? job.created_at : job.created_at + "Z").toLocaleTimeString() : ""}
                             {job.scheduled_at && (
                               <span style={{ color: "#4338ca", marginLeft: "6px" }}>
-                                • 📅 Scheduled: {new Date(job.scheduled_at.endsWith("Z") ? job.scheduled_at : job.scheduled_at + "Z").toLocaleString()}
+                                • Scheduled: {new Date(job.scheduled_at.endsWith("Z") ? job.scheduled_at : job.scheduled_at + "Z").toLocaleString()}
                               </span>
                             )}
                             {job.installed_updates && job.installed_updates.length > 0 && (
                               <span style={{ color: "#059669", fontWeight: "700", marginLeft: "6px" }}>
-                                • 📦 {job.installed_updates.length} Patches Applied
+                                • {job.installed_updates.length} Patches Applied
                               </span>
                             )}
                           </div>
@@ -14703,7 +14948,7 @@ const EndpointUpdatesPage = () => {
                             {job.status === "IN_PROGRESS"
                               ? `UPDATING ${job.progress_percent}%`
                               : job.status === "SCHEDULED"
-                              ? "📅 SCHEDULED"
+                              ? "SCHEDULED"
                               : job.status}
                           </span>
 
@@ -14757,7 +15002,7 @@ const EndpointUpdatesPage = () => {
                               }}
                               title="Restart or retry this update job"
                             >
-                              🔄 Retry Update
+                              <RefreshCw size={12} style={{ marginRight: "4px" }} /> Retry Update
                             </button>
                           )}
                         </div>
@@ -14780,7 +15025,7 @@ const EndpointUpdatesPage = () => {
                     {selectedJobDetails.status === "SCHEDULED" && (
                       <div style={{ background: "rgba(99, 102, 241, 0.1)", border: "1px solid #4f46e5", borderRadius: "6px", padding: "10px 12px", marginBottom: "12px", fontSize: "12px", color: "#4338ca", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px" }}>
                         <div>
-                          <strong>📅 Scheduled Maintenance Window:</strong> Updates for <strong>{selectedJobDetails.hostname}</strong> are scheduled to run at <strong>{selectedJobDetails.scheduled_at ? new Date(selectedJobDetails.scheduled_at.endsWith("Z") ? selectedJobDetails.scheduled_at : selectedJobDetails.scheduled_at + "Z").toLocaleString() : "the scheduled time"}</strong>.
+                          <strong>Scheduled Maintenance Window:</strong> Updates for <strong>{selectedJobDetails.hostname}</strong> are scheduled to run at <strong>{selectedJobDetails.scheduled_at ? new Date(selectedJobDetails.scheduled_at.endsWith("Z") ? selectedJobDetails.scheduled_at : selectedJobDetails.scheduled_at + "Z").toLocaleString() : "the scheduled time"}</strong>.
                         </div>
                         {isSuperAdmin ? (
                           <div style={{ display: "flex", gap: "8px", flexShrink: 0 }}>
@@ -14826,7 +15071,7 @@ const EndpointUpdatesPage = () => {
                     {selectedJobDetails.status === "PENDING" && (
                       <div style={{ background: "rgba(59, 130, 246, 0.1)", border: "1px solid #1d4ed8", borderRadius: "6px", padding: "10px 12px", marginBottom: "12px", fontSize: "12px", color: "#1d4ed8", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px" }}>
                         <div>
-                          <strong>⏳ Queued for Updates:</strong> This command is waiting in queue for <strong>{selectedJobDetails.hostname}</strong> ({selectedJobDetails.ip_address || "LAN"}).
+                          <strong>Queued for Updates:</strong> This command is waiting in queue for <strong>{selectedJobDetails.hostname}</strong> ({selectedJobDetails.ip_address || "LAN"}).
                         </div>
                         {isSuperAdmin ? (
                           <div style={{ display: "flex", gap: "8px", flexShrink: 0 }}>
@@ -14872,7 +15117,7 @@ const EndpointUpdatesPage = () => {
                     {(selectedJobDetails.status === "CANCELLED" || selectedJobDetails.status === "FAILED") && (
                       <div style={{ background: "rgba(239, 68, 68, 0.1)", border: "1px solid #b91c1c", borderRadius: "6px", padding: "10px 12px", marginBottom: "12px", fontSize: "12px", color: "#b91c1c", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px" }}>
                         <div>
-                          <strong>{selectedJobDetails.status === "CANCELLED" ? "✕ Update Job Cancelled:" : "⚠️ Update Job Failed:"}</strong> You can restart and continue update deployment anytime.
+                          <strong>{selectedJobDetails.status === "CANCELLED" ? "Update Job Cancelled:" : "Update Job Failed:"}</strong> You can restart and continue update deployment anytime.
                         </div>
                         <button
                           type="button"
@@ -14882,7 +15127,7 @@ const EndpointUpdatesPage = () => {
                             await runJobNow(selectedJobDetails.id);
                           }}
                         >
-                          🔄 Restart / Retry Update
+                          <RefreshCw size={12} style={{ marginRight: "4px" }} /> Restart / Retry Update
                         </button>
                       </div>
                     )}
@@ -14892,16 +15137,16 @@ const EndpointUpdatesPage = () => {
                         <span style={{ display: "inline-block", width: "8px", height: "8px", borderRadius: "50%", background: "#f59e0b", animation: "pulse 1.5s infinite" }} />
                         <span>
                           {selectedJobDetails.progress_percent >= 97
-                            ? "⚙️ Running post-installation triggers & finalizing system configuration..."
+                            ? "Running post-installation triggers & finalizing system configuration..."
                             : selectedJobDetails.progress_percent >= 88
-                            ? "📦 Configuring and setting up packages on system..."
+                            ? "Configuring and setting up packages on system..."
                             : selectedJobDetails.progress_percent >= 78
-                            ? "📂 Unpacking packages & preparing dependencies..."
+                            ? "Unpacking packages & preparing dependencies..."
                             : selectedJobDetails.progress_percent >= 70
                             ? "⬇️ Downloading update archives from repositories..."
                             : selectedJobDetails.progress_percent >= 50
-                            ? "🔍 Evaluating pending updates and dependency tree..."
-                            : "⚡ Initializing package deployment..."}
+                            ? "Evaluating pending updates and dependency tree..."
+                            : "Initializing package deployment..."}
                         </span>
                       </div>
                     )}
@@ -14925,7 +15170,7 @@ const EndpointUpdatesPage = () => {
                       <div style={{ marginBottom: "14px", background: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "8px", padding: "14px" }}>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px", paddingBottom: "8px", borderBottom: "1px solid #e2e8f0" }}>
                           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                            <span style={{ fontSize: "16px" }}>📦</span>
+                            <Package size={16} />
                             <span style={{ fontSize: "13px", fontWeight: "700", color: "#0f172a" }}>
                               Updates & Patches Applied to {selectedJobDetails.hostname}
                             </span>
@@ -14934,7 +15179,7 @@ const EndpointUpdatesPage = () => {
                             </span>
                           </div>
                           <span style={{ fontSize: "11px", color: "#059669", fontWeight: "700", background: "rgba(16, 185, 129, 0.1)", padding: "2px 8px", borderRadius: "12px", border: "1px solid rgba(16, 185, 129, 0.3)" }}>
-                            ✓ Verified & Active
+                            <CheckCircle2 size={13} color="#16a34a" style={{ marginRight: "4px" }} /> Verified & Active
                           </span>
                         </div>
                         <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "260px", overflowY: "auto" }}>
@@ -15242,7 +15487,7 @@ const EndpointUpdatesPage = () => {
                 NETWORK DIAGNOSTICS &amp; ROOT CAUSE ANALYSIS
               </div>
               <div className="automation-title" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <span>🩺</span>
+                <Stethoscope size={18} />
                 Troubleshoot: {dev.hostname || dev.ip_address || `Device #${dev.id}`}
               </div>
             </div>
@@ -15261,7 +15506,7 @@ const EndpointUpdatesPage = () => {
                 setTroubleshootError(null);
               }}
             >
-              ✕
+              <X size={18} />
             </button>
           </div>
 
@@ -15309,8 +15554,8 @@ const EndpointUpdatesPage = () => {
           <div style={{ overflowY: "auto", flex: 1, paddingRight: "4px" }}>
             {troubleshootLoading && (
               <div style={{ textAlign: "center", padding: "40px 16px" }}>
-                <div style={{ fontSize: "36px", marginBottom: "12px" }}>
-                  ⏳
+                <div style={{ marginBottom: "12px" }}>
+                  <Clock size={36} className="spin" color="#6366f1" />
                 </div>
                 <div style={{ fontWeight: "700", fontSize: "16px", color: "#0f172a" }}>
                   Running Multi-Layer Diagnostic Suite...
@@ -15354,14 +15599,14 @@ const EndpointUpdatesPage = () => {
                   }}
                 >
                   <div style={{ display: "flex", alignItems: "center", gap: "8px", fontWeight: "700", fontSize: "15px", color: "#0f172a" }}>
-                    <span>
+                    <span style={{ display: "inline-flex", alignItems: "center" }}>
                       {res.diagnosed_status === "online_reachable"
-                        ? "✅"
+                        ? <CheckCircle2 size={16} color="#16a34a" />
                         : res.diagnosed_status === "ip_mismatch"
-                        ? "🔄"
+                        ? <RefreshCw size={16} color="#3b82f6" />
                         : res.diagnosed_status === "firewall_icmp_blocked"
-                        ? "🛡️"
-                        : "🔴"}
+                        ? <ShieldAlert size={16} color="#ef4444" />
+                        : <AlertTriangle size={16} color="#ef4444" />}
                     </span>
                     {res.verdict}
                   </div>
@@ -15388,7 +15633,7 @@ const EndpointUpdatesPage = () => {
                   >
                     <div>
                       <div style={{ fontWeight: "700", color: "#1e3a8a", fontSize: "13px" }}>
-                        ⚡ Recommended Automated Fix Available
+                        <Zap size={14} color="#f59e0b" style={{ marginRight: "4px" }} /> Recommended Automated Fix Available
                       </div>
                       <div style={{ fontSize: "12px", color: "#334155", marginTop: "2px" }}>
                         {res.suggested_fix_action}
@@ -15402,7 +15647,7 @@ const EndpointUpdatesPage = () => {
                         disabled={troubleshootFixLoading}
                         onClick={() => handleApplyTroubleshootFix("update_ip", res.detected_ip)}
                       >
-                        {troubleshootFixLoading ? "Applying Fix..." : `🔄 Apply Detected IP (${res.detected_ip})`}
+                        {troubleshootFixLoading ? "Applying Fix..." : `Apply Detected IP (${res.detected_ip})`}
                       </button>
                     )}
                     {!res.detected_ip && (
@@ -15413,7 +15658,7 @@ const EndpointUpdatesPage = () => {
                         disabled={troubleshootFixLoading}
                         onClick={() => handleApplyTroubleshootFix("mark_online")}
                       >
-                        {troubleshootFixLoading ? "Synchronizing..." : "✓ Mark ONLINE in Inventory"}
+                        {troubleshootFixLoading ? "Synchronizing..." : "Mark ONLINE in Inventory"}
                       </button>
                     )}
                   </div>
@@ -15423,7 +15668,7 @@ const EndpointUpdatesPage = () => {
                 {res.probable_causes && res.probable_causes.length > 0 && (
                   <div style={{ marginBottom: "16px" }}>
                     <div style={{ fontWeight: "700", fontSize: "13px", color: "#991b1b", marginBottom: "6px", display: "flex", alignItems: "center", gap: "6px" }}>
-                      <span>⚠️</span> Probable Causes Identified:
+                      <AlertTriangle size={15} color="#d97706" style={{ marginRight: "6px" }} /> Probable Causes Identified:
                     </div>
                     <ul style={{ margin: 0, paddingLeft: "20px", fontSize: "12px", color: "#334155", lineHeight: "1.6" }}>
                       {res.probable_causes.map((c, i) => (
@@ -15437,7 +15682,7 @@ const EndpointUpdatesPage = () => {
                 {res.recommendations && res.recommendations.length > 0 && (
                   <div style={{ marginBottom: "16px" }}>
                     <div style={{ fontWeight: "700", fontSize: "13px", color: "#1e40af", marginBottom: "6px", display: "flex", alignItems: "center", gap: "6px" }}>
-                      <span>💡</span> Recommended Action Steps:
+                      <Lightbulb size={15} color="#d97706" style={{ marginRight: "6px" }} /> Recommended Action Steps:
                     </div>
                     <ol style={{ margin: 0, paddingLeft: "20px", fontSize: "12px", color: "#334155", lineHeight: "1.6" }}>
                       {res.recommendations.map((r, i) => (
@@ -15450,7 +15695,7 @@ const EndpointUpdatesPage = () => {
                 {/* Detailed Diagnostic Checks Matrix */}
                 <div>
                   <div style={{ fontWeight: "700", fontSize: "13px", color: "#0f172a", marginBottom: "8px" }}>
-                    📋 Diagnostic Test Results (Multi-Layer Verification):
+                    <ClipboardList size={15} style={{ marginRight: "6px" }} /> Diagnostic Test Results (Multi-Layer Verification):
                   </div>
                   <table className="data-table" style={{ fontSize: "12px" }}>
                     <thead>
@@ -15509,7 +15754,7 @@ const EndpointUpdatesPage = () => {
               disabled={troubleshootLoading || troubleshootFixLoading}
               onClick={() => handleRunTroubleshoot(dev)}
             >
-              🔄 Re-run Diagnostics
+              <RefreshCw size={13} style={{ marginRight: "4px" }} /> Re-run Diagnostics
             </button>
             <button
               type="button"
@@ -15570,10 +15815,10 @@ const EndpointUpdatesPage = () => {
           <div className="automation-modal-header" style={{ borderBottom: "1px solid #e2e8f0", paddingBottom: "12px" }}>
             <div>
               <div className="automation-label" style={{ color: "#dc2626", fontWeight: "800", fontSize: "11px", letterSpacing: "0.5px" }}>
-                🛡️ ZERO-TRUST FIRMWARE &amp; OS VULNERABILITY AUDIT
+                <ShieldAlert size={18} style={{ marginRight: "8px" }} /> ZERO-TRUST FIRMWARE & OS VULNERABILITY AUDIT
               </div>
               <div className="automation-title" style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "18px" }}>
-                <span>🔍</span>
+                <Search size={14} />
                 CVE Security Scan: {dev.hostname || dev.ip_address || `Device #${dev.id}`}
               </div>
             </div>
@@ -15602,14 +15847,14 @@ const EndpointUpdatesPage = () => {
 
             {cveLoading && (
               <div style={{ textAlign: "center", padding: "36px 16px", color: "#64748b" }}>
-                <div style={{ fontSize: "28px", marginBottom: "8px" }}>⏳</div>
+                <div style={{ marginBottom: "8px" }}><Clock size={28} className="spin" color="#6366f1" /></div>
                 <div style={{ fontWeight: "600", fontSize: "14px" }}>Correlating device firmware, services &amp; OS against CVE knowledge base...</div>
               </div>
             )}
 
             {cveError && (
               <div style={{ padding: "12px 16px", borderRadius: "8px", background: "#fef2f2", border: "1px solid #fecaca", color: "#991b1b", fontSize: "13px" }}>
-                ❌ {cveError}
+                <AlertTriangle size={14} color="#ef4444" style={{ marginRight: "4px" }} /> {cveError}
               </div>
             )}
 
@@ -15622,7 +15867,7 @@ const EndpointUpdatesPage = () => {
                       Overall Device Threat Level
                     </div>
                     <div style={{ fontSize: "22px", fontWeight: "900", color: riskTheme.text, display: "flex", alignItems: "center", gap: "8px" }}>
-                      <span>{res.overall_risk === "CLEAN" ? "✅" : "⚠️"}</span>
+                      {res.overall_risk === "CLEAN" ? <CheckCircle2 size={16} color="#16a34a" /> : <AlertTriangle size={16} color="#ef4444" />}
                       {res.overall_risk} RISK
                     </div>
                     <div style={{ fontSize: "12px", color: riskTheme.text, marginTop: "2px" }}>
@@ -15639,12 +15884,12 @@ const EndpointUpdatesPage = () => {
 
                 {/* Findings List */}
                 <div style={{ fontSize: "14px", fontWeight: "800", color: "#0f172a", marginBottom: "12px", display: "flex", alignItems: "center", gap: "6px" }}>
-                  <span>📋</span> Vulnerability Disclosures &amp; Patch Remediations ({res.vulnerabilities?.length || 0})
+                  <ClipboardList size={15} style={{ marginRight: "6px" }} /> Vulnerability Disclosures & Patch Remediations ({res.vulnerabilities?.length || 0})
                 </div>
 
                 {res.vulnerabilities?.length === 0 ? (
                   <div style={{ padding: "24px", background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0", textAlign: "center", color: "#64748b" }}>
-                    🎉 No active CVE advisories matched this hardware/firmware profile.
+                    <CheckCircle2 size={16} color="#16a34a" style={{ marginRight: "6px" }} /> No active CVE advisories matched this hardware/firmware profile.
                   </div>
                 ) : (
                   <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
@@ -15662,7 +15907,7 @@ const EndpointUpdatesPage = () => {
                               </span>
                               {v.exploit_available && (
                                 <span style={{ background: "#fee2e2", color: "#991b1b", border: "1px solid #fecaca", padding: "2px 6px", borderRadius: "4px", fontSize: "10px", fontWeight: "800" }}>
-                                  ⚡ Public Exploit Known
+                                  <Zap size={12} color="#ef4444" style={{ marginRight: "4px" }} /> Public Exploit Known
                                 </span>
                               )}
                             </div>
@@ -15681,7 +15926,7 @@ const EndpointUpdatesPage = () => {
 
                           {v.remediation && (
                             <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "6px", padding: "8px 12px", fontSize: "11px", color: "#166534" }}>
-                              <strong>🛠️ Recommended Remediation:</strong> {v.remediation}
+                              <Wrench size={14} style={{ marginRight: "4px" }} /> <strong>Recommended Remediation:</strong> {v.remediation}
                             </div>
                           )}
                         </div>
@@ -15701,7 +15946,7 @@ const EndpointUpdatesPage = () => {
               disabled={cveLoading}
               onClick={() => handleRescanCve(dev)}
             >
-              🔄 Re-Scan Firmware &amp; OS
+              <RefreshCw size={13} style={{ marginRight: "4px" }} /> Re-Scan Firmware & OS
             </button>
             <button
               type="button"
@@ -15784,7 +16029,7 @@ const EndpointUpdatesPage = () => {
                 REMOTE NETWORK DISCOVERY
               </div>
               <div style={{ fontSize: "18px", fontWeight: "700", display: "flex", alignItems: "center", gap: "8px", marginTop: "4px" }}>
-                <span>📡</span> NETOPS Remote LAN Probe
+                <Radio size={18} style={{ marginRight: "8px" }} /> NETOPS Remote LAN Probe
               </div>
             </div>
             <button
@@ -15798,7 +16043,7 @@ const EndpointUpdatesPage = () => {
                 cursor: "pointer",
               }}
             >
-              ✕
+              <X size={18} />
             </button>
           </div>
 
@@ -15816,7 +16061,7 @@ const EndpointUpdatesPage = () => {
             {/* Quick 1-Liner Linux / macOS */}
             <div>
               <div style={{ fontSize: "13px", fontWeight: "600", color: "#f1f5f9", marginBottom: "6px" }}>
-                🐧 Linux / macOS / WSL (1-Liner)
+                <Terminal size={14} style={{ marginRight: "6px" }} /> Linux / macOS / WSL (1-Liner)
               </div>
               <div style={{ background: "#020617", border: "1px solid #1e293b", borderRadius: "6px", padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
                 <code style={{ fontSize: "12px", color: "#a5f3fc", wordBreak: "break-all", fontFamily: "monospace" }}>
@@ -15832,7 +16077,7 @@ const EndpointUpdatesPage = () => {
                   }}
                   style={{ whiteSpace: "nowrap", padding: "5px 12px", fontSize: "12px", cursor: "pointer", flexShrink: 0 }}
                 >
-                  {probeCopied ? "✅ Copied" : "📋 Copy"}
+                  {probeCopied ? <><Check size={12} style={{ marginRight: "4px" }} /> Copied</> : <><ClipboardList size={12} style={{ marginRight: "4px" }} /> Copy</>}
                 </button>
               </div>
             </div>
@@ -15840,7 +16085,7 @@ const EndpointUpdatesPage = () => {
             {/* Quick 1-Liner Windows */}
             <div>
               <div style={{ fontSize: "13px", fontWeight: "600", color: "#f1f5f9", marginBottom: "6px" }}>
-                🪟 Windows PowerShell (1-Liner)
+                <Laptop size={14} style={{ marginRight: "6px" }} /> Windows PowerShell (1-Liner)
               </div>
               <div style={{ background: "#020617", border: "1px solid #1e293b", borderRadius: "6px", padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
                 <code style={{ fontSize: "12px", color: "#a5f3fc", wordBreak: "break-all", fontFamily: "monospace" }}>
@@ -15856,7 +16101,7 @@ const EndpointUpdatesPage = () => {
                   }}
                   style={{ whiteSpace: "nowrap", padding: "5px 12px", fontSize: "12px", cursor: "pointer", flexShrink: 0 }}
                 >
-                  {probeCopied ? "✅ Copied" : "📋 Copy"}
+                  {probeCopied ? <><Check size={12} style={{ marginRight: "4px" }} /> Copied</> : <><ClipboardList size={12} style={{ marginRight: "4px" }} /> Copy</>}
                 </button>
               </div>
             </div>
@@ -15864,7 +16109,7 @@ const EndpointUpdatesPage = () => {
             {/* 1-Click Launchers */}
             <div>
               <div style={{ fontSize: "13px", fontWeight: "600", color: "#f1f5f9", marginBottom: "6px" }}>
-                📥 1-Click Launcher Scripts
+                <Download size={15} style={{ marginRight: "6px" }} /> 1-Click Launcher Scripts
               </div>
               <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
                 <a
@@ -15873,7 +16118,7 @@ const EndpointUpdatesPage = () => {
                   style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12px", padding: "8px 14px", color: "#f8fafc", background: "#1e293b", border: "1px solid #334155", borderRadius: "6px" }}
                   download="scan_wifi.bat"
                 >
-                  <span>🪟</span> Download scan_wifi.bat (Windows)
+                  <Download size={13} style={{ marginRight: "4px" }} /> Download scan_wifi.bat (Windows)
                 </a>
                 <a
                   href={`${API_URL}/discovery/launcher/linux-mac?token=${encodeURIComponent(token)}&network_name=${encodeURIComponent(siteName)}`}
@@ -15881,7 +16126,7 @@ const EndpointUpdatesPage = () => {
                   style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12px", padding: "8px 14px", color: "#f8fafc", background: "#1e293b", border: "1px solid #334155", borderRadius: "6px" }}
                   download="scan_wifi.sh"
                 >
-                  <span>🐧</span> Download scan_wifi.sh (Linux/macOS)
+                  <Download size={13} style={{ marginRight: "4px" }} /> Download scan_wifi.sh (Linux/macOS)
                 </a>
                 <a
                   href={`${API_URL}/discovery/probe-script`}
@@ -15889,7 +16134,7 @@ const EndpointUpdatesPage = () => {
                   style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12px", padding: "8px 14px", color: "#38bdf8", background: "#0f172a", border: "1px solid #0284c7", borderRadius: "6px" }}
                   download="netops_probe.py"
                 >
-                  <span>🐍</span> Download netops_probe.py
+                  <Download size={13} style={{ marginRight: "4px" }} /> Download netops_probe.py
                 </a>
               </div>
             </div>
@@ -15968,14 +16213,14 @@ const EndpointUpdatesPage = () => {
             }}
           >
             <div style={{ display: "flex", alignItems: "center", gap: "10px", fontSize: "16px", fontWeight: "700" }}>
-              <span>⚡</span> Real Physical Update Deployment Agent
+              <Zap size={18} style={{ marginRight: "8px" }} /> Real Physical Update Deployment Agent
             </div>
             <button
               type="button"
               onClick={() => setShowClientUpdaterModal(false)}
               style={{ background: "transparent", border: "none", color: "#94a3b8", fontSize: "18px", cursor: "pointer", padding: "4px" }}
             >
-              ✕
+              <X size={18} />
             </button>
           </div>
 
@@ -16001,7 +16246,7 @@ const EndpointUpdatesPage = () => {
             {/* Windows 1-Liner */}
             <div>
               <div style={{ fontSize: "13px", fontWeight: "600", color: "#f1f5f9", marginBottom: "6px" }}>
-                🪟 Windows PowerShell (1-Click Run as Administrator)
+                <Laptop size={14} style={{ marginRight: "6px" }} /> Windows PowerShell (1-Click Run as Administrator)
               </div>
               <div style={{ background: "#020617", border: "1px solid #1e293b", borderRadius: "6px", padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
                 <code style={{ fontSize: "12px", color: "#a5f3fc", wordBreak: "break-all", fontFamily: "monospace" }}>
@@ -16017,7 +16262,7 @@ const EndpointUpdatesPage = () => {
                   }}
                   style={{ whiteSpace: "nowrap", padding: "5px 12px", fontSize: "12px", cursor: "pointer", flexShrink: 0 }}
                 >
-                  {updaterCopied ? "✅ Copied" : "📋 Copy"}
+                  {updaterCopied ? <><Check size={12} style={{ marginRight: "4px" }} /> Copied</> : <><ClipboardList size={12} style={{ marginRight: "4px" }} /> Copy</>}
                 </button>
               </div>
             </div>
@@ -16025,7 +16270,7 @@ const EndpointUpdatesPage = () => {
             {/* Linux 1-Liner */}
             <div>
               <div style={{ fontSize: "13px", fontWeight: "600", color: "#f1f5f9", marginBottom: "6px" }}>
-                🐧 Linux Terminal (Debian / Ubuntu / Kali / Fedora)
+                <Terminal size={14} style={{ marginRight: "6px" }} /> Linux Terminal (Debian / Ubuntu / Kali / Fedora)
               </div>
               <div style={{ background: "#020617", border: "1px solid #1e293b", borderRadius: "6px", padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
                 <code style={{ fontSize: "12px", color: "#a5f3fc", wordBreak: "break-all", fontFamily: "monospace" }}>
@@ -16041,7 +16286,7 @@ const EndpointUpdatesPage = () => {
                   }}
                   style={{ whiteSpace: "nowrap", padding: "5px 12px", fontSize: "12px", cursor: "pointer", flexShrink: 0 }}
                 >
-                  {updaterCopied ? "✅ Copied" : "📋 Copy"}
+                  {updaterCopied ? <><Check size={12} style={{ marginRight: "4px" }} /> Copied</> : <><ClipboardList size={12} style={{ marginRight: "4px" }} /> Copy</>}
                 </button>
               </div>
             </div>
@@ -16049,7 +16294,7 @@ const EndpointUpdatesPage = () => {
             {/* Direct Downloads */}
             <div>
               <div style={{ fontSize: "13px", fontWeight: "600", color: "#f1f5f9", marginBottom: "6px" }}>
-                📥 Direct 1-Click Batch & Shell Files
+                <Download size={15} style={{ marginRight: "6px" }} /> Direct 1-Click Batch & Shell Files
               </div>
               <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
                 <a
@@ -16058,7 +16303,7 @@ const EndpointUpdatesPage = () => {
                   style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12px", padding: "8px 14px", color: "#f8fafc", background: "#1e293b", border: "1px solid #334155", borderRadius: "6px" }}
                   download="install_windows_updates.bat"
                 >
-                  <span>🪟</span> Download install_windows_updates.bat
+                  <Download size={13} style={{ marginRight: "4px" }} /> Download install_windows_updates.bat
                 </a>
                 <a
                   href={`${API_URL}/endpoint-updates/launcher/linux?token=${encodeURIComponent(token)}`}
@@ -16066,7 +16311,7 @@ const EndpointUpdatesPage = () => {
                   style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12px", padding: "8px 14px", color: "#f8fafc", background: "#1e293b", border: "1px solid #334155", borderRadius: "6px" }}
                   download="install_linux_updates.sh"
                 >
-                  <span>🐧</span> Download install_linux_updates.sh
+                  <Download size={13} style={{ marginRight: "4px" }} /> Download install_linux_updates.sh
                 </a>
               </div>
             </div>
@@ -17526,9 +17771,99 @@ const EndpointUpdatesPage = () => {
             width: auto;
           }
         }
+
+        @keyframes netopsLogoPulse {
+          0% { transform: scale(1); filter: drop-shadow(0 0 10px rgba(56, 189, 248, 0.4)); }
+          50% { transform: scale(1.08); filter: drop-shadow(0 0 24px rgba(56, 189, 248, 0.9)) drop-shadow(0 0 32px rgba(37, 99, 235, 0.6)); }
+          100% { transform: scale(1); filter: drop-shadow(0 0 10px rgba(56, 189, 248, 0.4)); }
+        }
+
+        @keyframes netopsGlowBar {
+          0% { background-position: 0% 50%; }
+          50% { background-position: 100% 50%; }
+          100% { background-position: 0% 50%; }
+        }
       `}</style>
 
       <div className="app">
+        {/* REFRESH OVERLAY WITH NETOPS LOGO */}
+        {refreshingAll && (
+          <div
+            style={{
+              position: "fixed",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: "rgba(11, 19, 41, 0.7)",
+              backdropFilter: "blur(6px)",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 9999998,
+              animation: "fadeIn 0.2s ease-out",
+            }}
+          >
+            <div
+              style={{
+                background: "linear-gradient(145deg, #1e293b 0%, #0f172a 100%)",
+                border: "1.5px solid rgba(56, 189, 248, 0.4)",
+                boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.65), 0 0 35px rgba(56, 189, 248, 0.25)",
+                borderRadius: "16px",
+                padding: "36px 44px",
+                textAlign: "center",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: "16px",
+                maxWidth: "380px",
+                width: "90%",
+              }}
+            >
+              <div
+                style={{
+                  animation: "netopsLogoPulse 1.8s infinite ease-in-out",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <NetOpsLogo size={72} />
+              </div>
+
+              <div>
+                <div style={{ color: "#ffffff", fontSize: "17px", fontWeight: "800", letterSpacing: "0.02em" }}>
+                  Refreshing NETOPS Telemetry
+                </div>
+                <div style={{ color: "#94a3b8", fontSize: "12.5px", marginTop: "5px", lineHeight: "1.4" }}>
+                  Synchronizing live network endpoints, active VLANs &amp; firewall policies...
+                </div>
+              </div>
+
+              <div
+                style={{
+                  width: "100%",
+                  height: "4px",
+                  background: "rgba(255, 255, 255, 0.1)",
+                  borderRadius: "2px",
+                  overflow: "hidden",
+                  marginTop: "6px",
+                }}
+              >
+                <div
+                  style={{
+                    height: "100%",
+                    background: "linear-gradient(90deg, #38bdf8, #2563eb, #06b6d4, #38bdf8)",
+                    backgroundSize: "200% 100%",
+                    animation: "netopsGlowBar 1.2s infinite linear",
+                    borderRadius: "2px",
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+        )}
         {inactivitySecondsLeft !== null && (
           <div
             style={{
@@ -17546,7 +17881,7 @@ const EndpointUpdatesPage = () => {
             }}
           >
             <div style={{ display: "flex", alignItems: "flex-start", gap: "12px" }}>
-              <span style={{ fontSize: "24px", lineHeight: "1" }}>⏱️</span>
+              <Clock size={24} color="#6366f1" />
               <div>
                 <div style={{ fontWeight: "700", color: "#b45309", fontSize: "14px", marginBottom: "4px" }}>
                   Inactivity Warning
@@ -17601,7 +17936,7 @@ const EndpointUpdatesPage = () => {
             </div>
 
             <NavItem
-              icon="D"
+              icon={<LayoutDashboard size={18} />}
               label="Dashboard"
               active={
                 activePage === "dashboard"
@@ -17613,7 +17948,7 @@ const EndpointUpdatesPage = () => {
 
             {!isAdmin && (
               <NavItem
-                icon="▣"
+                icon={<Laptop size={18} />}
                 label="Devices (Read-Only)"
                 active={
                   activePage === "devices"
@@ -17628,7 +17963,7 @@ const EndpointUpdatesPage = () => {
             {isAdmin && (
               <>
                 <NavItem
-                  icon="📡"
+                  icon={<Radar size={18} />}
                   label="LAN Scanner"
                   active={
                     activePage === "lan-scanner"
@@ -17639,7 +17974,7 @@ const EndpointUpdatesPage = () => {
                 />
 
                 <NavItem
-                  icon="▣"
+                  icon={<Laptop size={18} />}
                   label="Devices"
                   active={
                     activePage === "devices"
@@ -17651,7 +17986,7 @@ const EndpointUpdatesPage = () => {
                 />
 
                 <NavItem
-                  icon="!"
+                  icon={<AlertTriangle size={18} />}
                   label="Events"
                   active={
                     activePage === "events"
@@ -17662,7 +17997,7 @@ const EndpointUpdatesPage = () => {
                 />
 
                 <NavItem
-                  icon="A"
+                  icon={<ShieldCheck size={18} />}
                   label="Access Control"
                   active={
                     activePage === "access"
@@ -17674,7 +18009,7 @@ const EndpointUpdatesPage = () => {
                 />
 
                 <NavItem
-                  icon="U"
+                  icon={<PackageCheck size={18} />}
                   label="Endpoint Updates"
                   active={
                     activePage === "endpoint-updates"
@@ -17689,7 +18024,7 @@ const EndpointUpdatesPage = () => {
                 </div>
 
                 <NavItem
-                  icon="🔀"
+                  icon={<Network size={18} />}
                   label="VLANs & Switches"
                   active={
                     activePage === "vlans"
@@ -17701,7 +18036,7 @@ const EndpointUpdatesPage = () => {
                 />
 
                 <NavItem
-                  icon="🗺️"
+                  icon={<MapIcon size={18} />}
                   label="Topology Map"
                   active={
                     activePage === "topology"
@@ -17712,7 +18047,7 @@ const EndpointUpdatesPage = () => {
                 />
 
                 <NavItem
-                  icon="R"
+                  icon={<FileText size={18} />}
                   label="Reports"
                   active={
                     activePage === "reports"
@@ -17727,7 +18062,7 @@ const EndpointUpdatesPage = () => {
                 </div>
 
                 <NavItem
-                  icon="👥"
+                  icon={<Users size={18} />}
                   label="Users"
                   active={
                     activePage === "users"
@@ -17739,7 +18074,7 @@ const EndpointUpdatesPage = () => {
 
                 {isDeveloper && (
                   <NavItem
-                    icon="📡"
+                    icon={<Activity size={18} />}
                     label="User Activity"
                     active={
                       activePage === "monitoring"
@@ -17751,7 +18086,7 @@ const EndpointUpdatesPage = () => {
                 )}
 
                 <NavItem
-                  icon="🌐"
+                  icon={<Globe size={18} />}
                   label="Web & App Activity"
                   active={
                     activePage === "web_activity"
@@ -17766,7 +18101,7 @@ const EndpointUpdatesPage = () => {
                 </div>
 
                 <NavItem
-                  icon="S"
+                  icon={<Settings size={18} />}
                   label="Settings"
                   active={
                     activePage === "settings"
@@ -17789,11 +18124,11 @@ const EndpointUpdatesPage = () => {
             </div>
             <div style={{ marginTop: "8px", paddingTop: "8px", borderTop: "1px solid #334155", fontSize: "11px", display: "flex", flexDirection: "column", gap: "3px" }}>
               <div style={{ fontSize: "10px", color: "#94a3b8", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>Support &amp; Inquiries</div>
-              <a href="tel:+254704393504" style={{ color: "#60a5fa", textDecoration: "none", fontSize: "11px", display: "inline-flex", alignItems: "center", gap: "5px" }}>
-                <span>📞</span> +254704393504
+              <a href="tel:+254704393504" style={{ color: "#60a5fa", textDecoration: "none", fontSize: "11px", display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                <Phone size={12} /> +254704393504
               </a>
-              <a href="mailto:rogersiru@gmail.com" style={{ color: "#60a5fa", textDecoration: "none", fontSize: "11px", display: "inline-flex", alignItems: "center", gap: "5px" }}>
-                <span>✉️</span> rogersiru@gmail.com
+              <a href="mailto:rogersiru@gmail.com" style={{ color: "#60a5fa", textDecoration: "none", fontSize: "11px", display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                <Mail size={12} /> rogersiru@gmail.com
               </a>
             </div>
           </div>
@@ -17808,12 +18143,23 @@ const EndpointUpdatesPage = () => {
             <div className="topbar-right" style={{ display: "flex", alignItems: "center", gap: "16px" }}>
               <div
                 className="live-indicator"
-                style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px" }}
+                style={{
+                  cursor: "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  padding: "4px 12px",
+                  borderRadius: "16px",
+                  background: refreshingAll ? "rgba(56, 189, 248, 0.12)" : "transparent",
+                  border: refreshingAll ? "1px solid #38bdf8" : "1px solid transparent",
+                  transition: "all 0.2s ease",
+                }}
                 onClick={refreshAll}
                 title="System automatically synchronizes in the background every 3 seconds. Click to trigger instant refresh."
               >
+                <NetOpsLogo size={18} style={{ animation: refreshingAll ? "spin 1s linear infinite" : "none" }} />
                 <span className="live-dot" />
-                <span>{refreshingAll ? "Syncing..." : "Auto-Refresh Active"}</span>
+                <span style={{ fontWeight: "700" }}>{refreshingAll ? "Refreshing..." : "Auto-Refresh Active"}</span>
               </div>
 
               {/* Site Scope Selector Pill */}
@@ -17830,8 +18176,8 @@ const EndpointUpdatesPage = () => {
                 }}
                 title="Active Site / Network Scope: Filter devices to the current connected network or switch between sites"
               >
-                <span style={{ fontSize: "13px" }}>
-                  {selectedNetwork === "current" ? "📡" : selectedNetwork === "Remote Network" ? "🌐" : selectedNetwork === "Home Network" ? "🏠" : "🌍"}
+                <span style={{ display: "inline-flex", alignItems: "center" }}>
+                  {selectedNetwork === "current" ? <Radar size={14} color="#0284c7" /> : selectedNetwork === "Remote Network" ? <Globe size={14} color="#1d4ed8" /> : selectedNetwork === "Home Network" ? <Network size={14} color="#15803d" /> : <Globe size={14} />}
                 </span>
                 <span style={{ fontSize: "11px", fontWeight: "800", color: "#64748b", textTransform: "uppercase" }}>Site:</span>
                 <select
@@ -17847,10 +18193,10 @@ const EndpointUpdatesPage = () => {
                     outline: "none",
                   }}
                 >
-                  <option value="current">📡 Current Connected ({detectedSubnet || "Local Subnet"})</option>
-                  <option value="Home Network">🏠 Home Network (192.168.0.0/24)</option>
-                  <option value="Remote Network">🌐 Remote Network (Remote Probe)</option>
-                  <option value="all">🌍 All Networks (Global View)</option>
+                  <option value="current">Current Connected ({detectedSubnet || "Local Subnet"})</option>
+                  <option value="Home Network">Home Network (192.168.0.0/24)</option>
+                  <option value="Remote Network">Remote Network (Remote Probe)</option>
+                  <option value="all">All Networks (Global View)</option>
                 </select>
               </div>
 
@@ -17875,7 +18221,7 @@ const EndpointUpdatesPage = () => {
                 }}
                 title="View Support & Developer Contact Information (+254704393504 • rogersiru@gmail.com)"
               >
-                <span>📞</span> Contact Us
+                <Phone size={13} /> Contact Us
               </button>
 
               <button
@@ -17899,7 +18245,7 @@ const EndpointUpdatesPage = () => {
                 }}
                 title="View Frequently Asked Questions & Operational Knowledge Base"
               >
-                <span>❓</span> FAQs
+                <HelpCircle size={13} /> FAQs
               </button>
 
               <div style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
@@ -17928,7 +18274,8 @@ const EndpointUpdatesPage = () => {
                       : "Alert bell is MUTED. Click to turn bell sound ON (visual popups still appear silently)."
                   }
                 >
-                  {alertSoundEnabled ? "🔔 Bell Sound ON" : "🔕 Bell Muted"}
+                  {alertSoundEnabled ? <Bell size={13} /> : <BellOff size={13} />}
+                  {alertSoundEnabled ? "Bell Sound ON" : "Bell Muted"}
                 </button>
                 {alertSoundEnabled && (
                   <button
@@ -17949,7 +18296,7 @@ const EndpointUpdatesPage = () => {
                     }}
                     title="Test bell ring sound"
                   >
-                    ▶ Ring
+                    <Play size={10} /> Ring
                   </button>
                 )}
               </div>
@@ -17963,8 +18310,9 @@ const EndpointUpdatesPage = () => {
                     <div style={{ fontSize: "12px", fontWeight: "700", color: "#0f172a", lineHeight: 1.2 }}>
                       {currentUser.username}
                     </div>
-                    <div style={{ fontSize: "10px", fontWeight: "600", color: isSuperAdmin ? "#fbbf24" : isAdmin ? "#60a5fa" : "#475569" }}>
-                      {isSuperAdmin ? "👑 Developer (Super Admin)" : isAdmin ? "🛡️ Administrator" : "👤 Standard User"}
+                    <div style={{ fontSize: "10px", fontWeight: "600", color: isSuperAdmin ? "#fbbf24" : isAdmin ? "#60a5fa" : "#475569", display: "flex", alignItems: "center", gap: "3px" }}>
+                      {isSuperAdmin ? <CrownIcon size={10} /> : isAdmin ? <Shield size={10} /> : <User size={10} />}
+                      {isSuperAdmin ? "Developer (Super Admin)" : isAdmin ? "Administrator" : "Standard User"}
                     </div>
                   </div>
                   {currentUser?.password_expiry?.days_remaining !== null && currentUser?.password_expiry?.days_remaining !== undefined && currentUser?.password_expiry?.days_remaining <= 14 && !isSuperAdmin && (
@@ -17978,10 +18326,13 @@ const EndpointUpdatesPage = () => {
                         borderRadius: "4px",
                         fontWeight: "700",
                         marginLeft: "6px",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "3px",
                       }}
                       title="Password expires every 3 months. Please change your password before it expires."
                     >
-                      ⏱️ {currentUser.password_expiry.days_remaining}d left
+                      <Clock size={10} /> {currentUser.password_expiry.days_remaining}d left
                     </span>
                   )}
                   <button
@@ -17994,22 +18345,22 @@ const EndpointUpdatesPage = () => {
                       setNewPw("");
                       setConfirmPw("");
                     }}
-                    style={{ background: "transparent", border: "none", color: "#475569", fontSize: "12px", cursor: "pointer", padding: "4px 6px", borderRadius: "4px", marginLeft: "6px" }}
+                    style={{ background: "transparent", border: "none", color: "#475569", fontSize: "12px", cursor: "pointer", padding: "4px 6px", borderRadius: "4px", marginLeft: "6px", display: "inline-flex", alignItems: "center", gap: "4px" }}
                     onMouseEnter={(e) => { e.currentTarget.style.color = "#2563eb"; }}
                     onMouseLeave={(e) => { e.currentTarget.style.color = "#475569"; }}
                     title="Change Account Password"
                   >
-                    🔑 Password
+                    <KeyRound size={12} /> Password
                   </button>
                   <button
                     type="button"
                     onClick={() => handleLogout()}
-                    style={{ background: "transparent", border: "none", color: "#475569", fontSize: "12px", cursor: "pointer", padding: "4px 6px", borderRadius: "4px", marginLeft: "6px" }}
+                    style={{ background: "transparent", border: "none", color: "#475569", fontSize: "12px", cursor: "pointer", padding: "4px 6px", borderRadius: "4px", marginLeft: "6px", display: "inline-flex", alignItems: "center", gap: "4px" }}
                     onMouseEnter={(e) => { e.currentTarget.style.color = "#f87171"; }}
                     onMouseLeave={(e) => { e.currentTarget.style.color = "#94a3b8"; }}
                     title="Sign Out of NETOPS"
                   >
-                    🚪 Sign Out
+                    <LogOut size={12} /> Sign Out
                   </button>
                 </div>
               )}
@@ -18030,11 +18381,11 @@ const EndpointUpdatesPage = () => {
               <span className="netops-footer-dot">•</span>
               <span style={{ color: "#334155", fontWeight: 600 }}>Support &amp; Inquiries:</span>
               <a href="tel:+254704393504" className="netops-footer-contact-link" title="Call or WhatsApp Developer">
-                📞 +254704393504
+                <Phone size={13} style={{ marginRight: "4px" }} /> +254704393504
               </a>
               <span className="netops-footer-dot">•</span>
               <a href="mailto:rogersiru@gmail.com" className="netops-footer-contact-link" title="Email Developer">
-                ✉️ rogersiru@gmail.com
+                <Mail size={13} style={{ marginRight: "4px" }} /> rogersiru@gmail.com
               </a>
               <span className="netops-footer-dot">•</span>
               {/* Site Scope Selector Pill */}
@@ -18051,8 +18402,8 @@ const EndpointUpdatesPage = () => {
                 }}
                 title="Active Site / Network Scope: Filter devices to the current connected network or switch between sites"
               >
-                <span style={{ fontSize: "13px" }}>
-                  {selectedNetwork === "current" ? "📡" : selectedNetwork === "Remote Network" ? "🌐" : selectedNetwork === "Home Network" ? "🏠" : "🌍"}
+                <span style={{ display: "inline-flex", alignItems: "center" }}>
+                  {selectedNetwork === "current" ? <Radar size={14} color="#0284c7" /> : selectedNetwork === "Remote Network" ? <Globe size={14} color="#1d4ed8" /> : selectedNetwork === "Home Network" ? <Network size={14} color="#15803d" /> : <Globe size={14} />}
                 </span>
                 <span style={{ fontSize: "11px", fontWeight: "800", color: "#64748b", textTransform: "uppercase" }}>Site:</span>
                 <select
@@ -18068,10 +18419,10 @@ const EndpointUpdatesPage = () => {
                     outline: "none",
                   }}
                 >
-                  <option value="current">📡 Current Connected ({detectedSubnet || "Local Subnet"})</option>
-                  <option value="Home Network">🏠 Home Network (192.168.0.0/24)</option>
-                  <option value="Remote Network">🌐 Remote Network (Remote Probe)</option>
-                  <option value="all">🌍 All Networks (Global View)</option>
+                  <option value="current">Current Connected ({detectedSubnet || "Local Subnet"})</option>
+                  <option value="Home Network">Home Network (192.168.0.0/24)</option>
+                  <option value="Remote Network">Remote Network (Remote Probe)</option>
+                  <option value="all">All Networks (Global View)</option>
                 </select>
               </div>
 
@@ -18092,7 +18443,7 @@ const EndpointUpdatesPage = () => {
                 }}
                 title="View Services We Offer & Contact Information"
               >
-                🛠️ Services We Offer
+                <Settings size={12} /> Services We Offer
               </button>
               <span className="netops-footer-dot">•</span>
               <button
@@ -18112,7 +18463,7 @@ const EndpointUpdatesPage = () => {
                 }}
                 title="View Frequently Asked Questions & Troubleshooting Guides"
               >
-                ❓ FAQs
+                <HelpCircle size={12} /> FAQs
               </button>
             </div>
             <div className="netops-footer-right">
@@ -18128,10 +18479,11 @@ const EndpointUpdatesPage = () => {
             <div className="alert-body">
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div className="alert-label" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                  <Bell size={13} color="#2563eb" />
                   <span>
                     {newDeviceAlert.event_type === "device_online"
-                      ? "🔔 MACHINE CONNECTED TO LAN"
-                      : "🆕 NEW MACHINE DETECTED ON LAN"}
+                      ? "MACHINE CONNECTED TO LAN"
+                      : "NEW MACHINE DETECTED ON LAN"}
                   </span>
                   {!alertSoundEnabled && (
                     <span
@@ -18144,10 +18496,13 @@ const EndpointUpdatesPage = () => {
                         borderRadius: "8px",
                         padding: "1px 6px",
                         letterSpacing: "0.5px",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "3px",
                       }}
                       title="Silent Mode: Popup appears visually, audio chime is muted"
                     >
-                      🔇 Silent
+                      <BellOff size={10} /> Silent
                     </span>
                   )}
                 </div>
@@ -18174,15 +18529,16 @@ const EndpointUpdatesPage = () => {
                         : "Turn bell sound back on"
                     }
                   >
-                    {alertSoundEnabled ? "🔔 Bell ON" : "🔕 Bell Muted"}
+                    {alertSoundEnabled ? <Bell size={11} /> : <BellOff size={11} />}
+                    {alertSoundEnabled ? "Bell ON" : "Bell Muted"}
                   </button>
                   <button
                     type="button"
                     onClick={() => setNewDeviceAlert(null)}
-                    style={{ background: "none", border: "none", color: "#64748b", cursor: "pointer", fontSize: "16px", fontWeight: "700" }}
+                    style={{ background: "none", border: "none", color: "#64748b", cursor: "pointer", display: "inline-flex", alignItems: "center", padding: 0 }}
                     title="Dismiss notification"
                   >
-                    ✕
+                    <X size={16} />
                   </button>
                 </div>
               </div>
@@ -18278,15 +18634,15 @@ const EndpointUpdatesPage = () => {
             >
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
                 <div style={{ fontSize: "16px", fontWeight: "800", color: "#0f172a", display: "flex", alignItems: "center", gap: "8px" }}>
-                  <span>🔑</span>
+                  <KeyRound size={18} color="#2563eb" />
                   <span>Change Password</span>
                 </div>
                 <button
                   type="button"
                   onClick={() => setShowChangePasswordModal(false)}
-                  style={{ background: "transparent", border: "none", fontSize: "18px", color: "#64748b", cursor: "pointer" }}
+                  style={{ background: "transparent", border: "none", fontSize: "18px", color: "#64748b", cursor: "pointer", display: "flex", alignItems: "center", padding: 0 }}
                 >
-                  ×
+                  <X size={18} />
                 </button>
               </div>
 
@@ -18297,14 +18653,16 @@ const EndpointUpdatesPage = () => {
               </div>
 
               {pwChangeError && (
-                <div style={{ background: "#fef2f2", border: "1px solid #fecaca", color: "#dc2626", padding: "10px 12px", borderRadius: "8px", fontSize: "12px", marginBottom: "14px" }}>
-                  ⚠️ {pwChangeError}
+                <div style={{ background: "#fef2f2", border: "1px solid #fecaca", color: "#dc2626", padding: "10px 12px", borderRadius: "8px", fontSize: "12px", marginBottom: "14px", display: "flex", alignItems: "center", gap: "6px" }}>
+                  <AlertTriangle size={14} />
+                  <span>{pwChangeError}</span>
                 </div>
               )}
 
               {pwChangeSuccess && (
-                <div style={{ background: "#ecfdf5", border: "1px solid #a7f3d0", color: "#059669", padding: "10px 12px", borderRadius: "8px", fontSize: "12px", marginBottom: "14px" }}>
-                  ✓ {pwChangeSuccess}
+                <div style={{ background: "#ecfdf5", border: "1px solid #a7f3d0", color: "#059669", padding: "10px 12px", borderRadius: "8px", fontSize: "12px", marginBottom: "14px", display: "flex", alignItems: "center", gap: "6px" }}>
+                  <CheckCircle2 size={14} />
+                  <span>{pwChangeSuccess}</span>
                 </div>
               )}
 
@@ -18410,7 +18768,7 @@ const EndpointUpdatesPage = () => {
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "14px" }}>
                 <div>
                   <div style={{ fontSize: "17px", fontWeight: "800", color: "#0f172a", display: "flex", alignItems: "center", gap: "8px" }}>
-                    <span>📞</span>
+                    <Phone size={18} color="#2563eb" />
                     <span>Contact Support &amp; Developer</span>
                   </div>
                   <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
@@ -18420,15 +18778,15 @@ const EndpointUpdatesPage = () => {
                 <button
                   type="button"
                   onClick={() => setShowContactModal(false)}
-                  style={{ background: "transparent", border: "none", fontSize: "18px", color: "#64748b", cursor: "pointer", padding: "4px" }}
+                  style={{ background: "transparent", border: "none", fontSize: "18px", color: "#64748b", cursor: "pointer", padding: "4px", display: "flex", alignItems: "center" }}
                 >
-                  ✕
+                  <X size={18} />
                 </button>
               </div>
 
               <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "8px", padding: "10px 14px", marginBottom: "16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div style={{ fontSize: "12px", color: "#1e40af" }}>
-                  💡 <strong>Have operational questions?</strong> Answers to device admission, schedules &amp; update FAQs are ready.
+                  <strong>Have operational questions?</strong> Answers to device admission, schedules &amp; update FAQs are ready.
                 </div>
                 <button
                   type="button"
@@ -18461,7 +18819,7 @@ const EndpointUpdatesPage = () => {
                       className="primary-button small"
                       style={{ textDecoration: "none", padding: "4px 10px", fontSize: "11px", display: "inline-flex", alignItems: "center", gap: "4px" }}
                     >
-                      <span>📞</span> Call
+                      <Phone size={12} /> Call
                     </a>
                     <a
                       href="https://wa.me/254704393504"
@@ -18470,7 +18828,7 @@ const EndpointUpdatesPage = () => {
                       className="secondary-button small"
                       style={{ textDecoration: "none", padding: "4px 10px", fontSize: "11px", borderColor: "#10b981", color: "#059669", display: "inline-flex", alignItems: "center", gap: "4px" }}
                     >
-                      <span>💬</span> WhatsApp
+                      <MessageCircle size={12} /> WhatsApp
                     </a>
                   </div>
                 </div>
@@ -18487,7 +18845,7 @@ const EndpointUpdatesPage = () => {
                     className="primary-button small"
                     style={{ textDecoration: "none", padding: "4px 10px", fontSize: "11px", display: "inline-flex", alignItems: "center", gap: "4px" }}
                   >
-                    <span>✉️</span> Email
+                    <Mail size={12} /> Email
                   </a>
                 </div>
               </div>
@@ -18495,12 +18853,12 @@ const EndpointUpdatesPage = () => {
               {/* SERVICES WE OFFER SECTION */}
               <div style={{ marginBottom: "20px" }}>
                 <div style={{ fontSize: "12px", fontWeight: "700", color: "#0f172a", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "10px", display: "flex", alignItems: "center", gap: "6px" }}>
-                  <span>🛠️</span> Services We Offer
+                  <Settings size={14} color="#2563eb" /> Services We Offer
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                   <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "10px 14px", display: "flex", alignItems: "center", gap: "12px" }}>
-                    <div style={{ width: "34px", height: "34px", borderRadius: "8px", background: "#e0f2fe", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "18px", flexShrink: 0 }}>
-                      📹
+                    <div style={{ width: "34px", height: "34px", borderRadius: "8px", background: "#e0f2fe", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      <Camera size={18} color="#0284c7" />
                     </div>
                     <div>
                       <div style={{ fontWeight: "700", fontSize: "13px", color: "#0f172a" }}>CCTV Installation</div>
@@ -18509,8 +18867,8 @@ const EndpointUpdatesPage = () => {
                   </div>
 
                   <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "10px 14px", display: "flex", alignItems: "center", gap: "12px" }}>
-                    <div style={{ width: "34px", height: "34px", borderRadius: "8px", background: "#ecfdf5", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "18px", flexShrink: 0 }}>
-                      🔌
+                    <div style={{ width: "34px", height: "34px", borderRadius: "8px", background: "#ecfdf5", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      <Cable size={18} color="#059669" />
                     </div>
                     <div>
                       <div style={{ fontWeight: "700", fontSize: "13px", color: "#0f172a" }}>Structured Cabling</div>
@@ -18519,8 +18877,8 @@ const EndpointUpdatesPage = () => {
                   </div>
 
                   <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "10px 14px", display: "flex", alignItems: "center", gap: "12px" }}>
-                    <div style={{ width: "34px", height: "34px", borderRadius: "8px", background: "#f5f3ff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "18px", flexShrink: 0 }}>
-                      🌐
+                    <div style={{ width: "34px", height: "34px", borderRadius: "8px", background: "#f5f3ff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      <Globe size={18} color="#7c3aed" />
                     </div>
                     <div>
                       <div style={{ fontWeight: "700", fontSize: "13px", color: "#0f172a" }}>Websites Maintenance</div>
@@ -18529,8 +18887,8 @@ const EndpointUpdatesPage = () => {
                   </div>
 
                   <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "10px 14px", display: "flex", alignItems: "center", gap: "12px" }}>
-                    <div style={{ width: "34px", height: "34px", borderRadius: "8px", background: "#eff6ff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "18px", flexShrink: 0 }}>
-                      💻
+                    <div style={{ width: "34px", height: "34px", borderRadius: "8px", background: "#eff6ff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      <Laptop size={18} color="#2563eb" />
                     </div>
                     <div>
                       <div style={{ fontWeight: "700", fontSize: "13px", color: "#0f172a" }}>Software Installations and Updates</div>
@@ -18539,8 +18897,8 @@ const EndpointUpdatesPage = () => {
                   </div>
 
                   <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "10px 14px", display: "flex", alignItems: "center", gap: "12px" }}>
-                    <div style={{ width: "34px", height: "34px", borderRadius: "8px", background: "#fff7ed", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "18px", flexShrink: 0 }}>
-                      ⚙️
+                    <div style={{ width: "34px", height: "34px", borderRadius: "8px", background: "#fff7ed", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      <Cpu size={18} color="#ea580c" />
                     </div>
                     <div>
                       <div style={{ fontWeight: "700", fontSize: "13px", color: "#0f172a" }}>Hardware Performance Maintenance</div>
@@ -18598,7 +18956,7 @@ const EndpointUpdatesPage = () => {
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "16px" }}>
                 <div>
                   <div style={{ fontSize: "18px", fontWeight: "800", color: "#0f172a", display: "flex", alignItems: "center", gap: "8px" }}>
-                    <span>❓</span>
+                    <HelpCircle size={20} color="#2563eb" />
                     <span>Frequently Asked Questions (FAQ)</span>
                   </div>
                   <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
@@ -18608,9 +18966,9 @@ const EndpointUpdatesPage = () => {
                 <button
                   type="button"
                   onClick={() => setShowFaqModal(false)}
-                  style={{ background: "transparent", border: "none", fontSize: "18px", color: "#64748b", cursor: "pointer", padding: "4px" }}
+                  style={{ background: "transparent", border: "none", fontSize: "18px", color: "#64748b", cursor: "pointer", padding: "4px", display: "flex", alignItems: "center" }}
                 >
-                  ✕
+                  <X size={18} />
                 </button>
               </div>
 
@@ -18618,7 +18976,7 @@ const EndpointUpdatesPage = () => {
               <div style={{ marginBottom: "14px" }}>
                 <input
                   type="text"
-                  placeholder="🔍 Search questions, keywords (e.g. quarantine, offline, schedule)..."
+                  placeholder="Search questions, keywords (e.g. quarantine, offline, schedule)..."
                   value={faqSearchQuery}
                   onChange={(e) => setFaqSearchQuery(e.target.value)}
                   style={{
@@ -18826,7 +19184,7 @@ function NavItem({
       }
       onClick={onClick}
     >
-      <span className="nav-icon">
+      <span className="nav-icon" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: "20px", height: "20px" }}>
         {icon}
       </span>
 

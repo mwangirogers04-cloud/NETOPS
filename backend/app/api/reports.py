@@ -1,5 +1,5 @@
 import csv
-from datetime import datetime, timedelta, time
+from datetime import datetime, timedelta, time, timezone
 from io import BytesIO, StringIO
 from xml.sax.saxutils import escape as xml_escape
 
@@ -344,7 +344,7 @@ def get_period_range(
 
     period = period.lower().strip()
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     if date:
         try:
             base_date = parse_report_date(date)
@@ -416,6 +416,10 @@ def get_period_range(
             try:
                 start = parse_report_datetime(start_datetime)
                 end = parse_report_datetime(end_datetime)
+                if start.tzinfo is not None:
+                    start = start.astimezone(timezone.utc).replace(tzinfo=None)
+                if end.tzinfo is not None:
+                    end = end.astimezone(timezone.utc).replace(tzinfo=None)
             except (ValueError, TypeError):
                 raise HTTPException(
                     status_code=400,
@@ -514,7 +518,7 @@ def get_custom_date_range(start_date: str, end_date: str):
             detail="Dates must use YYYY-MM-DD format.",
         )
 
-    now_date = datetime.utcnow().date()
+    now_date = datetime.now(timezone.utc).date()
     if start.date() > now_date or parse_report_date(end_date).date() > now_date:
         raise HTTPException(
             status_code=400,
@@ -701,7 +705,7 @@ def generate_report(
             "period": period,
             "start": start.isoformat(),
             "end": end.isoformat(),
-            "generated_at": datetime.utcnow().isoformat(),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
             "summary": {
                 "total_users": len(all_users),
                 "users_created_in_period": len(users_created),
@@ -781,7 +785,7 @@ def generate_report(
             "period": period,
             "start": start.isoformat(),
             "end": end.isoformat(),
-            "generated_at": datetime.utcnow().isoformat(),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
             "summary": {
                 "total_devices": len(devices),
                 "online_devices": sum(
@@ -1038,7 +1042,7 @@ def generate_report(
         "period": period,
         "start": start.isoformat(),
         "end": end.isoformat(),
-        "generated_at": datetime.utcnow().isoformat(),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
         "summary": {
             "total_events": len(filtered_events),
             "event_types": event_summary,
@@ -1116,7 +1120,7 @@ def download_isp_usage_csv(
     csv_content = generate_isp_usage_csv(data)
 
     clean_isp = isp.lower().replace(" ", "_")
-    filename = f"netops_isp_internet_usage_{clean_isp}_{period}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
+    filename = f"netops_isp_internet_usage_{clean_isp}_{period}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.csv"
     return Response(
         content=csv_content,
         media_type="text/csv; charset=utf-8",

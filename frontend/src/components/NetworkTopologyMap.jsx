@@ -1,4 +1,23 @@
 import React, { useState, useEffect, useMemo } from "react";
+import {
+  Map,
+  Layers,
+  Network,
+  RefreshCw,
+  Printer,
+  Shield,
+  Zap,
+  Phone,
+  Camera,
+  Server,
+  Smartphone,
+  Radio,
+  Laptop,
+  CheckCircle2,
+  Stethoscope,
+  Circle,
+  GitFork,
+} from "lucide-react";
 import { getDeviceInternetStatus, DeviceInterfaceBadge, isTypeAndVlanMatching } from "../utils/networkInterfaceStatus";
 
 export default function NetworkTopologyMap({
@@ -146,15 +165,15 @@ export default function NetworkTopologyMap({
   const sfpUplinkPorts = switchPorts.filter((p) => p.is_sfp || String(p.port || "").toLowerCase().startsWith("te"));
   const connectedPorts = switchPorts.filter((p) => p.status === "connected");
 
-  const getDeviceIcon = (type) => {
+  const getDeviceIcon = (type, size = 18) => {
     switch (type) {
-      case "voip": return "📞";
-      case "camera": return "📹";
-      case "printer": return "🖨️";
-      case "server": return "🖥️";
-      case "mobile": return "📱";
-      case "access_point": return "📡";
-      default: return "💻";
+      case "voip": return <Phone size={size} color="#0284c7" />;
+      case "camera": return <Camera size={size} color="#8b5cf6" />;
+      case "printer": return <Printer size={size} color="#64748b" />;
+      case "server": return <Server size={size} color="#f59e0b" />;
+      case "mobile": return <Smartphone size={size} color="#10b981" />;
+      case "access_point": return <Radio size={size} color="#06b6d4" />;
+      default: return <Laptop size={size} color="#475569" />;
     }
   };
 
@@ -164,7 +183,8 @@ export default function NetworkTopologyMap({
       <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "12px", marginBottom: "16px" }}>
         <div>
           <div className="page-title" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <span>🗺️ Interactive Network Topology Map</span>
+            <Map size={22} color="#2563eb" />
+            <span>Interactive Network Topology Map</span>
             <span style={{ fontSize: "11px", background: "#eff6ff", color: "#1d4ed8", border: "1px solid #93c5fd", padding: "3px 8px", borderRadius: "12px", fontWeight: "700" }}>
               Live 802.1Q VLAN Hierarchy
             </span>
@@ -223,15 +243,17 @@ export default function NetworkTopologyMap({
             type="button"
             className={viewMode === "diagram" ? "primary-button small" : "secondary-button small"}
             onClick={() => setViewMode("diagram")}
+            style={{ display: "flex", alignItems: "center", gap: "6px" }}
           >
-            📊 Layered Diagram
+            <Layers size={14} /> Layered Diagram
           </button>
           <button
             type="button"
             className={viewMode === "clusters" ? "primary-button small" : "secondary-button small"}
             onClick={() => setViewMode("clusters")}
+            style={{ display: "flex", alignItems: "center", gap: "6px" }}
           >
-            🗂️ Subnet Clusters
+            <Network size={14} /> Subnet Clusters
           </button>
           <button
             type="button"
@@ -241,17 +263,19 @@ export default function NetworkTopologyMap({
               if (refreshAll) refreshAll();
             }}
             disabled={loading || switchingDensity}
+            style={{ display: "flex", alignItems: "center", gap: "6px" }}
           >
-            {loading || switchingDensity ? "Refreshing..." : "🔄 Refresh Topology"}
+            <RefreshCw size={13} className={loading || switchingDensity ? "spin" : ""} />
+            {loading || switchingDensity ? "Refreshing..." : "Refresh Topology"}
           </button>
           <button
             type="button"
             className="secondary-button small"
             onClick={() => window.print()}
             title="Print or export the network topology diagram to PDF"
-            style={{ display: "flex", alignItems: "center", gap: "4px" }}
+            style={{ display: "flex", alignItems: "center", gap: "6px" }}
           >
-            🖨️ Print / PDF
+            <Printer size={14} /> Print / PDF
           </button>
         </div>
       </div>
@@ -300,11 +324,11 @@ export default function NetworkTopologyMap({
         <div style={{ display: "flex", gap: "8px", alignItems: "center", marginTop: "12px", paddingTop: "10px", borderTop: "1px solid #f1f5f9", flexWrap: "wrap" }}>
           <span style={{ fontSize: "11px", fontWeight: "700", color: "#475569" }}>VLAN FILTER:</span>
           {[
-            { id: "all", label: "All VLANs" },
-            { id: "10", label: "🟢 VLAN 10 (Voice)" },
-            { id: "20", label: "🔵 VLAN 20 (Data)" },
-            { id: "30", label: "🟣 VLAN 30 (CCTV)" },
-            { id: "90", label: "🔴 VLAN 90 (Quarantine)" },
+            { id: "all", label: "All VLANs", color: null },
+            { id: "10", label: "VLAN 10 (Voice)", color: "#16a34a" },
+            { id: "20", label: "VLAN 20 (Data)", color: "#2563eb" },
+            { id: "30", label: "VLAN 30 (CCTV)", color: "#9333ea" },
+            { id: "90", label: "VLAN 90 (Quarantine)", color: "#dc2626" },
           ].map((pill) => (
             <button
               key={pill.id}
@@ -319,8 +343,12 @@ export default function NetworkTopologyMap({
                 color: vlanFilter === pill.id ? "#1d4ed8" : "#475569",
                 fontWeight: vlanFilter === pill.id ? "800" : "500",
                 cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "5px",
               }}
             >
+              {pill.color && <span style={{ width: "7px", height: "7px", borderRadius: "50%", background: pill.color, display: "inline-block" }} />}
               {pill.label}
             </button>
           ))}
@@ -374,15 +402,17 @@ export default function NetworkTopologyMap({
                   transition: "transform 0.15s ease",
                 }}
               >
-                <div style={{ fontSize: "28px", marginBottom: "4px" }}>🛡️</div>
+                <div style={{ display: "flex", justifyContent: "center", marginBottom: "6px" }}>
+                  <Shield size={32} color="#2563eb" />
+                </div>
                 <div style={{ fontSize: "14px", fontWeight: "800", color: "#0f172a" }}>
                   {activeFirewall?.vendor_title || "Sophos XG/XGS Firewall Gateway"}
                 </div>
                 <div style={{ fontSize: "11px", color: "#64748b", marginTop: "2px" }}>
                   Default Gateway • Zero-Trust NAC Enforcement Engine
                 </div>
-                <div style={{ marginTop: "6px", display: "inline-block", background: "#f0fdf4", color: "#166534", fontSize: "10px", padding: "2px 8px", borderRadius: "10px", fontWeight: "700" }}>
-                  🟢 WAN ACTIVE • DHCP SYNC ONLINE
+                <div style={{ marginTop: "6px", display: "inline-flex", alignItems: "center", gap: "5px", background: "#f0fdf4", color: "#166534", fontSize: "10px", padding: "2px 8px", borderRadius: "10px", fontWeight: "700" }}>
+                  <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#16a34a" }} /> WAN ACTIVE • DHCP SYNC ONLINE
                 </div>
               </div>
 
@@ -404,7 +434,7 @@ export default function NetworkTopologyMap({
                     boxShadow: is48PortSwitch ? "0 0 10px rgba(139, 92, 246, 0.25)" : "none",
                   }}
                 >
-                  <span>{is48PortSwitch ? "⚡" : "🔀"}</span>
+                  {is48PortSwitch ? <Zap size={13} /> : <GitFork size={13} />}
                   <span>
                     {is48PortSwitch
                       ? "10G SFP+ High-Speed Trunk Uplink (Te0/49-52 • Tagged VLANs 10, 20, 30, 90)"
@@ -438,8 +468,8 @@ export default function NetworkTopologyMap({
                   transition: "all 0.15s ease",
                 }}
               >
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "8px", marginBottom: "4px" }}>
-                  <span style={{ fontSize: "28px" }}>🔀</span>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "8px", marginBottom: "6px" }}>
+                  <Network size={26} color={is48PortSwitch ? "#7c3aed" : "#4f46e5"} />
                   <span
                     style={{
                       fontSize: "10px",
@@ -461,12 +491,12 @@ export default function NetworkTopologyMap({
                   Management IP: <code>{activeSwitch.management_ip || "192.168.0.2"}</code> • Model: <strong>{activeSwitch.model || (is48PortSwitch ? "Catalyst 2960X-48TS-L" : "Catalyst 2960-X")}</strong>
                 </div>
                 <div style={{ display: "flex", justifyContent: "center", gap: "6px", marginTop: "8px", flexWrap: "wrap" }}>
-                  <span style={{ background: "#f0fdf4", color: "#166534", border: "1px solid #bbf7d0", fontSize: "10px", padding: "2px 8px", borderRadius: "10px", fontWeight: "700" }}>
-                    🟢 {connectedPorts.length || (is48PortSwitch ? 28 : 14)} / {switchPorts.length || (is48PortSwitch ? 52 : 24)} Ports Connected
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: "5px", background: "#f0fdf4", color: "#166534", border: "1px solid #bbf7d0", fontSize: "10px", padding: "2px 8px", borderRadius: "10px", fontWeight: "700" }}>
+                    <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#16a34a" }} /> {connectedPorts.length || (is48PortSwitch ? 28 : 14)} / {switchPorts.length || (is48PortSwitch ? 52 : 24)} Ports Connected
                   </span>
                   {is48PortSwitch && (
-                    <span style={{ background: "#faf5ff", color: "#7c3aed", border: "1px solid #e9d5ff", fontSize: "10px", padding: "2px 8px", borderRadius: "10px", fontWeight: "700" }}>
-                      ⚡ 4x 10G SFP+ Uplinks Ready
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", background: "#faf5ff", color: "#7c3aed", border: "1px solid #e9d5ff", fontSize: "10px", padding: "2px 8px", borderRadius: "10px", fontWeight: "700" }}>
+                      <Zap size={11} /> 4x 10G SFP+ Uplinks Ready
                     </span>
                   )}
                   <span style={{ background: "#eff6ff", color: "#2563eb", border: "1px solid #bfdbfe", fontSize: "10px", padding: "2px 8px", borderRadius: "10px", fontWeight: "700" }}>
@@ -713,19 +743,20 @@ export default function NetworkTopologyMap({
                     <button
                       type="button"
                       className="primary-button small"
-                      style={{ background: "#b91c1c", borderColor: "#991b1b" }}
+                      style={{ background: "#b91c1c", borderColor: "#991b1b", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}
                       onClick={() => handleOpenCveModal(selectedNode.data)}
                     >
-                      🛡️ Audit CVE Vulnerabilities
+                      <Shield size={14} /> Audit CVE Vulnerabilities
                     </button>
                   )}
                   {handleRunTroubleshoot && (
                     <button
                       type="button"
                       className="secondary-button small"
+                      style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}
                       onClick={() => handleRunTroubleshoot(selectedNode.data)}
                     >
-                      🩺 Troubleshoot &amp; Diagnose
+                      <Stethoscope size={14} /> Troubleshoot &amp; Diagnose
                     </button>
                   )}
                 </div>

@@ -1,4 +1,22 @@
 import React, { useEffect, useState, useRef } from "react";
+import {
+  Activity,
+  Users,
+  Calendar,
+  History,
+  Clock,
+  Globe,
+  Building2,
+  Copy,
+  Check,
+  LogOut,
+  RefreshCw,
+  CheckCircle2,
+  AlertTriangle,
+  Moon,
+  FileText,
+  Radio,
+} from "lucide-react";
 
 export default function UserMonitoringPage({ API_URL, currentUser, getAuthHeaders, setActivePage }) {
   const [activeTab, setActiveTab] = useState("live"); // "live", "users", "history"
@@ -230,7 +248,9 @@ export default function UserMonitoringPage({ API_URL, currentUser, getAuthHeader
     return (
       <span
         style={{
-          display: "inline-block",
+          display: "inline-flex",
+          alignItems: "center",
+          gap: "4px",
           padding: "3px 8px",
           borderRadius: "12px",
           fontSize: "11px",
@@ -240,7 +260,7 @@ export default function UserMonitoringPage({ API_URL, currentUser, getAuthHeader
           border: `1px solid ${item.color}30`,
         }}
       >
-        📄 {item.label}
+        <FileText size={11} /> {item.label}
       </span>
     );
   };
@@ -262,8 +282,9 @@ export default function UserMonitoringPage({ API_URL, currentUser, getAuthHeader
       >
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <Activity size={22} color="#2563eb" />
             <h1 style={{ fontSize: "22px", fontWeight: "800", margin: 0, color: "#0f172a" }}>
-              📡 Developer User Monitor &amp; Live Activity
+              Developer User Monitor &amp; Live Activity
             </h1>
             <span
               style={{
@@ -344,9 +365,12 @@ export default function UserMonitoringPage({ API_URL, currentUser, getAuthHeader
               fontWeight: "700",
               cursor: refreshing ? "not-allowed" : "pointer",
               boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
             }}
           >
-            <span style={{ transform: refreshing ? "rotate(180deg)" : "none", transition: "transform 0.5s" }}>🔄</span>
+            <RefreshCw size={13} className={refreshing ? "spin" : ""} />
             {refreshing ? "Updating..." : "Sync Now"}
           </button>
         </div>
@@ -364,9 +388,13 @@ export default function UserMonitoringPage({ API_URL, currentUser, getAuthHeader
             color: "#065f46",
             fontSize: "13px",
             fontWeight: "600",
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
           }}
         >
-          ✓ {actionSuccessNotice}
+          <CheckCircle2 size={16} />
+          <span>{actionSuccessNotice}</span>
         </div>
       )}
       {errorNotice && (
@@ -380,9 +408,13 @@ export default function UserMonitoringPage({ API_URL, currentUser, getAuthHeader
             color: "#991b1b",
             fontSize: "13px",
             fontWeight: "600",
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
           }}
         >
-          ⚠️ {errorNotice}
+          <AlertTriangle size={16} />
+          <span>{errorNotice}</span>
         </div>
       )}
 
@@ -412,7 +444,7 @@ export default function UserMonitoringPage({ API_URL, currentUser, getAuthHeader
             <span style={{ fontSize: "12px", fontWeight: "700", textTransform: "uppercase", color: "#64748b" }}>
               Online Right Now
             </span>
-            <span style={{ fontSize: "18px" }}>🟢</span>
+            <Radio size={18} color="#10b981" />
           </div>
           <div style={{ fontSize: "28px", fontWeight: "800", color: "#0f172a", marginTop: "8px" }}>
             {summary?.online_users_count ?? 0}
@@ -439,7 +471,7 @@ export default function UserMonitoringPage({ API_URL, currentUser, getAuthHeader
             <span style={{ fontSize: "12px", fontWeight: "700", textTransform: "uppercase", color: "#64748b" }}>
               Total Users
             </span>
-            <span style={{ fontSize: "18px" }}>👥</span>
+            <Users size={18} color="#3b82f6" />
           </div>
           <div style={{ fontSize: "28px", fontWeight: "800", color: "#0f172a", marginTop: "8px" }}>
             {summary?.total_registered_users ?? 0}
@@ -466,7 +498,7 @@ export default function UserMonitoringPage({ API_URL, currentUser, getAuthHeader
             <span style={{ fontSize: "12px", fontWeight: "700", textTransform: "uppercase", color: "#64748b" }}>
               Active Today
             </span>
-            <span style={{ fontSize: "18px" }}>📅</span>
+            <Calendar size={18} color="#f59e0b" />
           </div>
           <div style={{ fontSize: "28px", fontWeight: "800", color: "#0f172a", marginTop: "8px" }}>
             {summary?.unique_users_today ?? 0}
@@ -493,7 +525,7 @@ export default function UserMonitoringPage({ API_URL, currentUser, getAuthHeader
             <span style={{ fontSize: "12px", fontWeight: "700", textTransform: "uppercase", color: "#64748b" }}>
               Total Logins / Sessions
             </span>
-            <span style={{ fontSize: "18px" }}>📜</span>
+            <History size={18} color="#8b5cf6" />
           </div>
           <div style={{ fontSize: "28px", fontWeight: "800", color: "#0f172a", marginTop: "8px" }}>
             {summary?.total_sessions_all_time ?? 0}
@@ -530,7 +562,8 @@ export default function UserMonitoringPage({ API_URL, currentUser, getAuthHeader
             gap: "8px",
           }}
         >
-          <span>🟢 Live Online Sessions</span>
+          <Activity size={15} />
+          <span>Live Online Sessions</span>
           <span
             style={{
               background: activeTab === "live" ? "#dbeafe" : "#f1f5f9",
@@ -561,7 +594,8 @@ export default function UserMonitoringPage({ API_URL, currentUser, getAuthHeader
             gap: "8px",
           }}
         >
-          <span>👥 User Directory &amp; Lifecycle</span>
+          <Users size={15} />
+          <span>User Directory &amp; Lifecycle</span>
           <span
             style={{
               background: activeTab === "users" ? "#dbeafe" : "#f1f5f9",
@@ -592,7 +626,8 @@ export default function UserMonitoringPage({ API_URL, currentUser, getAuthHeader
             gap: "8px",
           }}
         >
-          <span>📜 Login &amp; Logout History Log</span>
+          <History size={15} />
+          <span>Login &amp; Logout History Log</span>
           <span
             style={{
               background: activeTab === "history" ? "#dbeafe" : "#f1f5f9",
@@ -635,7 +670,9 @@ export default function UserMonitoringPage({ API_URL, currentUser, getAuthHeader
 
           {liveSessions.length === 0 ? (
             <div style={{ padding: "48px 24px", textAlign: "center", color: "#64748b" }}>
-              <div style={{ fontSize: "36px", marginBottom: "8px" }}>💤</div>
+              <div style={{ display: "flex", justifyContent: "center", marginBottom: "8px" }}>
+                <Moon size={36} color="#94a3b8" />
+              </div>
               <div style={{ fontSize: "15px", fontWeight: "600", color: "#334155" }}>
                 No external users are actively browsing right now.
               </div>
@@ -722,12 +759,12 @@ export default function UserMonitoringPage({ API_URL, currentUser, getAuthHeader
                       {/* Logged in from (Location) */}
                       <td style={{ padding: "14px 16px" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: "6px", fontWeight: "700", color: "#0f172a" }}>
-                          <span style={{ fontSize: "16px" }}>{s.location?.flag || "🌐"}</span>
+                          {s.location?.flag ? <span>{s.location.flag}</span> : <Globe size={15} color="#3b82f6" />}
                           <span>{s.location_display || s.location?.display || "Unknown Location"}</span>
                         </div>
                         {s.location?.isp && (
-                          <div style={{ fontSize: "11px", color: "#64748b", marginTop: "2px" }}>
-                            🏢 {s.location.isp}
+                          <div style={{ fontSize: "11px", color: "#64748b", marginTop: "2px", display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                            <Building2 size={11} color="#64748b" /> {s.location.isp}
                           </div>
                         )}
                       </td>
@@ -745,12 +782,14 @@ export default function UserMonitoringPage({ API_URL, currentUser, getAuthHeader
                               background: "none",
                               border: "none",
                               cursor: "pointer",
-                              fontSize: "11px",
+                              padding: 0,
+                              display: "inline-flex",
+                              alignItems: "center",
                               color: copiedIp === s.session_id ? "#10b981" : "#94a3b8",
                             }}
                             title="Copy IP"
                           >
-                            {copiedIp === s.session_id ? "✓" : "📋"}
+                            {copiedIp === s.session_id ? <Check size={12} color="#10b981" /> : <Copy size={12} />}
                           </button>
                         </div>
                       </td>
@@ -773,8 +812,8 @@ export default function UserMonitoringPage({ API_URL, currentUser, getAuthHeader
 
                       {/* Duration */}
                       <td style={{ padding: "14px 16px" }}>
-                        <span style={{ fontWeight: "700", color: "#0f172a" }}>
-                          ⏱️ {formatDuration(s.duration_seconds)}
+                        <span style={{ fontWeight: "700", color: "#0f172a", display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                          <Clock size={12} color="#64748b" /> {formatDuration(s.duration_seconds)}
                         </span>
                       </td>
 
@@ -815,10 +854,13 @@ export default function UserMonitoringPage({ API_URL, currentUser, getAuthHeader
                             fontSize: "12px",
                             fontWeight: "700",
                             cursor: "pointer",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "5px",
                           }}
                           title="Force terminate user session"
                         >
-                          🚪 Disconnect
+                          <LogOut size={12} /> Disconnect
                         </button>
                       </td>
                     </tr>
@@ -965,12 +1007,12 @@ export default function UserMonitoringPage({ API_URL, currentUser, getAuthHeader
                     {/* Logged In From (Location) */}
                     <td style={{ padding: "14px 16px" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: "6px", fontWeight: "700", color: "#0f172a" }}>
-                        <span style={{ fontSize: "16px" }}>{u.last_location?.flag || "🌐"}</span>
+                        {u.last_location?.flag ? <span>{u.last_location.flag}</span> : <Globe size={15} color="#3b82f6" />}
                         <span>{u.last_location_display || "Unknown Location"}</span>
                       </div>
                       {u.last_location?.isp && (
-                        <div style={{ fontSize: "11px", color: "#64748b", marginTop: "2px" }}>
-                          🏢 {u.last_location.isp}
+                        <div style={{ fontSize: "11px", color: "#64748b", marginTop: "2px", display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                          <Building2 size={11} color="#64748b" /> {u.last_location.isp}
                         </div>
                       )}
                     </td>
@@ -1019,7 +1061,9 @@ export default function UserMonitoringPage({ API_URL, currentUser, getAuthHeader
 
                     {/* Total Duration */}
                     <td style={{ padding: "14px 16px", fontWeight: "600", color: "#0f172a" }}>
-                      ⏱️ {formatDuration(u.total_duration_seconds)}
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                        <Clock size={12} color="#64748b" /> {formatDuration(u.total_duration_seconds)}
+                      </span>
                     </td>
                   </tr>
                 ))}
@@ -1160,23 +1204,29 @@ export default function UserMonitoringPage({ API_URL, currentUser, getAuthHeader
                       {/* Status */}
                       <td style={{ padding: "12px 16px" }}>
                         {s.is_online ? (
-                          <span style={{ color: "#059669", fontWeight: "700", fontSize: "12px" }}>🟢 Online</span>
+                          <span style={{ color: "#059669", fontWeight: "700", fontSize: "12px", display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                            <span style={{ width: "7px", height: "7px", borderRadius: "50%", background: "#10b981", display: "inline-block" }} /> Online
+                          </span>
                         ) : s.is_active ? (
-                          <span style={{ color: "#d97706", fontWeight: "600", fontSize: "12px" }}>🟡 Active (Idle)</span>
+                          <span style={{ color: "#d97706", fontWeight: "600", fontSize: "12px", display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                            <span style={{ width: "7px", height: "7px", borderRadius: "50%", background: "#f59e0b", display: "inline-block" }} /> Active (Idle)
+                          </span>
                         ) : (
-                          <span style={{ color: "#64748b", fontSize: "12px" }}>⚪ Ended</span>
+                          <span style={{ color: "#64748b", fontSize: "12px", display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                            <span style={{ width: "7px", height: "7px", borderRadius: "50%", background: "#94a3b8", display: "inline-block" }} /> Ended
+                          </span>
                         )}
                       </td>
 
                       {/* Logged in from (Location) */}
                       <td style={{ padding: "12px 16px" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: "6px", fontWeight: "600", color: "#0f172a" }}>
-                          <span style={{ fontSize: "15px" }}>{s.location?.flag || "🌐"}</span>
+                          {s.location?.flag ? <span>{s.location.flag}</span> : <Globe size={15} color="#3b82f6" />}
                           <span>{s.location_display || s.location?.display || "Unknown Location"}</span>
                         </div>
                         {s.location?.isp && (
-                          <div style={{ fontSize: "11px", color: "#64748b" }}>
-                            🏢 {s.location.isp}
+                          <div style={{ fontSize: "11px", color: "#64748b", display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                            <Building2 size={11} color="#64748b" /> {s.location.isp}
                           </div>
                         )}
                       </td>

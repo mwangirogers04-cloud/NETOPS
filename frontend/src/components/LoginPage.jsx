@@ -1,6 +1,33 @@
 import React, { useEffect, useState } from "react";
 import { NETOPS_FAQS } from "../data/faqs";
 import NetOpsLogo from "./NetOpsLogo";
+import {
+  Shield,
+  ShieldCheck,
+  ShieldAlert,
+  Lock,
+  Unlock,
+  KeyRound,
+  Crown,
+  User,
+  Mail,
+  Phone,
+  AlertTriangle,
+  AlertCircle,
+  Check,
+  CheckCircle2,
+  XCircle,
+  Clock,
+  Eye,
+  EyeOff,
+  RefreshCw,
+  HelpCircle,
+  Camera,
+  Cable,
+  Globe,
+  Laptop,
+  Cpu,
+} from "lucide-react";
 
 const formatFetchError = (err, defaultMsg = "Request failed.") => {
   const msg = err?.message || "";
@@ -227,12 +254,12 @@ export default function LoginPage({
           gap: "4px 10px",
         }}
       >
-        <div style={itemStyle(r.minLength)}>{r.minLength ? "✓" : "○"} Min 8 characters</div>
-        <div style={itemStyle(r.hasUpper)}>{r.hasUpper ? "✓" : "○"} 1 Uppercase (A–Z)</div>
-        <div style={itemStyle(r.hasLower)}>{r.hasLower ? "✓" : "○"} 1 Lowercase (a–z)</div>
-        <div style={itemStyle(r.hasNumber)}>{r.hasNumber ? "✓" : "○"} 1 Number (0–9)</div>
-        <div style={itemStyle(r.hasSpecial)}>{r.hasSpecial ? "✓" : "○"} 1 Special (@#$%!&*)</div>
-        <div style={itemStyle(r.noPersonal)}>{r.noPersonal ? "✓" : "○"} No name or email</div>
+        <div style={itemStyle(r.minLength)}><span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>{r.minLength ? <Check size={11} /> : "○"} Min 8 characters</span></div>
+        <div style={itemStyle(r.hasUpper)}><span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>{r.hasUpper ? <Check size={11} /> : "○"} 1 Uppercase (A–Z)</span></div>
+        <div style={itemStyle(r.hasLower)}><span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>{r.hasLower ? <Check size={11} /> : "○"} 1 Lowercase (a–z)</span></div>
+        <div style={itemStyle(r.hasNumber)}><span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>{r.hasNumber ? <Check size={11} /> : "○"} 1 Number (0–9)</span></div>
+        <div style={itemStyle(r.hasSpecial)}><span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>{r.hasSpecial ? <Check size={11} /> : "○"} 1 Special (@#$%!&*)</span></div>
+        <div style={itemStyle(r.noPersonal)}><span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>{r.noPersonal ? <Check size={11} /> : "○"} No name or email</span></div>
       </div>
     );
   };
@@ -498,7 +525,7 @@ export default function LoginPage({
       setForgotStep(1);
       setIdentifier(forgotIdentifier);
       setPassword("");
-      setSuccessMessage("✅ Password reset successfully! You can now sign in with your new password.");
+      setSuccessMessage("Password reset successfully! You can now sign in with your new password.");
     } catch (err) {
       setErrorMessage(formatFetchError(err, "Failed to reset password."));
     } finally {
@@ -571,7 +598,7 @@ export default function LoginPage({
       setPassword("");
       setSuccessMessage(
         data.message ||
-          `✅ Password for '${resetUsername}' has been directly reset using Admin/Developer rights (no OTP required).`
+          `Password for '${resetUsername}' has been directly reset using Admin/Developer rights (no OTP required).`
       );
     } catch (err) {
       setErrorMessage(formatFetchError(err, "Failed to reset user password."));
@@ -872,14 +899,14 @@ export default function LoginPage({
               color: "#1e293b",
             }}
           >
-            🔑 Console Sign In
+            <KeyRound size={15} /> Console Sign In
           </div>
         )}
 
         {/* ALERTS */}
         {successMessage && (
           <div className="login-alert success">
-            <span>✅</span>
+            <CheckCircle2 size={16} color="#059669" />
             <div>{successMessage}</div>
           </div>
         )}
@@ -899,7 +926,7 @@ export default function LoginPage({
             }}
           >
             <div style={{ display: "flex", alignItems: "center", gap: "10px", width: "100%" }}>
-              <span style={{ fontSize: "22px" }}>🚨</span>
+              <ShieldAlert size={24} color="#ef4444" />
               <div>
                 <div style={{ fontWeight: "800", fontSize: "14px", color: "#fca5a5" }}>
                   Account Locked: 3 Incorrect Password Attempts
@@ -927,11 +954,11 @@ export default function LoginPage({
                 boxSizing: "border-box",
               }}
             >
-              <div style={{ fontWeight: "700", marginBottom: "4px", color: "#fca5a5" }}>
-                📞 Administrator Contacts:
+              <div style={{ fontWeight: "700", marginBottom: "6px", color: "#fca5a5", display: "flex", alignItems: "center", gap: "6px" }}>
+                <Phone size={13} /> Administrator Contacts:
               </div>
-              <div>🛡️ <strong>System Administrator:</strong> <a href="mailto:admin@netops.local" style={{ color: "#93c5fd", textDecoration: "underline" }}>admin@netops.local</a></div>
-              <div>👑 <strong>Lead Developer (Super Admin):</strong> <a href="mailto:developer@netops.local" style={{ color: "#93c5fd", textDecoration: "underline" }}>developer@netops.local</a></div>
+              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}><ShieldCheck size={13} color="#93c5fd" /> <strong>System Administrator:</strong> <a href="mailto:admin@netops.local" style={{ color: "#93c5fd", textDecoration: "underline" }}>admin@netops.local</a></div>
+              <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "3px" }}><Crown size={13} color="#fcd34d" /> <strong>Lead Developer (Super Admin):</strong> <a href="mailto:developer@netops.local" style={{ color: "#93c5fd", textDecoration: "underline" }}>developer@netops.local</a></div>
             </div>
 
             <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", marginTop: "4px", alignItems: "center" }}>
@@ -951,7 +978,9 @@ export default function LoginPage({
                   setAdminTargetUser(identifier);
                 }}
               >
-                🛡️ Direct Admin / Dev Password Reset →
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                  <ShieldCheck size={13} /> Direct Admin / Dev Password Reset →
+                </span>
               </button>
               <span style={{ color: "#64748b" }}>•</span>
               <button
@@ -971,13 +1000,15 @@ export default function LoginPage({
                   setForgotIdentifier(identifier);
                 }}
               >
-                🔑 Reset with 5-Minute OTP →
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                  <KeyRound size={13} /> Reset with 5-Minute OTP →
+                </span>
               </button>
             </div>
           </div>
         ) : errorMessage ? (
           <div className="login-alert error">
-            <span>⚠️</span>
+            <AlertCircle size={16} color="#ef4444" />
             <div>{errorMessage}</div>
           </div>
         ) : null}
@@ -1001,7 +1032,7 @@ export default function LoginPage({
             }}
           >
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <span style={{ fontSize: "16px" }}>⏱️</span>
+              <Clock size={16} color="#b45309" />
               <div>{inactivityAlert}</div>
             </div>
             <button
@@ -1041,7 +1072,7 @@ export default function LoginPage({
             }}
           >
             <div style={{ display: "flex", alignItems: "flex-start", gap: "10px" }}>
-              <span style={{ fontSize: "20px", lineHeight: "1" }}>🔒</span>
+              <Lock size={20} color="#991b1b" style={{ flexShrink: 0, marginTop: 2 }} />
               <div style={{ flex: 1 }}>
                 <div style={{ fontWeight: "800", fontSize: "14px", marginBottom: "4px", color: "#991b1b" }}>
                   Password Expired (3 Months)
@@ -1059,6 +1090,9 @@ export default function LoginPage({
                       borderColor: "#b91c1c",
                       fontWeight: "700",
                       cursor: "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "6px",
                     }}
                     onClick={() => {
                       setAdminTargetUser(identifier);
@@ -1068,7 +1102,7 @@ export default function LoginPage({
                       setErrorMessage("");
                     }}
                   >
-                    🛡️ Request Administrator / Developer Reset →
+                    <ShieldCheck size={13} /> Request Administrator / Developer Reset →
                   </button>
                   <button
                     type="button"
@@ -1121,7 +1155,9 @@ export default function LoginPage({
                     }}
                     title="By policy, passwords can only be reset by an Administrator or Developer"
                   >
-                    🛡️ Forgot Password? (Admin / Dev Reset)
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                      <Shield size={12} /> Forgot Password? (Admin / Dev Reset)
+                    </span>
                   </button>
                 </div>
               </div>
@@ -1140,7 +1176,7 @@ export default function LoginPage({
                   onClick={() => setShowPassword(!showPassword)}
                   title={showPassword ? "Hide password" : "Show password"}
                 >
-                  {showPassword ? "👁️‍🗨️" : "👁️"}
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
               </div>
             </div>
@@ -1168,13 +1204,15 @@ export default function LoginPage({
                   : {}
               }
             >
-              {authSuccess
-                ? "✅ Authenticated! Opening Console..."
-                : loading
-                ? "⏳ Verifying Credentials..."
-                : isLockedOut
-                ? "🔒 Locked — Please Contact Administrator"
-                : "Sign In to Console →"}
+              {authSuccess ? (
+                <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}><CheckCircle2 size={16} /> Authenticated! Opening Console...</span>
+              ) : loading ? (
+                <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}><RefreshCw size={14} className="spin" /> Verifying Credentials...</span>
+              ) : isLockedOut ? (
+                <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}><Lock size={14} /> Locked — Please Contact Administrator</span>
+              ) : (
+                "Sign In to Console →"
+              )}
             </button>
 
             {isLockedOut && (
@@ -1193,7 +1231,9 @@ export default function LoginPage({
                     } catch (_) {}
                   }}
                 >
-                  🔄 Try logging in as another account
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                    <RefreshCw size={12} /> Try logging in as another account
+                  </span>
                 </button>
               </div>
             )}
@@ -1211,12 +1251,14 @@ export default function LoginPage({
                 lineHeight: "1.5",
               }}
             >
-              🔒 <strong>Need an account?</strong> User self-registration is disabled. New accounts can only be provisioned by an <strong>Administrator</strong> or <strong>Developer</strong>. Please contact your system administrator to request access.
+              <Lock size={13} style={{ display: "inline-block", verticalAlign: "middle", marginRight: "4px" }} /> <strong>Need an account?</strong> User self-registration is disabled. New accounts can only be provisioned by an <strong>Administrator</strong> or <strong>Developer</strong>. Please contact your system administrator to request access.
             </div>
 
             {/* ROLE-BASED SECURITY POLICY */}
             <div className="quick-roles-panel">
-              <div className="quick-roles-title">🔒 Role-Based Security Policy</div>
+              <div className="quick-roles-title" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                <Lock size={13} /> Role-Based Security Policy
+              </div>
               <div
                 style={{
                   background: "#f8fafc",
@@ -1228,8 +1270,8 @@ export default function LoginPage({
                   lineHeight: 1.5,
                 }}
               >
-                <div><strong style={{ color: "#2563eb" }}>🛡️ Administrators:</strong> Full access to LAN scanning, endpoint patching, firewall enforcement & report exports.</div>
-                <div style={{ marginTop: "4px" }}><strong style={{ color: "#0f172a" }}>👤 Standard Users:</strong> Restricted to read-only Dashboard view only (LAN scan updates & report downloads disabled).</div>
+                <div><strong style={{ color: "#2563eb", display: "inline-flex", alignItems: "center", gap: "4px" }}><ShieldCheck size={13} /> Administrators:</strong> Full access to LAN scanning, endpoint patching, firewall enforcement & report exports.</div>
+                <div style={{ marginTop: "4px" }}><strong style={{ color: "#0f172a", display: "inline-flex", alignItems: "center", gap: "4px" }}><User size={13} /> Standard Users:</strong> Restricted to read-only Dashboard view only (LAN scan updates & report downloads disabled).</div>
               </div>
             </div>
           </form>
@@ -1250,7 +1292,7 @@ export default function LoginPage({
               }}
             >
               <div style={{ fontSize: "14px", fontWeight: "800", color: "#1d4ed8", display: "flex", alignItems: "center", gap: "8px" }}>
-                <span>🛡️</span>
+                <ShieldCheck size={18} color="#1d4ed8" />
                 <span>Administrator Password Expired (3 Months)</span>
               </div>
               <div style={{ fontSize: "12px", color: "#334155", marginTop: "5px", lineHeight: "1.5" }}>
@@ -1324,7 +1366,15 @@ export default function LoginPage({
               </div>
 
               <button type="submit" className="login-submit-btn" disabled={loading}>
-                {loading ? "Updating Password & Signing In..." : "🔑 Reset Administrator Password & Sign In →"}
+                {loading ? (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", justifyContent: "center" }}>
+                    <RefreshCw size={14} className="spin" /> Updating Password & Signing In...
+                  </span>
+                ) : (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", justifyContent: "center" }}>
+                    <KeyRound size={14} /> Reset Administrator Password & Sign In →
+                  </span>
+                )}
               </button>
 
               <div style={{ textAlign: "center", marginTop: "16px" }}>
@@ -1359,7 +1409,7 @@ export default function LoginPage({
               }}
             >
               <div style={{ fontSize: "14px", fontWeight: "800", color: "#1d4ed8", display: "flex", alignItems: "center", gap: "8px" }}>
-                <span>🛡️</span>
+                <ShieldCheck size={18} color="#1d4ed8" />
                 <span>Administrator & Developer Password Reset</span>
               </div>
               <div style={{ fontSize: "12px", color: "#334155", marginTop: "5px", lineHeight: "1.5" }}>
@@ -1400,11 +1450,12 @@ export default function LoginPage({
                     marginBottom: "16px",
                   }}
                 >
-                  <div style={{ fontSize: "11px", fontWeight: "800", color: "#1d4ed8", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "6px" }}>
-                    🔐 Authorize with Admin / Developer Credentials
+                  <div style={{ fontSize: "11px", fontWeight: "800", color: "#1d4ed8", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "6px", display: "flex", alignItems: "center", gap: "6px" }}>
+                    <Lock size={12} /> Authorize with Admin / Developer Credentials
                   </div>
-                  <div style={{ fontSize: "11px", color: "#b45309", background: "#fef3c7", border: "1px solid #fde68a", borderRadius: "6px", padding: "6px 8px", marginBottom: "10px", fontWeight: "600" }}>
-                    ⚠️ Note: An Administrator can only reset standard user accounts. Resetting or unlocking an Administrator or Developer account requires Developer (Super Admin) credentials.
+                  <div style={{ fontSize: "11px", color: "#b45309", background: "#fef3c7", border: "1px solid #fde68a", borderRadius: "6px", padding: "6px 8px", marginBottom: "10px", fontWeight: "600", display: "flex", alignItems: "center", gap: "6px" }}>
+                    <AlertTriangle size={13} style={{ flexShrink: 0 }} />
+                    <span>Note: An Administrator can only reset standard user accounts. Resetting or unlocking an Administrator or Developer account requires Developer (Super Admin) credentials.</span>
                   </div>
 
                   <div className="form-group" style={{ marginBottom: "12px" }}>
@@ -1444,7 +1495,7 @@ export default function LoginPage({
                         onClick={() => setShowAdminAuthPassword(!showAdminAuthPassword)}
                         title={showAdminAuthPassword ? "Hide password" : "Show password"}
                       >
-                        {showAdminAuthPassword ? "👁️‍🗨️" : "👁️"}
+                        {showAdminAuthPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                       </button>
                     </div>
                   </div>
@@ -1468,7 +1519,7 @@ export default function LoginPage({
                       onClick={() => setShowAdminNewPassword(!showAdminNewPassword)}
                       title={showAdminNewPassword ? "Hide password" : "Show password"}
                     >
-                      {showAdminNewPassword ? "👁️‍🗨️" : "👁️"}
+                      {showAdminNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
                   </div>
                   {renderPasswordChecklist(adminNewPassword, [adminTargetUser, forgotIdentifier])}
@@ -1492,7 +1543,15 @@ export default function LoginPage({
                   className="login-submit-btn"
                   disabled={loading}
                 >
-                  {loading ? "Authorizing & Resetting Password..." : "🛡️ Reset User Password Now (No OTP) →"}
+                  {loading ? (
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", justifyContent: "center" }}>
+                      <RefreshCw size={14} className="spin" /> Authorizing & Resetting Password...
+                    </span>
+                  ) : (
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", justifyContent: "center" }}>
+                      <ShieldCheck size={15} /> Reset User Password Now (No OTP) →
+                    </span>
+                  )}
                 </button>
 
                 <div style={{ textAlign: "center", marginTop: "16px" }}>
@@ -1516,12 +1575,12 @@ export default function LoginPage({
           <div><strong style={{ color: "#0f172a" }}>NETOPS Version 2</strong> • copyright 2026</div>
           <div style={{ marginTop: "8px", fontSize: "11px", color: "#475569", display: "flex", justifyContent: "center", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
             <span style={{ fontWeight: 600, color: "#334155" }}>Support &amp; Inquiries:</span>
-            <a href="tel:+254704393504" style={{ color: "#2563eb", textDecoration: "none", fontWeight: 700 }}>
-              📞 +254704393504
+            <a href="tel:+254704393504" style={{ color: "#2563eb", textDecoration: "none", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: "4px" }}>
+              <Phone size={12} /> +254704393504
             </a>
             <span style={{ color: "#cbd5e1" }}>•</span>
-            <a href="mailto:rogersiru@gmail.com" style={{ color: "#2563eb", textDecoration: "none", fontWeight: 700 }}>
-              ✉️ rogersiru@gmail.com
+            <a href="mailto:rogersiru@gmail.com" style={{ color: "#2563eb", textDecoration: "none", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: "4px" }}>
+              <Mail size={12} /> rogersiru@gmail.com
             </a>
           </div>
 
@@ -1530,11 +1589,11 @@ export default function LoginPage({
               Services We Offer
             </div>
             <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "6px" }}>
-              <span style={{ background: "#f1f5f9", color: "#334155", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 500 }}>📹 CCTV Installation</span>
-              <span style={{ background: "#f1f5f9", color: "#334155", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 500 }}>🔌 Structured Cabling</span>
-              <span style={{ background: "#f1f5f9", color: "#334155", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 500 }}>🌐 Websites Maintenance</span>
-              <span style={{ background: "#f1f5f9", color: "#334155", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 500 }}>💻 Software Installations &amp; Updates</span>
-              <span style={{ background: "#f1f5f9", color: "#334155", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 500 }}>⚙️ Hardware Performance Maintenance</span>
+              <span style={{ background: "#f1f5f9", color: "#334155", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 500, display: "inline-flex", alignItems: "center", gap: "4px" }}><Camera size={12} /> CCTV Installation</span>
+              <span style={{ background: "#f1f5f9", color: "#334155", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 500, display: "inline-flex", alignItems: "center", gap: "4px" }}><Cable size={12} /> Structured Cabling</span>
+              <span style={{ background: "#f1f5f9", color: "#334155", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 500, display: "inline-flex", alignItems: "center", gap: "4px" }}><Globe size={12} /> Websites Maintenance</span>
+              <span style={{ background: "#f1f5f9", color: "#334155", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 500, display: "inline-flex", alignItems: "center", gap: "4px" }}><Laptop size={12} /> Software Installations &amp; Updates</span>
+              <span style={{ background: "#f1f5f9", color: "#334155", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 500, display: "inline-flex", alignItems: "center", gap: "4px" }}><Cpu size={12} /> Hardware Performance Maintenance</span>
             </div>
           </div>
 
@@ -1558,7 +1617,7 @@ export default function LoginPage({
                 transition: "all 0.15s ease",
               }}
             >
-              <span>❓</span> {showLoginFaqs ? "Hide Frequently Asked Questions (FAQ)" : "View Frequently Asked Questions (FAQ)"}
+              <HelpCircle size={13} /> {showLoginFaqs ? "Hide Frequently Asked Questions (FAQ)" : "View Frequently Asked Questions (FAQ)"}
             </button>
 
             {showLoginFaqs && (
