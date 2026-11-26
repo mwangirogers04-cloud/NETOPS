@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from "react";
-import { NETOPS_FAQS } from "../data/faqs";
 import NetOpsLogo from "./NetOpsLogo";
 import {
   Shield,
@@ -21,7 +20,6 @@ import {
   Eye,
   EyeOff,
   RefreshCw,
-  HelpCircle,
 } from "lucide-react";
 
 const formatFetchError = (err, defaultMsg = "Request failed.") => {
@@ -49,8 +47,6 @@ export default function LoginPage({
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
-  const [showLoginFaqs, setShowLoginFaqs] = useState(false);
-  const [openLoginFaqIndex, setOpenLoginFaqIndex] = useState(null);
   const [inactivityAlert, setInactivityAlert] = useState(() => {
     try {
       const saved = sessionStorage.getItem("netops_logout_notice");
@@ -1544,79 +1540,6 @@ export default function LoginPage({
               </form>
           </div>
         )}
-
-        {/* FAQS SECTION ON LOGIN */}
-        <div style={{ textAlign: "center", marginTop: "20px", paddingTop: "14px", borderTop: "1px solid #e2e8f0" }}>
-          <button
-              type="button"
-              onClick={() => setShowLoginFaqs(!showLoginFaqs)}
-              style={{
-                background: showLoginFaqs ? "#e0f2fe" : "#f8fafc",
-                border: "1px solid #cbd5e1",
-                borderRadius: "20px",
-                padding: "4px 12px",
-                fontSize: "11px",
-                fontWeight: "700",
-                color: showLoginFaqs ? "#0284c7" : "#475569",
-                cursor: "pointer",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "6px",
-                transition: "all 0.15s ease",
-              }}
-            >
-              <HelpCircle size={13} /> {showLoginFaqs ? "Hide Frequently Asked Questions (FAQ)" : "View Frequently Asked Questions (FAQ)"}
-            </button>
-
-            {showLoginFaqs && (
-              <div style={{ marginTop: "12px", textAlign: "left", display: "flex", flexDirection: "column", gap: "8px", maxHeight: "300px", overflowY: "auto", padding: "4px" }}>
-                {NETOPS_FAQS.map((faq, index) => {
-                  const isOpen = openLoginFaqIndex === index;
-                  return (
-                    <div
-                      key={faq.id || index}
-                      style={{
-                        background: "#f8fafc",
-                        border: "1px solid #e2e8f0",
-                        borderRadius: "8px",
-                        overflow: "hidden",
-                        transition: "all 0.15s ease",
-                      }}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => setOpenLoginFaqIndex(isOpen ? null : index)}
-                        style={{
-                          width: "100%",
-                          textAlign: "left",
-                          padding: "10px 12px",
-                          background: isOpen ? "#f1f5f9" : "transparent",
-                          border: "none",
-                          cursor: "pointer",
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                          gap: "8px",
-                        }}
-                      >
-                        <span style={{ fontSize: "12px", fontWeight: "700", color: "#0f172a" }}>
-                          {faq.question}
-                        </span>
-                        <span style={{ fontSize: "12px", color: "#64748b", fontWeight: "700" }}>
-                          {isOpen ? "▲" : "▼"}
-                        </span>
-                      </button>
-                      {isOpen && (
-                        <div style={{ padding: "10px 12px", borderTop: "1px solid #e2e8f0", fontSize: "12px", color: "#334155", lineHeight: "1.5", whiteSpace: "pre-line" }}>
-                          {faq.answer}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
       </div>
     </div>
   );
