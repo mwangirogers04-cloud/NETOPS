@@ -413,7 +413,14 @@ function App() {
   const [lanDevicesResult, setLanDevicesResult] = useState(null);
   const [detectedSubnet, setDetectedSubnet] = useState(() => {
     try {
-      return localStorage.getItem("netops_custom_subnet") || "192.168.0.0/24";
+      const custom = localStorage.getItem("netops_custom_subnet");
+      if (custom && custom !== "192.168.0.0/24") return custom;
+      const host = window.location.hostname;
+      if (host && /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/.test(host) && !host.startsWith("127.")) {
+        const parts = host.split(".");
+        return `${parts[0]}.${parts[1]}.${parts[2]}.0/24`;
+      }
+      return custom || "192.168.0.0/24";
     } catch {
       return "192.168.0.0/24";
     }
@@ -435,21 +442,18 @@ function App() {
   };
 
   const getConnectedNetworkLabel = () => {
+    const activeSubnet = detectedSubnet || activeNetworkDetails?.client_network || activeNetworkDetails?.default_network || "Auto";
     if (selectedInterface === "wlan0") {
       const wlan = detectedInterfaces.find((i) => i.interface === "wlan0" || i.is_wireless);
-      if (wlan) {
-        return `${wlan.ssid ? `Wi-Fi (${wlan.ssid})` : "Wi-Fi"} • ${wlan.network || detectedSubnet}`;
-      }
+      return `${wlan?.ssid ? `Wi-Fi (${wlan.ssid})` : "Wi-Fi"} • ${activeSubnet}`;
     } else if (selectedInterface === "eth0") {
       const eth = detectedInterfaces.find((i) => i.interface === "eth0" || (!i.is_wireless && !i.is_virtual));
-      if (eth) {
-        return `Wired (${eth.interface}) • ${eth.network || detectedSubnet}`;
-      }
+      return `Wired (${eth?.interface || "eth0"}) • ${activeSubnet}`;
     }
     if (activeNetworkDetails?.active_ssid) {
-      return `Wi-Fi (${activeNetworkDetails.active_ssid}) • ${detectedSubnet}`;
+      return `Wi-Fi (${activeNetworkDetails.active_ssid}) • ${activeSubnet}`;
     }
-    return `Auto-Detected • ${detectedSubnet}`;
+    return `Auto-Detected • ${activeSubnet}`;
   };
   const [detectedInterfaces, setDetectedInterfaces] = useState([]);
   const [selectedInterface, setSelectedInterface] = useState(() => {
@@ -578,12 +582,23 @@ function App() {
 
   const loadDetectedSubnets = async () => {
     try {
-      const response = await fetch(`${API_URL}/discovery/local-subnets`);
+      const host = window.location.hostname;
+      const clientParam = (host && /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/.test(host) && !host.startsWith("127."))
+        ? `?client_ip=${encodeURIComponent(host)}`
+        : "";
+      const response = await fetch(`${API_URL}/discovery/local-subnets${clientParam}`);
       if (response.ok) {
         const data = await response.json();
         setActiveNetworkDetails(data);
-        if (data.default_network) {
-          setDetectedSubnet(data.default_network);
+        const autoNet = data.client_network || data.default_network;
+        if (autoNet) {
+          setDetectedSubnet((prev) => {
+            const custom = localStorage.getItem("netops_custom_subnet");
+            if (custom && custom !== "192.168.0.0/24" && custom !== prev) {
+              return custom;
+            }
+            return autoNet;
+          });
         }
         if (Array.isArray(data.interfaces)) {
           setDetectedInterfaces(data.interfaces);
@@ -595,13 +610,38 @@ function App() {
   };
 
   const scanAllLanDevices = async (overrideNetwork = null, overrideInterface = null) => {
+    setShowProbeModal(false);
     const targetInterface = overrideInterface !== null ? overrideInterface : (selectedInterface || "all");
-    let targetNetwork = (overrideNetwork || detectedSubnet || "192.168.0.0/24").trim();
-    if (!targetNetwork) {
-      targetNetwork = "192.168.0.0/24";
+    let targetNetwork = (overrideNetwork || detectedSubnet || "auto").trim();
+
+    // Dynamically auto-resolve connected network if none or "auto"
+    if (!targetNetwork || targetNetwork === "auto" || targetNetwork === "current") {
+      try {
+        const host = window.location.hostname;
+        const clientParam = (host && /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/.test(host) && !host.startsWith("127."))
+          ? `?client_ip=${encodeURIComponent(host)}`
+          : "";
+        const netRes = await fetch(`${API_URL}/discovery/local-subnets${clientParam}`);
+        if (netRes.ok) {
+          const netData = await netRes.json();
+          const autoNet = netData.client_network || netData.default_network;
+          if (autoNet) {
+            targetNetwork = autoNet;
+            setDetectedSubnet(autoNet);
+          }
+          if (Array.isArray(netData.interfaces)) {
+            setDetectedInterfaces(netData.interfaces);
+          }
+        }
+      } catch (_) {}
     }
+
+    if (!targetNetwork || targetNetwork === "auto") {
+      targetNetwork = detectedSubnet || "192.168.0.0/24";
+    }
+
     // Auto-normalize CIDR mask if omitted by user (e.g. "192.168.1.0" -> "192.168.1.0/24")
-    if (!targetNetwork.includes("/")) {
+    if (targetNetwork && !targetNetwork.includes("/")) {
       const parts = targetNetwork.split(".");
       if (parts.length === 4) {
         targetNetwork = `${parts[0]}.${parts[1]}.${parts[2]}.0/24`;
@@ -611,9 +651,21 @@ function App() {
         targetNetwork = `${targetNetwork}/24`;
       }
     }
+
     handleSelectInterface(targetInterface);
     updateCustomSubnet(targetNetwork);
     setLanDevicesScanning(true);
+
+    // Live continuous polling so devices start appearing immediately as the scan progresses!
+    const pollInterval = setInterval(() => {
+      loadDevices();
+    }, 1200);
+
+    // Initial instant poll after 300ms for immediate kernel ARP cache hits
+    const quickTimer = setTimeout(() => {
+      loadDevices();
+    }, 300);
+
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 35000);
     try {
@@ -633,30 +685,34 @@ function App() {
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
+      clearInterval(pollInterval);
+      clearTimeout(quickTimer);
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
         throw new Error(errData.detail || `Scan failed: ${response.status}`);
       }
       const data = await response.json();
       setLanDevicesResult(data);
-      if (data.status === "unreachable_network" || data.status === "waiting_for_agent") {
-        setShowProbeModal(true);
-      }
       await loadDevices();
       await loadEvents();
       await loadAccessSchedules();
     } catch (err) {
       clearTimeout(timeoutId);
+      clearInterval(pollInterval);
+      clearTimeout(quickTimer);
       console.error("Discovery scan error:", err);
       if (err.name === "AbortError") {
-        alert("Discovery scan timed out: The network sweep took longer than 35 seconds. Please check if your remote network connection is stable or scan a single interface (eth0 or wlan0).");
+        await loadDevices();
       } else if (err.message && (err.message.toLowerCase().includes("failed to fetch") || err.message.toLowerCase().includes("networkerror"))) {
-        alert("Connection to NETOPS API timed out or server is starting up. Please wait ~15-30 seconds for the cloud instance (api.netops.co.ke) to respond, then retry.");
+        alert("Connection to NETOPS API timed out or server is starting up. Please wait a moment, then retry.");
       } else {
-        alert("LAN/WLAN Discovery scan failed: " + err.message);
+        alert("LAN/WLAN Discovery scan: " + err.message);
       }
     } finally {
+      clearInterval(pollInterval);
+      clearTimeout(quickTimer);
       setLanDevicesScanning(false);
+      await loadDevices();
     }
   };
 
@@ -5208,7 +5264,7 @@ const LanScannerPage = () => {
                       title="Enter any custom IPv4 CIDR subnet (e.g. 192.168.0.0/24, 192.168.1.0/24, 10.0.0.0/24)"
                     />
                     <div style={{ display: "inline-flex", gap: "4px", flexWrap: "wrap", alignItems: "center" }}>
-                      {["192.168.0.0/24", "192.168.1.0/24", "10.0.0.0/24", "172.16.0.0/24"].map((preset) => (
+                      {["192.168.88.0/24", "192.168.0.0/24", "192.168.1.0/24", "10.0.0.0/24", "172.16.0.0/24"].map((preset) => (
                         <button
                           key={`ls-preset-${preset}`}
                           type="button"

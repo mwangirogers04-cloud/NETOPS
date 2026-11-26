@@ -352,4 +352,16 @@ def test_agent_sync_marks_disconnected_device_offline(db_session):
     assert "went offline / disconnected from Home Network" in evt.message
 
 
+def test_detect_local_subnets_with_connected_client_ip():
+    from backend.app.services.discovery import detect_local_subnets
+
+    # When client connects from 192.168.88.100
+    res = detect_local_subnets(client_ip="192.168.88.100")
+    assert res["default_network"] == "192.168.88.0/24"
+    assert res["client_ip"] == "192.168.88.100"
+    assert res["client_network"] == "192.168.88.0/24"
+    assert any(i.get("network") == "192.168.88.0/24" for i in res["interfaces"])
+
+
+
 

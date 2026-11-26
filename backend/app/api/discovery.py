@@ -1,5 +1,5 @@
 import os
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, field_validator
 from sqlalchemy import and_, func, or_, select
@@ -28,12 +28,29 @@ router = APIRouter(
 
 
 @router.get("/local-subnets")
-def get_local_subnets():
+def get_local_subnets(
+    request: Request,
+    client_ip: str | None = Query(None, description="Optional IP address of the client/browser"),
+):
     """
     Detect local network subnets on host interfaces to provide
     zero-configuration LAN scanning.
+    Automatically identifies client machine IP to auto-detect the network connected to that machine.
     """
-    return detect_local_subnets()
+    req_ip = client_ip
+    if not req_ip and request is not None:
+        try:
+            forwarded = request.headers.get("x-forwarded-for")
+            if forwarded:
+                req_ip = forwarded.split(",")[0].strip()
+            elif request.headers.get("x-real-ip"):
+                req_ip = request.headers.get("x-real-ip").strip()
+            elif request.client and request.client.host:
+                req_ip = request.client.host
+        except Exception:
+            pass
+
+    return detect_local_subnets(client_ip=req_ip)
 
 
 class DiscoveryRequest(BaseModel):
@@ -215,7 +232,10 @@ def run_discovery_scan(
                     or_(Device.owner_id == owner_id, Device.owner_id.is_(None))
                 )
 
-            existing_real = db.scalars(existing_query).all()
+            try:
+                existing_real = db.scalars(existing_query).all()
+            except Exception:
+                existing_real = []
 
             if existing_real:
                 # Real physical devices exist! Return real inventory rather than generating fake ones
@@ -249,20 +269,34 @@ def run_discovery_scan(
                 scanned_network=target_network,
             )
 
-        # Detect and record endpoint update posture for all active online devices
-        local_ip = get_local_ip()
-        local_mac = get_local_mac()
-        for dev in saved_devices:
-            if getattr(dev, "status", None) == "online":
-                try:
-                    assess_and_record_device_updates(
-                        device=dev,
-                        db=db,
-                        local_ip=local_ip,
-                        local_mac=local_mac,
-                    )
-                except Exception as exc:
-                    pass
+        # Asynchronously assess endpoint update posture in background daemon thread
+        # so scan response returns immediately and devices appear on screen without waiting
+        if not is_mock_env:
+            online_dev_ids = [d.id for d in saved_devices if getattr(d, "status", None) == "online"]
+            if online_dev_ids:
+                def _bg_assess_updates(dev_ids):
+                    try:
+                        from ..database import SessionLocal
+                        with SessionLocal() as bg_db:
+                            local_ip = get_local_ip()
+                            local_mac = get_local_mac()
+                            for dev_id in dev_ids:
+                                dev_item = bg_db.get(Device, dev_id)
+                                if dev_item and dev_item.status == "online":
+                                    try:
+                                        assess_and_record_device_updates(
+                                            device=dev_item,
+                                            db=bg_db,
+                                            local_ip=local_ip,
+                                            local_mac=local_mac,
+                                        )
+                                    except Exception:
+                                        pass
+                    except Exception:
+                        pass
+
+                import threading
+                threading.Thread(target=_bg_assess_updates, args=(online_dev_ids,), daemon=True).start()
         # Detect and calculate duplicate IP conflicts to prevent network collisions
         ip_device_map = {}
         for dev in saved_devices:

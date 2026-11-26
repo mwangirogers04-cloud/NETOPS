@@ -656,19 +656,36 @@ def get_arp_scan_devices(network: str | None = None, interface: str | None = Non
     return list(by_mac.values())
 
 
-def detect_local_subnets() -> dict:
+def detect_local_subnets(client_ip: str | None = None) -> dict:
     """
     Detect local IPv4 subnets across wired (LAN) and wireless (WLAN/Wi-Fi) network interfaces.
     Identifies the active default gateway interface and returns detected interfaces with medium metadata.
+    Accepts an optional client_ip from the browsing client/device to auto-detect and prioritize the
+    client machine's network (e.g. 192.168.88.0/24 when accessed from 192.168.88.100).
     """
     detected = []
     default_iface = None
     default_gw = None
+    default_src = None
 
-    # 1. Determine active default gateway interface from system routing table
+    # Parse and validate optional client IP
+    clean_client_ip = None
+    client_net_str = None
+    if client_ip and isinstance(client_ip, str):
+        candidate_ip = client_ip.strip()
+        try:
+            parsed_c = ipaddress.ip_address(candidate_ip)
+            if not parsed_c.is_loopback and not parsed_c.is_unspecified:
+                clean_client_ip = candidate_ip
+                client_net_str = str(ipaddress.ip_network(f"{candidate_ip}/24", strict=False))
+        except Exception:
+            clean_client_ip = None
+            client_net_str = None
+
+    # 1. Determine active default gateway interface and default source IP from system routing table
     try:
         route_res = subprocess.run(
-            ["ip", "-4", "route", "show", "default"],
+            ["ip", "-4", "route", "show"],
             capture_output=True,
             text=True,
             check=False,
@@ -676,12 +693,14 @@ def detect_local_subnets() -> dict:
         )
         for line in route_res.stdout.splitlines():
             parts = line.split()
-            if "via" in parts and "dev" in parts:
+            if "default" in parts and "via" in parts and "dev" in parts:
                 gw = parts[parts.index("via") + 1]
                 dev = parts[parts.index("dev") + 1]
+                src = parts[parts.index("src") + 1] if "src" in parts else None
                 if not default_iface:
                     default_iface = dev
                     default_gw = gw
+                    default_src = src
                 break
     except Exception:
         pass
@@ -707,10 +726,17 @@ def detect_local_subnets() -> dict:
                     label = f"Wired LAN ({iface})"
                 try:
                     net = ipaddress.ip_interface(cidr).network
-                    is_primary = (iface == default_iface)
+                    ip_only = cidr.split("/")[0]
+
+                    is_primary = False
+                    if default_src and ip_only == default_src:
+                        is_primary = True
+                    elif default_iface and iface == default_iface and not default_src:
+                        is_primary = True
+
                     detected.append({
                         "interface": iface,
-                        "ip": cidr.split("/")[0],
+                        "ip": ip_only,
                         "cidr": cidr,
                         "network": str(net),
                         "is_virtual": is_virtual,
@@ -718,7 +744,7 @@ def detect_local_subnets() -> dict:
                         "medium": medium,
                         "ssid": ssid,
                         "label": label,
-                        "gateway": default_gw if is_primary else None,
+                        "gateway": default_gw if (iface == default_iface) else None,
                         "is_default": is_primary,
                     })
                 except Exception:
@@ -726,14 +752,43 @@ def detect_local_subnets() -> dict:
     except Exception as exc:
         print(f"[DISCOVERY] Error detecting local subnets: {exc}")
 
+    # If client network was detected from client_ip, check if it matches an existing interface
+    client_matched = False
+    if client_net_str:
+        for d in detected:
+            if d.get("network") == client_net_str and not d.get("is_virtual"):
+                d["is_default"] = True
+                client_matched = True
+                break
+        # If client machine is on a network not directly bound to the server interfaces
+        # (e.g. host is bridged/containerized/NAT or client connects via routed network 192.168.88.x)
+        if not client_matched:
+            detected.insert(0, {
+                "interface": default_iface or "eth0",
+                "ip": clean_client_ip,
+                "cidr": f"{clean_client_ip}/24",
+                "network": client_net_str,
+                "is_virtual": False,
+                "is_wireless": False,
+                "medium": "wired",
+                "ssid": None,
+                "label": f"Wired ({default_iface or 'eth0'}) • Client ({clean_client_ip})",
+                "gateway": default_gw,
+                "is_default": True,
+                "is_client_network": True,
+            })
+            client_matched = True
+
     # Fallback only when absolutely no interfaces were found (e.g., bare test environment)
     if not detected:
+        fb_net = client_net_str or "192.168.0.0/24"
+        fb_ip = clean_client_ip or "192.168.0.1"
         detected = [
             {
                 "interface": "eth0",
-                "ip": "192.168.0.1",
-                "cidr": "192.168.0.1/24",
-                "network": "192.168.0.0/24",
+                "ip": fb_ip,
+                "cidr": f"{fb_ip}/24",
+                "network": fb_net,
                 "is_virtual": False,
                 "is_wireless": False,
                 "medium": "wired",
@@ -744,17 +799,37 @@ def detect_local_subnets() -> dict:
         ]
 
     # Select the default subnet:
-    # 1. First choice: from the active default gateway interface
     default_sub = None
     active_ssid = None
-    if default_iface:
+
+    # Priority 1: Connected client network (if detected from client_ip)
+    if client_net_str and client_matched:
+        default_sub = client_net_str
         for d in detected:
-            if d["interface"] == default_iface and not d["is_virtual"]:
-                default_sub = d["network"]
+            if d.get("network") == client_net_str:
                 active_ssid = d.get("ssid")
                 break
 
-    # 2. Second choice: first non-virtual physical interface
+    # Priority 2: From active default gateway interface
+    if not default_sub and default_iface:
+        for d in detected:
+            if d["interface"] == default_iface and not d["is_virtual"]:
+                if default_src and d["ip"] == default_src:
+                    default_sub = d["network"]
+                    active_ssid = d.get("ssid")
+                    break
+                elif not default_src:
+                    default_sub = d["network"]
+                    active_ssid = d.get("ssid")
+                    break
+        if not default_sub:
+            for d in detected:
+                if d["interface"] == default_iface and not d["is_virtual"]:
+                    default_sub = d["network"]
+                    active_ssid = d.get("ssid")
+                    break
+
+    # Priority 3: First non-virtual physical interface
     if not default_sub:
         physical = [d for d in detected if not d["is_virtual"]]
         if physical:
@@ -763,7 +838,7 @@ def detect_local_subnets() -> dict:
             if not default_iface:
                 default_iface = physical[0]["interface"]
         else:
-            default_sub = detected[0]["network"] if detected else "192.168.0.0/24"
+            default_sub = detected[0]["network"] if detected else (client_net_str or "192.168.0.0/24")
 
     # Sort so default/primary physical interface appears first
     detected.sort(key=lambda x: (not x.get("is_default", False), x.get("is_virtual", False)))
@@ -773,6 +848,8 @@ def detect_local_subnets() -> dict:
         "default_interface": default_iface,
         "default_gateway": default_gw,
         "active_ssid": active_ssid,
+        "client_ip": clean_client_ip,
+        "client_network": client_net_str,
         "interfaces": detected,
     }
 

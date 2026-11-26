@@ -1,3 +1,4 @@
+import os
 from unittest.mock import MagicMock
 
 import pytest
@@ -291,7 +292,8 @@ def test_http_scan_unreachable_network_returns_informative_status(monkeypatch):
             }
         ),
     )
-    monkeypatch.setattr("os.path.exists", lambda path: True if "sys/class/net" in path else False)
+    orig_exists = os.path.exists
+    monkeypatch.setattr("os.path.exists", lambda path: True if "sys/class/net" in str(path) else orig_exists(path))
 
     # Disable mock/test bypass flag inside run_discovery_scan to test bare-metal physical host behavior
     with monkeypatch.context() as m:
@@ -311,7 +313,8 @@ def test_http_scan_unreachable_network_returns_informative_status(monkeypatch):
 
 def test_cloud_scan_when_empty_returns_waiting_for_agent_and_no_fake_devices(monkeypatch):
     monkeypatch.setattr(discovery, "discover_devices", MagicMock(return_value=[]))
-    monkeypatch.setattr("os.path.exists", lambda path: False)
+    orig_exists = os.path.exists
+    monkeypatch.setattr("os.path.exists", lambda path: False if "sys/class/net" in str(path) else orig_exists(path))
     monkeypatch.setenv("CLOUD_MODE", "true")
 
     response = client.post(
@@ -324,6 +327,28 @@ def test_cloud_scan_when_empty_returns_waiting_for_agent_and_no_fake_devices(mon
     assert data["devices_discovered"] == 0
     assert len(data["devices"]) == 0
     assert "probe_command" in data
+
+
+def test_get_local_subnets_auto_detects_client_ip_param():
+    response = client.get("/discovery/local-subnets?client_ip=192.168.88.100")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["default_network"] == "192.168.88.0/24"
+    assert data["client_ip"] == "192.168.88.100"
+    assert data["client_network"] == "192.168.88.0/24"
+
+
+def test_get_local_subnets_auto_detects_forwarded_client_ip():
+    response = client.get(
+        "/discovery/local-subnets",
+        headers={"X-Forwarded-For": "192.168.88.100, 10.0.0.1"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["default_network"] == "192.168.88.0/24"
+    assert data["client_ip"] == "192.168.88.100"
+    assert data["client_network"] == "192.168.88.0/24"
+
 
 
 
